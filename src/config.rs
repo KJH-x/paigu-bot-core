@@ -38,6 +38,15 @@ pub struct AppConfig {
     pub default_timezone: String,
     pub host: String,
     pub port: u16,
+    pub ws: WsServerConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WsServerConfig {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+    pub token: String,
 }
 
 impl Config {
@@ -82,6 +91,18 @@ impl Config {
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(8080),
+                ws: WsServerConfig {
+                    enabled: std::env::var("WS_ENABLED")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(true),
+                    host: std::env::var("WS_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
+                    port: std::env::var("WS_PORT")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(3001),
+                    token: std::env::var("WS_TOKEN").unwrap_or_default(),
+                },
             },
         })
     }

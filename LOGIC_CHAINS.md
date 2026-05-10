@@ -424,10 +424,45 @@ SnapshotService.save_and_publish: SnapshotRepo.save_allocation成功→R2Publish
 
 ---
 
+## 十三、WebSocket 消息接收
+
+### 13.1 QQ框架通过WS发送消息
+```
+QQ框架连接 ws://host:3001 → WsServer.run_forever监听
+→ create_reuse_listener(SO_REUSEADDR)绑定TCP → accept_loop接受连接
+→ handshake: Authorization: Bearer <token>校验
+→ tokio_tungstenite::accept_hdr_async升级为WebSocket
+→ connection_loop: 每15s Ping保活 + 接收Text/Ping/Pong/Close帧
+→ process_incoming_message: JSON解析为WsIncomingPayload
+→ QqMessage→IncomingQqMessage→MessageService.handle_incoming
+→ BotReply→WsOutgoingReply→write.send(Text(json))
+→ 客户端收到回复 {"replyType":"text","text":"已记录，当前版本 #128"}
+```
+
+### 13.2 WS连接管理
+```
+客户端断开 → Read.next()返回None/Close → connection_loop退出
+→ WsServerStatus更新: connected=false, client_count-=1
+→ 重新进入accept_loop等待新连接
+→ 多客户端: 每个连接独立tokio::spawn, 独立状态处理
+```
+
+### 13.3 WS鉴权
+```
+连接握手 → 读取Authorization头 → 比对Bearer <WS_TOKEN>
+→ token为空: 允许所有连接（开发模式）
+→ token不匹配: 返回ErrorResponse(401), 连接拒绝
+→ token匹配: 连接建立, 开始消息处理
+```
+
+---
+
 ## 附录: 数据结构引用索引
 
 | 输入内容 | 触发入口 | 生成事件类型 | 影响引擎 | 输出物 |
 |---------|---------|------------|---------|-------|
+| QQ框架WS消息 | ws_server(port 3001) | 转为IncomingQqMessage | MessageService | WsOutgoingReply JSON |
+| HTTP Webhook | POST /webhook/qq-message | 同上 | 同上 | HTTP JSON |
 | 群成员排谷文本 | message_service::process_as_claim | ClaimCreated | AllocationEngine, SettlementEngine | AllocationSnapshot, BotReply |
 | 群成员撤销文本 | message_service::process_as_claim | ClaimCancelled | AllocationEngine(replay) | 槽位释放+连锁前移, BotReply |
 | 管理员开团命令 | message_service::handle_admin_message | RoundOpened | RoundService | Round记录 |
@@ -435,7 +470,7 @@ SnapshotService.save_and_publish: SnapshotRepo.save_allocation成功→R2Publish
 | 管理员加优先权 | message_service::handle_admin_message | - | AdminService | Eligibility记录 |
 | 管理员设优惠 | message_service::handle_admin_message | DiscountRulesSet | SettlementEngine | 用户账单更新 |
 | 管理员锁位 | message_service::handle_admin_message | AdminSlotLocked | AllocationEngine | slot锁定 |
-| 管理员固定 | message_service::handle_admin_message | AdminAllocationAdjusted | AllocationEngine | slot强制分配 |
+| 管理员固定(/修正) | message_service::handle_admin_message | AdminAllocationAdjusted | AllocationEngine | slot强制分配 |
 | 管理员结团 | message_service::handle_admin_message | RoundClosed | RoundService | status=Closed, 导出 |
 | 导出命令 | message_service::handle_admin_message | - | ExportService | CSV文件 |
 | JSONL模拟文件 | simulation_runner::run | 多个ClaimCreated | ReplayEngine | SimulationReport |
