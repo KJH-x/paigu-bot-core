@@ -22,3 +22,6 @@ aws-config = "1"
 aws-sdk-s3 = "1"
 sha2 = "0.10"
 figment = { version = "0.10", features = ["env"] }
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+socket2 = "0.5"

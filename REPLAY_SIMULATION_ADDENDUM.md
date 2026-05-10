@@ -1199,11 +1199,13 @@ pub struct AdminSlotView {
 6. 前端除 current table 外，增加 replay viewer。
 7. CLI 增加 simulate 命令，读取消息队列文件。
 
-最终系统应有两种入口：
+最终系统应有两种入口（加上 WS 共三种）：
 
-实时入口：QQ WS -> RawMessage -> Parser -> Validator -> EventStore -> 当前状态 -> current.json
+实时入口（WS）：QQ WS → WS Server (port 3001) → IncomingQqMessage → Parser → Validator → EventStore → 当前状态 → current.json
 
-模拟入口：queue.jsonl -> RawMessage -> Parser 或 ParseCache -> Validator -> ReplayEngine -> replay timeline -> final report
+实时入口（Webhook）：POST /webhook/qq-message → IncomingQqMessage → Parser → Validator → EventStore → 当前状态 → current.json
+
+模拟入口：queue.jsonl → RawMessage → Parser 或 ParseCache → Validator → ReplayEngine → replay timeline → final report
 
 两种入口在 Validator 之后共用同一个事件模型，在 Allocation Engine 处共用同一套排队规则。
 

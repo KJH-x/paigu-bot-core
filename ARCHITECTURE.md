@@ -139,15 +139,21 @@ paigu-bot-core/
 
     tests/
       mod.rs
+
+    ws/
+      mod.rs
+      ws_server.rs
 ```
 
 四、核心流程
 
-系统收到 QQ 框架传入的消息后，执行以下链路：
+系统收到 QQ 框架传入的消息后，执行以下链路（两种入口：WebSocket 或 HTTP Webhook）：
 
 ```text
 QQ框架消息
-→ RawMessage 入库
+→ WS Server (port 3001) 或 Webhook API (POST /webhook/qq-message)
+→ IncomingQqMessage 统一消息体
+→ RawMessage 入库（幂等校验：group_id+qq_message_id 唯一）
 → command_router 判断消息类型
 → 管理员命令或成员排谷消息
 → LLM Parser 生成 ParsedEvent
@@ -157,7 +163,7 @@ QQ框架消息
 → AllocationEngine 生成 AllocationSnapshot
 → SettlementEngine 生成 SettlementSnapshot
 → SnapshotPublisher 写 current.json 到 R2
-→ 返回群消息，例如“已记录”“需确认”“解析失败”“已撤销”
+→ 返回 BotReply（WS 返回 JSON，Webhook 返回 HTTP JSON），例如"已记录""需确认""解析失败""已撤销"
 ```
 
 五、数据库表设计
@@ -1728,13 +1734,16 @@ async fn main() -> anyhow::Result<()> {
 虽然消息收发已有框架，但后端仍建议暴露 HTTP API，便于管理后台和测试。
 
 ```text
-POST /webhook/qq-message          接收已解析的 QQ 框架消息
+WS  ws://0.0.0.0:3001              接收 QQ 框架消息（反向WS服务器）
+POST /webhook/qq-message          接收已解析的 QQ 框架消息（HTTP 备选）
 POST /admin/rounds                创建团
 POST /admin/rounds/{id}/items      添加商品
 POST /admin/rounds/{id}/discounts  设置优惠
 POST /admin/rounds/{id}/close      结团
 GET  /public/rounds/{id}/current   读取当前快照
 GET  /admin/rounds/{id}/export     导出
+GET  /api/replays/{id}/replays     列出该团所有 replay
+GET  /api/simulations              提交模拟任务
 ```
 
 三十六、最终给 LLM 生成代码时的实现顺序建议
