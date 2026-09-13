@@ -47,22 +47,15 @@ async fn get_members(State(state): State<Arc<ApiState>>) -> Json<Value> {
     }
 }
 
-async fn refresh_members(
-    State(state): State<Arc<ApiState>>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+/// 拉取群成员并写入缓存（供路由与每日 19:00 调度复用）。只读动作，绝不发消息。
+pub async fn refresh_members_from_gateway(state: &ApiState) -> anyhow::Result<Value> {
     let cfg = state.cfg.get().await;
     let group_id = cfg.members.group_id.clone();
 
     let response = state
         .gateway
         .send_action("get_group_member_list", json!({ "group_id": group_id }))
-        .await
-        .map_err(|error| {
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": error.to_string() })),
-            )
-        })?;
+        .await?;
 
     let status_ok = response
         .get("status")
@@ -71,10 +64,7 @@ async fn refresh_members(
         .unwrap_or(false);
     let data = response.get("data").cloned().unwrap_or(Value::Null);
     if !status_ok || data.is_null() {
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": "gateway_action_failed", "response": response })),
-        ));
+        anyhow::bail!("gateway_action_failed: {response}");
     }
 
     let path = Path::new(&cfg.members.cache_path);
@@ -84,14 +74,20 @@ async fn refresh_members(
         }
     }
     let serialized = serde_json::to_string_pretty(&data).unwrap_or_else(|_| "[]".to_string());
-    std::fs::write(path, serialized).map_err(|error| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": error.to_string() })),
-        )
-    })?;
+    std::fs::write(path, serialized)?;
+    Ok(data)
+}
 
-    Ok(Json(json!({ "members": data, "source": "gateway" })))
+async fn refresh_members(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    match refresh_members_from_gateway(&state).await {
+        Ok(data) => Ok(Json(json!({ "members": data, "source": "gateway" }))),
+        Err(error) => Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": error.to_string() })),
+        )),
+    }
 }
 
 #[cfg(test)]

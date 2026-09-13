@@ -75,3 +75,27 @@
 - A4 只依赖 A3 的 HTTP 契约。
 - A5 依赖 A3+A4 可运行。
 - 冲突文件（`main.rs`/`mod.rs`/`app_state.rs`/`Cargo.toml`）由 A0 统一改；子 agent 需要时在 `docs/TASKS.md` 追加“待 A0 处理”条目。
+
+## 完成状态（2026-09-14）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| A0 接口冻结 | ✅ | `src/bus.rs`（IncomingEvent/EventSink/PipelineOutcome）、`src/settings.rs`（AppConfig + ConfigStore 热载）、`config.example.json` |
+| A1 Gateway | ✅ | `src/gateway/**`：白名单/drop、反向 WS（`192.168.100.2:9801`）、心跳、echo 动作回包、拒绝 `send_*` |
+| A2 LLM+Pipeline | ✅ | `src/llm/**`：DeepSeek 客户端 + 规则快路径 + 权限（时段/预存）+ 内存重放 + who-whats |
+| A3 HTTP API | ✅ | `src/api/**`：config(409)/board/display/messages/sim/members/gateway-status + 静态页 |
+| A4 前端 | ✅ | `web/**`：display(5s 增量、不打断)/admin(config 面板+成员拉取)/sim(身份+偏移) |
+| A5 测试 | ✅ | `tests/e2e/sim.mjs`（Playwright，4 用例 ALL PASS）、`package.json` |
+| A0 装配 | ✅ | `main.rs run`：Gateway+Pipeline+API(`:21081`)+每日 19:00 成员调度 |
+| 引擎缺陷修复 | ✅ | `AllocationEngine` 快照 `boxes`/`user_summaries` 排序确定化（修掉 flaky） |
+
+**验证**：`cargo test` 46 passed；`node tests/e2e/sim.mjs` 4/4 PASS；`real-samples` 逐格回归 ALL PASS。
+
+**运行**：
+```powershell
+cargo run -- run            # Gateway(192.168.100.2:9801) + API(127.0.0.1:21081) + 每日19:00成员拉取
+# 展示 http://127.0.0.1:21081/  ·  管理 http://127.0.0.1:21081/admin  ·  模拟 http://127.0.0.1:21081/sim
+node tests/e2e/sim.mjs      # 端到端测试
+```
+
+**遗留/后续**：真实 NapCat 接入后 `reply_enabled=false`（不回复）——需用户确认后再开；成员拉取依赖 NapCat 已连接；Cloudflare 远程展示（R2 发布 + Pages）尚未接线。

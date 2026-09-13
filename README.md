@@ -92,6 +92,19 @@ cargo run --release
 cargo test
 ```
 
+### 本地运行（真实接入 + 展示，无需 PostgreSQL）
+
+```bash
+cargo run -- run
+# Gateway(反向WS) → ws://192.168.100.2:9801   （NapCat 连入；白名单群 720675572；默认不回复）
+# HTTP API          → http://127.0.0.1:21081
+#   展示页 /admin /sim  ·  config 热载 config/app.json  ·  每日 19:00 拉取群成员
+node tests/e2e/sim.mjs        # Playwright 端到端（4 用例）
+```
+
+> 配置：首次运行会从 `config.example.json` 生成 `config/app.json`（gitignored，热载）。
+> 环境变量：`PAIGU_CONFIG_PATH`、`PAIGU_HTTP_PORT`、`DEEPSEEK_API_KEY`（LLM）。
+
 ### 离线模拟与本地聊天（无需 LLM / PostgreSQL）
 
 ```bash
