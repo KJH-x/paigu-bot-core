@@ -43,6 +43,9 @@ async fn main() -> Result<()> {
         simulation::chat_server::run_cli(&args[2..]).await?;
         return Ok(());
     }
+    if args.len() <= 1 || args[1] == "run" {
+        return run_gateway_stack().await;
+    }
 
     let config = config::Config::from_env()?;
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -74,4 +77,40 @@ async fn main() -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+async fn run_gateway_stack() -> Result<()> {
+    let cfg_path = std::env::var("PAIGU_CONFIG_PATH").unwrap_or_else(|_| "config/app.json".to_string());
+    let store = Arc::new(settings::ConfigStore::load(&cfg_path)?);
+    store.spawn_watch();
+    let cfg = store.get().await;
+
+    let pipeline = llm::Pipeline::new(store.clone());
+    let gateway = gateway::Gateway::new(store.clone(), pipeline.clone());
+
+    {
+        let gw = gateway.clone();
+        tokio::spawn(async move {
+            if let Err(e) = gw.run().await {
+                tracing::error!("gateway stopped: {e}");
+            }
+        });
+    }
+
+    let port: u16 = std::env::var("PAIGU_HTTP_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(21081);
+
+    info!(
+        "gateway bind={} reply_enabled={} http=127.0.0.1:{}",
+        cfg.gateway.bind, cfg.gateway.reply_enabled, port
+    );
+
+    let state = Arc::new(api::ApiState {
+        cfg: store.clone(),
+        pipeline: pipeline.clone(),
+        gateway: gateway.clone(),
+    });
+    api::serve(state, port).await
 }
