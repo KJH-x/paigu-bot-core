@@ -96,12 +96,13 @@ impl AllocationEngine {
             let item_name = item.map(|i| i.name.clone()).unwrap_or_default();
             let kind = item.map(|i| i.kind.as_str().to_string()).unwrap_or_default();
 
-            let boxes: Vec<BoxAllocation> = state.boxes.values()
+            let mut boxes: Vec<BoxAllocation> = state.boxes.values()
                 .map(|b| BoxAllocation {
                     box_index: b.box_index,
                     slots: b.slots.clone(),
                 })
                 .collect();
+            boxes.sort_by_key(|b| b.box_index);
 
             for mbox in state.boxes.values() {
                 for slot in &mbox.slots {
@@ -159,13 +160,14 @@ impl AllocationEngine {
                 .then_with(|| a.variant_id.cmp(&b.variant_id))
         });
 
-        let user_summaries: Vec<UserAllocationSummary> = user_summaries_map.into_iter()
+        let mut user_summaries: Vec<UserAllocationSummary> = user_summaries_map.into_iter()
             .map(|(uid, items)| UserAllocationSummary {
                 user_id: uid,
                 display_name: String::new(),
                 items,
             })
             .collect();
+        user_summaries.sort_by(|a, b| a.user_id.0.cmp(&b.user_id.0));
 
         Ok(AllocationSnapshot {
             round_id,
