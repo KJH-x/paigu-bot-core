@@ -1,0 +1,309 @@
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use anyhow::Context;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+
+use crate::domain::ids::{ItemId, RoundId};
+use crate::domain::item::{Item, ItemKind, ItemVariant};
+use crate::domain::money::MoneyCents;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    pub revision: u64,
+    pub gateway: GatewayConfig,
+    pub llm: LlmSettings,
+    pub round: RoundSettings,
+    pub display: DisplaySettings,
+    pub members: MembersSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayConfig {
+    pub bind: String,
+    #[serde(default)]
+    pub require_token: bool,
+    #[serde(default)]
+    pub whitelist_groups: Vec<String>,
+    #[serde(default = "default_heartbeat")]
+    pub heartbeat_secs: u64,
+    #[serde(default)]
+    pub reply_enabled: bool,
+    #[serde(default)]
+    pub allowed_actions: Vec<String>,
+}
+
+fn default_heartbeat() -> u64 {
+    15
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmSettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub base_url: String,
+    pub model: String,
+    pub api_key_env: String,
+    #[serde(default = "default_timeout")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+    #[serde(default = "default_temperature")]
+    pub temperature: f32,
+    #[serde(default = "default_true")]
+    pub fallback_to_rules: bool,
+    #[serde(default)]
+    pub prompt_template: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_timeout() -> u64 {
+    60
+}
+fn default_max_tokens() -> u32 {
+    2048
+}
+fn default_temperature() -> f32 {
+    0.1
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriorityWindow {
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoundSettings {
+    pub round_id: String,
+    pub title: String,
+    pub group_id: String,
+    #[serde(default)]
+    pub priority_users: Vec<String>,
+    #[serde(default)]
+    pub priority_window: Option<PriorityWindow>,
+    #[serde(default)]
+    pub items: Vec<ItemConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemConfig {
+    pub item_id: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub variants: Vec<VariantConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VariantConfig {
+    pub variant_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub capacity: Option<u32>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
+
+impl RoundSettings {
+    pub fn to_items(&self) -> Vec<Item> {
+        let round_id = RoundId(self.round_id.clone());
+        self.items
+            .iter()
+            .enumerate()
+            .map(|(idx, it)| Item {
+                item_id: ItemId(it.item_id.clone()),
+                round_id: round_id.clone(),
+                name: it.name.clone(),
+                kind: match it.kind.as_str() {
+                    "single" => ItemKind::Single,
+                    "gift" => ItemKind::Gift,
+                    "shipping" => ItemKind::Shipping,
+                    "adjustment" => ItemKind::Adjustment,
+                    _ => ItemKind::Split,
+                },
+                unit_price: MoneyCents::zero(),
+                box_size: None,
+                max_quantity: None,
+                is_blind: false,
+                is_proxy_card: false,
+                aliases: it.aliases.clone(),
+                sort_order: idx as i32,
+                metadata: serde_json::Value::Null,
+                variants: it
+                    .variants
+                    .iter()
+                    .map(|v| ItemVariant {
+                        variant_id: v.variant_id.clone(),
+                        name: v.name.clone(),
+                        unit_price: MoneyCents::zero(),
+                        capacity: v.capacity,
+                        aliases: v.aliases.clone(),
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplaySettings {
+    #[serde(default = "default_refresh")]
+    pub refresh_ms: u64,
+    #[serde(default = "default_source")]
+    pub data_source: String,
+    #[serde(default)]
+    pub remote_base_url: String,
+}
+
+fn default_refresh() -> u64 {
+    5000
+}
+fn default_source() -> String {
+    "local".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MembersSettings {
+    pub group_id: String,
+    pub cache_path: String,
+    #[serde(default = "default_pull_at")]
+    pub daily_pull_at: String,
+}
+
+fn default_pull_at() -> String {
+    "19:00".to_string()
+}
+
+pub fn default_config() -> AppConfig {
+    serde_json::from_str(include_str!("../config.example.json"))
+        .expect("config.example.json must be valid")
+}
+
+#[derive(Debug)]
+pub enum ConfigError {
+    StaleRevision { expected: u64, actual: u64 },
+    Io(std::io::Error),
+    Json(serde_json::Error),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::StaleRevision { expected, actual } => {
+                write!(f, "stale config revision: expected {expected}, actual {actual}")
+            }
+            ConfigError::Io(e) => write!(f, "io: {e}"),
+            ConfigError::Json(e) => write!(f, "json: {e}"),
+        }
+    }
+}
+impl std::error::Error for ConfigError {}
+
+pub struct ConfigStore {
+    path: PathBuf,
+    inner: RwLock<AppConfig>,
+}
+
+impl ConfigStore {
+    pub fn load(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
+        let path = path.into();
+        let cfg = if path.exists() {
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("read config {}", path.display()))?;
+            serde_json::from_str(&raw).with_context(|| format!("parse config {}", path.display()))?
+        } else {
+            let cfg = default_config();
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(&path, serde_json::to_string_pretty(&cfg)?).ok();
+            cfg
+        };
+        Ok(Self {
+            path,
+            inner: RwLock::new(cfg),
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub async fn get(&self) -> AppConfig {
+        self.inner.read().await.clone()
+    }
+
+    pub async fn revision(&self) -> u64 {
+        self.inner.read().await.revision
+    }
+
+    pub async fn put(&self, mut cfg: AppConfig, expected: u64) -> Result<u64, ConfigError> {
+        let mut guard = self.inner.write().await;
+        if guard.revision != expected {
+            return Err(ConfigError::StaleRevision {
+                expected,
+                actual: guard.revision,
+            });
+        }
+        cfg.revision = expected + 1;
+        let revision = cfg.revision;
+        let raw = serde_json::to_string_pretty(&cfg).map_err(ConfigError::Json)?;
+        std::fs::write(&self.path, raw).map_err(ConfigError::Io)?;
+        *guard = cfg;
+        Ok(revision)
+    }
+
+    pub async fn reload(&self) -> anyhow::Result<u64> {
+        let raw = std::fs::read_to_string(&self.path)?;
+        let mut cfg: AppConfig = serde_json::from_str(&raw)?;
+        let mut guard = self.inner.write().await;
+        if cfg.revision <= guard.revision {
+            cfg.revision = guard.revision + 1;
+        }
+        let revision = cfg.revision;
+        *guard = cfg;
+        Ok(revision)
+    }
+
+    /// 监听文件变更并热载（notify，带 300ms 去抖）。
+    pub fn spawn_watch(self: &Arc<Self>) {
+        use notify::{Config as NConfig, RecursiveMode, Watcher};
+        let store = self.clone();
+        let path = self.path.clone();
+        std::thread::spawn(move || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut watcher = match notify::RecommendedWatcher::new(tx, NConfig::default()) {
+                Ok(w) => w,
+                Err(_) => return,
+            };
+            if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() {
+                return;
+            }
+            let mut last = std::time::Instant::now();
+            loop {
+                match rx.recv() {
+                    Ok(_) => {
+                        if last.elapsed() < std::time::Duration::from_millis(300) {
+                            continue;
+                        }
+                        last = std::time::Instant::now();
+                        let rt = tokio::runtime::Handle::try_current();
+                        if let Ok(rt) = rt {
+                            let store = store.clone();
+                            rt.spawn(async move {
+                                let _ = store.reload().await;
+                            });
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+}
