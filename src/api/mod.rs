@@ -71,7 +71,8 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .route("/", get_service(display_page))
         .route("/admin", get_service(admin_page))
         .route("/sim", get_service(sim_page))
-        .nest_service("/web", ServeDir::new(web))
+        .nest_service("/web", ServeDir::new(web.clone()))
+        .fallback_service(ServeDir::new(web))
         .with_state(state)
         .layer(cors_layer())
 }

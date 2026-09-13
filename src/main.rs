@@ -112,5 +112,47 @@ async fn run_gateway_stack() -> Result<()> {
         pipeline: pipeline.clone(),
         gateway: gateway.clone(),
     });
+    spawn_members_scheduler(state.clone());
     api::serve(state, port).await
+}
+
+fn next_daily_ms(hhmm: &str) -> i64 {
+    use chrono::{Duration, Local, TimeZone};
+    let (h, m) = hhmm
+        .split_once(':')
+        .map(|(h, m)| {
+            (
+                h.trim().parse::<u32>().unwrap_or(19),
+                m.trim().parse::<u32>().unwrap_or(0),
+            )
+        })
+        .unwrap_or((19, 0));
+    let now = Local::now();
+    let naive = now
+        .date_naive()
+        .and_hms_opt(h, m, 0)
+        .unwrap_or_else(|| now.naive_local());
+    let mut dt = Local.from_local_datetime(&naive).single().unwrap_or(now);
+    if dt <= now {
+        dt += Duration::hours(24);
+    }
+    dt.timestamp_millis()
+}
+
+/// 每日在 `members.daily_pull_at`（默认 19:00）尝试拉取群成员并缓存；失败只告警。
+fn spawn_members_scheduler(state: Arc<api::ApiState>) {
+    tokio::spawn(async move {
+        loop {
+            let at = state.cfg.get().await.members.daily_pull_at.clone();
+            let wait_ms = (next_daily_ms(&at) - chrono::Utc::now().timestamp_millis()).max(1_000) as u64;
+            tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+            match api::member_routes::refresh_members_from_gateway(&state).await {
+                Ok(v) => info!(
+                    "members refreshed: {} entries",
+                    v.as_array().map(|a| a.len()).unwrap_or(0)
+                ),
+                Err(e) => tracing::warn!("members refresh failed: {e}"),
+            }
+        }
+    });
 }
