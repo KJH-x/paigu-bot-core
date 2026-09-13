@@ -19,7 +19,7 @@ QQ 机器人拼团排谷系统后端，基于事件溯源架构，使用 LLM 解
 ## 技术栈
 
 | 层面 | 技术 |
-|------|------|
+| --- | --- |
 | 语言 | Rust 2021 |
 | 异步运行时 | tokio |
 | HTTP API | axum 0.7 |
@@ -88,9 +88,37 @@ cargo run --release
 cargo test
 ```
 
+### 离线模拟与本地聊天（无需 LLM / PostgreSQL）
+
+```bash
+# 确定性重放验证：读取商品表 + JSONL 消息队列，逐条解析→校验→重放，输出排结果与报告
+cargo run -- simulate \
+  --round-config simulation-corpus/agent-a-normal/round_config.json \
+  --queue        simulation-corpus/agent-a-normal/queue.jsonl \
+  --out          simulation-corpus/agent-a-normal/out
+# 产物: out/report.md（逐条状态+最终排结果+结算）、out/result.json、out/outcomes.jsonl
+
+# 本地聊天界面模拟：浏览器输入话术，实时查看排结果（内存事件存储，实时重放）
+cargo run -- serve \
+  --round-config simulation-corpus/agent-a-normal/round_config.json \
+  --port 8090
+# 浏览器打开 http://127.0.0.1:8090
+```
+
+`simulate` 使用确定性规则解析器（`ParserMode::RuleOnly`），不调用 LLM，可完全复现。
+话术覆盖：排/要/来/帮排、中文与阿拉伯数量、别名与错位语序、单领、代牌、包盒、包尾、撤销。
+Policy：**购物金优先排（时间验证 valid_from），非购物金延后排**；排序键 `priority_level DESC → effective_at ASC → sequence ASC`。
+
+验证结论与缺陷清单见 [simulation-corpus/VERIFICATION.md](./simulation-corpus/VERIFICATION.md)。
+真实「事件重放」样本（变体/包尾/单领/调价）改造与逐项比对见 [simulation-corpus/real-samples/README.md](./simulation-corpus/real-samples/README.md)。
+真实结果表（xlsx）解析、**逐格一致**验证与变体感知引擎见 [simulation-corpus/real-xlsx/README.md](./simulation-corpus/real-xlsx/README.md)。
+真实群聊语料复现（两张 QQ 截图 + 商品价格归档 md）见 [simulation-corpus/real-chat/README.md](./simulation-corpus/real-chat/README.md)。
+本次改造的操作-时间表见 [simulation-corpus/CHANGELOG.md](./simulation-corpus/CHANGELOG.md)。
+重放步进查看器（表格 / **列视图** / Mermaid、双向高亮、样本切换）见 [viewer/README.md](./viewer/README.md)：`pwsh -File viewer\serve.ps1` → `http://127.0.0.1:8095/`。
+
 ## 项目结构
 
-```
+```text
 src/
 ├── domain/       # 核心数据类型（IDs, Money, Round, Item, Claim, Event, Allocation, Settlement, Snapshot, Discount, Gift）
 ├── engine/       # 业务引擎（EventStore, Replay, Allocation, Settlement, Discount, Gift, Priority, Policy）
@@ -110,7 +138,7 @@ src/
 
 ## 核心架构
 
-```
+```text
 QQ框架 ──WS──▶ ws_server (port 3001)
                     │
                     ▼

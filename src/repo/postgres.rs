@@ -100,6 +100,7 @@ fn row_to_item(row: &sqlx::postgres::PgRow) -> AppResult<Item> {
         aliases,
         sort_order: row.try_get("sort_order")?,
         metadata: row.try_get("metadata")?,
+        variants: vec![],
     })
 }
 

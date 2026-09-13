@@ -1,16 +1,42 @@
-# Rust / Cargo
+# ---------- Rust / Cargo ----------
 /target/
 
-# Environment
+# ---------- 环境 ----------
 .env
 .env.*
 
-# IDE
+# ---------- IDE / OS ----------
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
 .DS_Store
 Thumbs.db
+
+# ---------- Python / Node ----------
+__pycache__/
+*.pyc
+node_modules/
+
+# ---------- 隐私数据（不入库） ----------
+# 真实结果表 / 真实聊天语料 / 用户昵称相关
+*.xlsx
+*.xls
+sample*.json
+/simulation-corpus/real-chat/
+/simulation-corpus/real-xlsx/月行水上/
+/simulation-corpus/real-xlsx/覆雪于冬/
+/simulation-corpus/real-samples/sample1/
+/simulation-corpus/real-samples/sample2/
+/viewer/data/
+/viewer/replay_view.json
+/viewer/sample_replay.json
+cookies/
+*.log
+
+# ---------- 开发文档（不入库） ----------
+ARCHITECTURE.md
+LOGIC_CHAINS.md
+REPLAY_SIMULATION_ADDENDUM.md
+/simulation-corpus/VERIFICATION.md
+/simulation-corpus/CHANGELOG.md

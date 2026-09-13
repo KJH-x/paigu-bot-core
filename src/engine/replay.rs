@@ -42,7 +42,8 @@ impl ReplayService {
         sorted_events.sort_by(compare_event_order);
 
         let effective_claims = self.collect_effective_claims(&sorted_events, eligibilities);
-        let allocation = self.allocation_engine.allocate(items, &effective_claims, &sorted_events)?;
+        let mut allocation = self.allocation_engine.allocate(items, &effective_claims, &sorted_events)?;
+        allocation.version = sorted_events.len() as i64;
 
         let settlement = if let Some(s) = self.collect_discount_rules(&sorted_events) {
             let input = crate::engine::settlement_engine::SettlementInput {
@@ -109,6 +110,7 @@ impl ReplayService {
                     line_index: i as u32,
                     user_id: claim.user_id.clone(),
                     item_id: line.item_id.clone(),
+                    variant_id: line.variant_id.clone(),
                     quantity: line.quantity,
                     claim_type: line.claim_type.clone(),
                     slot_policy: line.slot_policy.clone(),

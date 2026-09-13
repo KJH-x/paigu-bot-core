@@ -1,0 +1,57 @@
+{"source_sequence":1,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c1","timestamp_ms":1778241601000,"text":"/开团 es_2026_05","attachments":[],"reply_to_message_id":null,"is_admin":true}
+{"source_sequence":2,"group_id":"10003","user_id":"u_a","nickname":"甲","message_id":"c2","timestamp_ms":1778241601800,"text":"排燐音吧唧2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":3,"group_id":"10003","user_id":"u_b","nickname":"乙","message_id":"c3","timestamp_ms":1778241602300,"text":"燐音吧唧1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":4,"group_id":"10003","user_id":"u_d","nickname":"丁","message_id":"c4","timestamp_ms":1778241602900,"text":"蓝良吧唧2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":5,"group_id":"10003","user_id":"u_f","nickname":"己","message_id":"c5","timestamp_ms":1778241603400,"text":"排燐音吧唧1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":6,"group_id":"10003","user_id":"u_h","nickname":"辛","message_id":"c6","timestamp_ms":1778241603900,"text":"特典色纸1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":7,"group_id":"10003","user_id":"u_a","nickname":"甲","message_id":"c7","timestamp_ms":1778241604500,"text":"再排燐音立牌1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":8,"group_id":"10003","user_id":"u_c","nickname":"丙","message_id":"c8","timestamp_ms":1778241605000,"text":"燐音吧唧1 我有购物金","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":9,"group_id":"10003","user_id":"u_e","nickname":"戊","message_id":"c9","timestamp_ms":1778241605000,"text":"用购物金排立牌2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":10,"group_id":"10003","user_id":"u_g","nickname":"庚","message_id":"c10","timestamp_ms":1778241605700,"text":"蓝良吧唧1 购物金","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":11,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c11","timestamp_ms":1778241606200,"text":"/加优先 丙 燐音吧唧","attachments":[],"reply_to_message_id":null,"is_admin":true}
+{"source_sequence":12,"group_id":"10003","user_id":"u_b","nickname":"乙","message_id":"c12","timestamp_ms":1778241606800,"text":"管理员能给我也加个优先权吗","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":13,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c13","timestamp_ms":1778241607400,"text":"/设置优惠 燐音吧唧 满3减100","attachments":[],"reply_to_message_id":null,"is_admin":true}
+{"source_sequence":14,"group_id":"10003","user_id":"u_a","nickname":"甲","message_id":"c14","timestamp_ms":1778241608000,"text":"撤燐音1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":15,"group_id":"10003","user_id":"u_b","nickname":"乙","message_id":"c15","timestamp_ms":1778241608600,"text":"改燐音吧唧为2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":16,"group_id":"10003","user_id":"u_c","nickname":"丙","message_id":"c16","timestamp_ms":1778241609100,"text":"撤燐音1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":17,"group_id":"10003","user_id":"u_d","nickname":"丁","message_id":"c17","timestamp_ms":1778241609700,"text":"蓝良不要了","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":18,"group_id":"10003","user_id":"u_e","nickname":"戊","message_id":"c18","timestamp_ms":1778241610200,"text":"撤立牌1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":19,"group_id":"10003","user_id":"u_h","nickname":"辛","message_id":"c19","timestamp_ms":1778241610800,"text":"色纸不要了","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":20,"group_id":"10003","user_id":"u_f","nickname":"己","message_id":"c20","timestamp_ms":1778241611300,"text":"取消","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":21,"group_id":"10003","user_id":"u_a","nickname":"甲","message_id":"c21","timestamp_ms":1778241611900,"text":"包尾燐音吧唧","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":22,"group_id":"10003","user_id":"u_b","nickname":"乙","message_id":"c22","timestamp_ms":1778241612500,"text":"包盒燐音吧唧","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":23,"group_id":"10003","user_id":"u_d","nickname":"丁","message_id":"c23","timestamp_ms":1778241613100,"text":"重新排蓝良吧唧1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":24,"group_id":"10003","user_id":"u_g","nickname":"庚","message_id":"c24","timestamp_ms":1778241613600,"text":"撤蓝良1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":25,"group_id":"10003","user_id":"u_e","nickname":"戊","message_id":"c25","timestamp_ms":1778241614200,"text":"蓝良吧唧2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":26,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c26","timestamp_ms":1778241614800,"text":"/锁位 燐音吧唧","attachments":[],"reply_to_message_id":null,"is_admin":true}
+{"source_sequence":27,"group_id":"10003","user_id":"u_f","nickname":"己","message_id":"c27","timestamp_ms":1778241615300,"text":"再排燐音吧唧1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":28,"group_id":"10003","user_id":"u_a","nickname":"甲","message_id":"c28","timestamp_ms":1778241615900,"text":"撤燐音两个","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":29,"group_id":"10003","user_id":"u_c","nickname":"丙","message_id":"c29","timestamp_ms":1778241616400,"text":"改燐音吧唧为1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":30,"group_id":"10003","user_id":"u_b","nickname":"乙","message_id":"c30","timestamp_ms":1778241617000,"text":"立牌改成单领","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":31,"group_id":"10003","user_id":"u_h","nickname":"辛","message_id":"c31","timestamp_ms":1778241617600,"text":"再要色纸2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":32,"group_id":"10003","user_id":"u_e","nickname":"戊","message_id":"c32","timestamp_ms":1778241618100,"text":"撤立牌1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":33,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c33","timestamp_ms":1778241618700,"text":"/修正 甲 燐音吧唧 2","attachments":[],"reply_to_message_id":null,"is_admin":true}
+{"source_sequence":34,"group_id":"10003","user_id":"u_g","nickname":"庚","message_id":"c34","timestamp_ms":1778241619300,"text":"退了","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":35,"group_id":"10003","user_id":"u_d","nickname":"丁","message_id":"c35","timestamp_ms":1778241619800,"text":"蓝良吧唧改成2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":36,"group_id":"10003","user_id":"u_a","nickname":"甲","message_id":"c36","timestamp_ms":1778241620400,"text":"燐音吧唧3","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":37,"group_id":"10003","user_id":"u_f","nickname":"己","message_id":"c37","timestamp_ms":1778241620900,"text":"撤燐音1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":38,"group_id":"10003","user_id":"u_e","nickname":"戊","message_id":"c38","timestamp_ms":1778241621500,"text":"立牌1 购物金优先","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":39,"group_id":"10003","user_id":"u_h","nickname":"辛","message_id":"c39","timestamp_ms":1778241622100,"text":"特典色纸1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":40,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c40","timestamp_ms":1778241622600,"text":"/设置优惠 立牌 满2减200","attachments":[],"reply_to_message_id":null,"is_admin":true}
+{"source_sequence":41,"group_id":"10003","user_id":"u_b","nickname":"乙","message_id":"c41","timestamp_ms":1778241623200,"text":"免减吗","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":42,"group_id":"10003","user_id":"u_c","nickname":"丙","message_id":"c42","timestamp_ms":1778241623800,"text":"我有购物金 排蓝良1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":43,"group_id":"10003","user_id":"u_a","nickname":"甲","message_id":"c43","timestamp_ms":1778241624300,"text":"撤","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":44,"group_id":"10003","user_id":"u_d","nickname":"丁","message_id":"c44","timestamp_ms":1778241624900,"text":"撤","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":45,"group_id":"10003","user_id":"u_e","nickname":"戊","message_id":"c45","timestamp_ms":1778241625400,"text":"撤","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":46,"group_id":"10003","user_id":"u_f","nickname":"己","message_id":"c46","timestamp_ms":1778241626000,"text":"撤","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":47,"group_id":"10003","user_id":"u_h","nickname":"辛","message_id":"c47","timestamp_ms":1778241626600,"text":"撤","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":48,"group_id":"10003","user_id":"u_g","nickname":"庚","message_id":"c48","timestamp_ms":1778241627100,"text":"再排燐音吧唧1 购物金","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":49,"group_id":"10003","user_id":"u_b","nickname":"乙","message_id":"c49","timestamp_ms":1778241627700,"text":"燐音吧唧改成2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":50,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c50","timestamp_ms":1778241628200,"text":"/加优先 乙 燐音吧唧","attachments":[],"reply_to_message_id":null,"is_admin":true}
+{"source_sequence":51,"group_id":"10003","user_id":"u_a","nickname":"甲","message_id":"c51","timestamp_ms":1778241628800,"text":"蓝良吧唧1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":52,"group_id":"10003","user_id":"u_c","nickname":"丙","message_id":"c52","timestamp_ms":1778241629400,"text":"撤蓝良1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":53,"group_id":"10003","user_id":"u_d","nickname":"丁","message_id":"c53","timestamp_ms":1778241629900,"text":"包尾蓝良吧唧","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":54,"group_id":"10003","user_id":"u_e","nickname":"戊","message_id":"c54","timestamp_ms":1778241630500,"text":"立牌2","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":55,"group_id":"10003","user_id":"u_f","nickname":"己","message_id":"c55","timestamp_ms":1778241631000,"text":"色纸1","attachments":[],"reply_to_message_id":null,"is_admin":false}
+{"source_sequence":56,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c56","timestamp_ms":1778241631600,"text":"/结团 es_2026_05","attachments":[],"reply_to_message_id":null,"is_admin":true}
+{"source_sequence":57,"group_id":"10003","user_id":"u_admin","nickname":"管理员","message_id":"c57","timestamp_ms":1778241632100,"text":"/导出 es_2026_05","attachments":[],"reply_to_message_id":null,"is_admin":true}

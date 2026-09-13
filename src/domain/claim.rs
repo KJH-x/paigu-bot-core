@@ -35,6 +35,7 @@ pub enum SlotPolicy {
     TailLocked,
     ColumnLocked,
     AdminFixed,
+    FullBox,
 }
 
 impl SlotPolicy {
@@ -44,6 +45,7 @@ impl SlotPolicy {
             SlotPolicy::TailLocked => "tail_locked",
             SlotPolicy::ColumnLocked => "column_locked",
             SlotPolicy::AdminFixed => "admin_fixed",
+            SlotPolicy::FullBox => "full_box",
         }
     }
 }
@@ -51,6 +53,8 @@ impl SlotPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaimLine {
     pub item_id: ItemId,
+    #[serde(default)]
+    pub variant_id: Option<String>,
     pub quantity: u32,
     pub claim_type: ClaimType,
     pub slot_policy: SlotPolicy,
@@ -62,6 +66,7 @@ impl ClaimLine {
     pub fn new_split(item_id: impl Into<ItemId>, quantity: u32) -> Self {
         Self {
             item_id: item_id.into(),
+            variant_id: None,
             quantity,
             claim_type: ClaimType::Split,
             slot_policy: SlotPolicy::Normal,
@@ -73,6 +78,7 @@ impl ClaimLine {
     pub fn new_single(item_id: impl Into<ItemId>, quantity: u32) -> Self {
         Self {
             item_id: item_id.into(),
+            variant_id: None,
             quantity,
             claim_type: ClaimType::Single,
             slot_policy: SlotPolicy::Normal,
@@ -84,11 +90,24 @@ impl ClaimLine {
     pub fn new_tail_locked(item_id: impl Into<ItemId>, quantity: u32) -> Self {
         Self {
             item_id: item_id.into(),
+            variant_id: None,
             quantity,
             claim_type: ClaimType::Split,
             slot_policy: SlotPolicy::TailLocked,
             is_proxy_card: false,
             notes: Some("包尾".to_string()),
+        }
+    }
+
+    pub fn new_full_box(item_id: impl Into<ItemId>, quantity: u32) -> Self {
+        Self {
+            item_id: item_id.into(),
+            variant_id: None,
+            quantity,
+            claim_type: ClaimType::Split,
+            slot_policy: SlotPolicy::FullBox,
+            is_proxy_card: false,
+            notes: Some("包盒".to_string()),
         }
     }
 }
@@ -211,6 +230,8 @@ pub struct EffectiveClaimLine {
     pub line_index: u32,
     pub user_id: UserId,
     pub item_id: ItemId,
+    #[serde(default)]
+    pub variant_id: Option<String>,
     pub quantity: u32,
     pub claim_type: ClaimType,
     pub slot_policy: SlotPolicy,

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::domain::ids::{ItemId, UserId};
 use crate::domain::item::Item;
@@ -37,17 +37,44 @@ impl AllocationEngine {
                 .then_with(|| a.line_index.cmp(&b.line_index))
         });
 
-        let mut item_states: HashMap<ItemId, ItemWorkingState> = HashMap::new();
+        let mut item_states: HashMap<(ItemId, Option<String>), ItemWorkingState> = HashMap::new();
         let item_map: HashMap<ItemId, &Item> = items.iter().map(|i| (i.item_id.clone(), i)).collect();
 
+        let mut needs_variantless: HashSet<ItemId> = HashSet::new();
+        for line in &sorted_lines {
+            if line.variant_id.is_none() {
+                needs_variantless.insert(line.item_id.clone());
+            }
+        }
+
         for item in items {
-            item_states.insert(item.item_id.clone(), ItemWorkingState::new(item));
+            if item.variants.is_empty() {
+                item_states.insert(
+                    (item.item_id.clone(), None),
+                    ItemWorkingState::new(item.box_size),
+                );
+            } else {
+                for variant in &item.variants {
+                    let box_size = variant.capacity.or(item.box_size);
+                    item_states.insert(
+                        (item.item_id.clone(), Some(variant.variant_id.clone())),
+                        ItemWorkingState::new(box_size),
+                    );
+                }
+                if needs_variantless.contains(&item.item_id) {
+                    item_states.insert(
+                        (item.item_id.clone(), None),
+                        ItemWorkingState::new(item.box_size),
+                    );
+                }
+            }
         }
 
         self.apply_admin_constraints(&mut item_states, events);
 
         for line in &sorted_lines {
-            if let Some(state) = item_states.get_mut(&line.item_id) {
+            let key = (line.item_id.clone(), line.variant_id.clone());
+            if let Some(state) = item_states.get_mut(&key) {
                 match line.claim_type {
                     ClaimType::Split | ClaimType::GiftClaim => {
                         self.allocate_split_line(state, line);
@@ -60,11 +87,11 @@ impl AllocationEngine {
             }
         }
 
-        let mut item_allocations = Vec::new();
+        let mut item_allocations: Vec<ItemAllocation> = Vec::new();
         let mut user_summaries_map: HashMap<UserId, Vec<UserItemAllocation>> = HashMap::new();
         let warnings = Vec::new();
 
-        for (item_id, state) in &item_states {
+        for ((item_id, variant_id), state) in &item_states {
             let item = item_map.get(item_id);
             let item_name = item.map(|i| i.name.clone()).unwrap_or_default();
             let kind = item.map(|i| i.kind.as_str().to_string()).unwrap_or_default();
@@ -117,11 +144,20 @@ impl AllocationEngine {
                 item_id: item_id.clone(),
                 item_name,
                 kind,
+                variant_id: variant_id.clone(),
                 boxes,
                 singles: state.singles.clone(),
                 waiting: state.waiting.clone(),
             });
         }
+
+        item_allocations.sort_by(|a, b| {
+            let sa = item_map.get(&a.item_id).map(|i| i.sort_order).unwrap_or(0);
+            let sb = item_map.get(&b.item_id).map(|i| i.sort_order).unwrap_or(0);
+            sa.cmp(&sb)
+                .then_with(|| a.item_id.0.cmp(&b.item_id.0))
+                .then_with(|| a.variant_id.cmp(&b.variant_id))
+        });
 
         let user_summaries: Vec<UserAllocationSummary> = user_summaries_map.into_iter()
             .map(|(uid, items)| UserAllocationSummary {
@@ -146,12 +182,38 @@ impl AllocationEngine {
             SlotPolicy::TailLocked => {
                 self.allocate_tail_locked(state, line);
             }
+            SlotPolicy::FullBox => {
+                self.allocate_full_box(state, line);
+            }
+            SlotPolicy::ColumnLocked => {
+                self.allocate_normal(state, line);
+            }
             SlotPolicy::AdminFixed => {
                 // Admin-fixed placements are handled separately
             }
             _ => {
                 self.allocate_normal(state, line);
             }
+        }
+    }
+
+    fn allocate_full_box(&self, state: &mut ItemWorkingState, line: &EffectiveClaimLine) {
+        let box_size = state.box_size.unwrap_or_else(|| line.quantity.max(1));
+        let box_idx = state.next_box_index();
+        let take = if line.quantity == 0 {
+            box_size
+        } else {
+            line.quantity.min(box_size)
+        };
+        let segment_id = format!("fullbox:{}:{}:{}", line.user_id.0, line.claim_id.0, line.line_index);
+
+        for slot_idx in 1..=take {
+            state.ensure_slot_exists(box_idx, slot_idx);
+            state.fill_slot(box_idx, slot_idx, line, SlotPolicy::FullBox, Some(segment_id.clone()));
+        }
+        for slot_idx in (take + 1)..=box_size {
+            state.ensure_slot_exists(box_idx, slot_idx);
+            state.mark_locked_empty(box_idx, slot_idx, SlotPolicy::FullBox, Some(segment_id.clone()));
         }
     }
 
@@ -174,14 +236,19 @@ impl AllocationEngine {
         let segment_id = format!("tail:{}:{}:{}", line.user_id.0, line.claim_id.0, line.line_index);
         let box_idx = state.next_box_index();
 
-        for i in 0..line.quantity {
+        let take = match state.box_size {
+            Some(size) => line.quantity.clamp(1, size),
+            None => line.quantity.max(1),
+        };
+
+        for i in 0..take {
             let slot_idx = i + 1;
             state.ensure_slot_exists(box_idx, slot_idx);
             state.fill_slot(box_idx, slot_idx, line, SlotPolicy::TailLocked, Some(segment_id.clone()));
         }
 
         if let Some(box_size) = state.box_size {
-            for slot_idx in (line.quantity + 1)..=box_size {
+            for slot_idx in (take + 1)..=box_size {
                 state.ensure_slot_exists(box_idx, slot_idx);
                 state.mark_locked_empty(box_idx, slot_idx, SlotPolicy::TailLocked, Some(segment_id.clone()));
             }
@@ -190,7 +257,7 @@ impl AllocationEngine {
 
     fn apply_admin_constraints(
         &self,
-        item_states: &mut HashMap<ItemId, ItemWorkingState>,
+        item_states: &mut HashMap<(ItemId, Option<String>), ItemWorkingState>,
         events: &[EventEnvelope],
     ) {
         for ev in events {
@@ -198,38 +265,52 @@ impl AllocationEngine {
                 DomainEvent::AdminAllocationAdjusted(adj) => {
                     match &adj.action {
                         AdminAllocationAction::FixUserToSlot { item_id, user_id, box_index, slot_index } => {
-                            if let Some(state) = item_states.get_mut(item_id) {
+                            Self::for_item_states(item_states, item_id, |state| {
                                 state.admin_fix_slot(*box_index, *slot_index, user_id.clone());
-                            }
+                            });
                         }
                         AdminAllocationAction::LockSlot { item_id, box_index, slot_index, reason } => {
-                            if let Some(state) = item_states.get_mut(item_id) {
+                            Self::for_item_states(item_states, item_id, |state| {
                                 state.admin_lock_slot(*box_index, *slot_index, reason.clone());
-                            }
+                            });
                         }
                         AdminAllocationAction::UnlockSlot { item_id, box_index, slot_index } => {
-                            if let Some(state) = item_states.get_mut(item_id) {
+                            Self::for_item_states(item_states, item_id, |state| {
                                 state.admin_unlock_slot(*box_index, *slot_index);
-                            }
+                            });
                         }
                         AdminAllocationAction::RemoveUserItem { item_id, user_id, quantity } => {
-                            if let Some(state) = item_states.get_mut(item_id) {
+                            Self::for_item_states(item_states, item_id, |state| {
                                 state.remove_user_quantity(user_id, *quantity);
-                            }
+                            });
                         }
                     }
                 }
                 DomainEvent::AdminSlotLocked(lock) => {
-                    if let Some(state) = item_states.get_mut(&lock.item_id) {
+                    Self::for_item_states(item_states, &lock.item_id, |state| {
                         state.admin_lock_slot(lock.box_index, lock.slot_index, lock.reason.clone());
-                    }
+                    });
                 }
                 DomainEvent::AdminSlotUnlocked(unlock) => {
-                    if let Some(state) = item_states.get_mut(&unlock.item_id) {
+                    Self::for_item_states(item_states, &unlock.item_id, |state| {
                         state.admin_unlock_slot(unlock.box_index, unlock.slot_index);
-                    }
+                    });
                 }
                 _ => {}
+            }
+        }
+    }
+
+    fn for_item_states<F>(
+        item_states: &mut HashMap<(ItemId, Option<String>), ItemWorkingState>,
+        item_id: &ItemId,
+        mut f: F,
+    ) where
+        F: FnMut(&mut ItemWorkingState),
+    {
+        for ((iid, _), state) in item_states.iter_mut() {
+            if iid == item_id {
+                f(state);
             }
         }
     }
@@ -250,9 +331,9 @@ struct ItemWorkingState {
 }
 
 impl ItemWorkingState {
-    fn new(item: &Item) -> Self {
+    fn new(box_size: Option<u32>) -> Self {
         Self {
-            box_size: item.box_size,
+            box_size,
             boxes: HashMap::new(),
             singles: Vec::new(),
             waiting: Vec::new(),

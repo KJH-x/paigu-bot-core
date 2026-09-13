@@ -16,7 +16,10 @@ pub fn normalize_claim_item(item: &ParsedClaimItem) -> ParsedClaimItem {
 
     normalized.slot_policy = normalized.slot_policy.map(|sp| {
         let sp_lower = sp.to_lowercase();
-        if sp_lower.contains("tail") || sp_lower.contains("包尾") || sp_lower.contains("端盒") {
+        if sp_lower.contains("fullbox") || sp_lower.contains("full_box") || sp_lower.contains("包盒")
+            || sp_lower.contains("整盒") || sp_lower.contains("全包") {
+            "FullBox".to_string()
+        } else if sp_lower.contains("tail") || sp_lower.contains("包尾") || sp_lower.contains("端盒") {
             "TailLocked".to_string()
         } else if sp_lower.contains("column") || sp_lower.contains("锁列") {
             "ColumnLocked".to_string()

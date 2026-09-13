@@ -1,0 +1,546 @@
+{
+  "snapshot": {
+    "generated_at": "2026-09-13T16:50:36.969446600Z",
+    "item_allocations": [
+      {
+        "boxes": [
+          {
+            "box_index": 1,
+            "slots": [
+              {
+                "claim_id": "b3edf659-6f63-4d4b-a271-d202112c804b",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 1,
+                "slot_policy": "Normal",
+                "status": "Filled",
+                "user_id": "u_ran"
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 2,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 3,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 4,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 5,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 6,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 7,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 8,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 9,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 10,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              }
+            ]
+          },
+          {
+            "box_index": 2,
+            "slots": [
+              {
+                "claim_id": "aaae7bea-6a69-4610-8064-5efda3910ebb",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 1,
+                "slot_policy": "TailLocked",
+                "status": "Filled",
+                "user_id": "u_aoi"
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 2,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 3,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 4,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 5,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 6,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 7,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 8,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 9,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": "tail:u_aoi:aaae7bea-6a69-4610-8064-5efda3910ebb:0",
+                "slot_index": 10,
+                "slot_policy": "TailLocked",
+                "status": "LockedEmpty",
+                "user_id": null
+              }
+            ]
+          }
+        ],
+        "item_id": "badge_ran",
+        "item_name": "蓝良吧唧",
+        "kind": "split",
+        "singles": [],
+        "waiting": []
+      },
+      {
+        "boxes": [
+          {
+            "box_index": 1,
+            "slots": [
+              {
+                "claim_id": "82f37edf-96e4-4587-bf41-d0119b33677d",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 1,
+                "slot_policy": "Normal",
+                "status": "Filled",
+                "user_id": "u_kanade"
+              },
+              {
+                "claim_id": "82f37edf-96e4-4587-bf41-d0119b33677d",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 2,
+                "slot_policy": "Normal",
+                "status": "Filled",
+                "user_id": "u_kanade"
+              },
+              {
+                "claim_id": "dda824b8-f542-4f84-9be9-aedd58f5347a",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 3,
+                "slot_policy": "Normal",
+                "status": "Filled",
+                "user_id": "u_rinne"
+              },
+              {
+                "claim_id": "dda824b8-f542-4f84-9be9-aedd58f5347a",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 4,
+                "slot_policy": "Normal",
+                "status": "Filled",
+                "user_id": "u_rinne"
+              },
+              {
+                "claim_id": "0f2985ba-70f8-4b20-af85-6fd51863aad8",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 5,
+                "slot_policy": "Normal",
+                "status": "Filled",
+                "user_id": "u_niki"
+              },
+              {
+                "claim_id": "82a397c9-0410-4ad4-a4fc-d77c8185fc63",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 6,
+                "slot_policy": "Normal",
+                "status": "Filled",
+                "user_id": "u_hiyori"
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 7,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 8,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 9,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              },
+              {
+                "claim_id": null,
+                "claim_line_index": null,
+                "lock_reason": null,
+                "segment_id": null,
+                "slot_index": 10,
+                "slot_policy": "Normal",
+                "status": "Empty",
+                "user_id": null
+              }
+            ]
+          }
+        ],
+        "item_id": "badge_rinne",
+        "item_name": "燐音吧唧",
+        "kind": "split",
+        "singles": [],
+        "waiting": []
+      },
+      {
+        "boxes": [],
+        "item_id": "stand_ran",
+        "item_name": "蓝良立牌",
+        "kind": "single",
+        "singles": [],
+        "waiting": []
+      },
+      {
+        "boxes": [
+          {
+            "box_index": 1,
+            "slots": [
+              {
+                "claim_id": "53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "fullbox:u_tsukasa:53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5:0",
+                "slot_index": 1,
+                "slot_policy": "FullBox",
+                "status": "Filled",
+                "user_id": "u_tsukasa"
+              },
+              {
+                "claim_id": "53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "fullbox:u_tsukasa:53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5:0",
+                "slot_index": 2,
+                "slot_policy": "FullBox",
+                "status": "Filled",
+                "user_id": "u_tsukasa"
+              },
+              {
+                "claim_id": "53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "fullbox:u_tsukasa:53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5:0",
+                "slot_index": 3,
+                "slot_policy": "FullBox",
+                "status": "Filled",
+                "user_id": "u_tsukasa"
+              },
+              {
+                "claim_id": "53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "fullbox:u_tsukasa:53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5:0",
+                "slot_index": 4,
+                "slot_policy": "FullBox",
+                "status": "Filled",
+                "user_id": "u_tsukasa"
+              },
+              {
+                "claim_id": "53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "fullbox:u_tsukasa:53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5:0",
+                "slot_index": 5,
+                "slot_policy": "FullBox",
+                "status": "Filled",
+                "user_id": "u_tsukasa"
+              },
+              {
+                "claim_id": "53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "fullbox:u_tsukasa:53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5:0",
+                "slot_index": 6,
+                "slot_policy": "FullBox",
+                "status": "Filled",
+                "user_id": "u_tsukasa"
+              },
+              {
+                "claim_id": "53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "fullbox:u_tsukasa:53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5:0",
+                "slot_index": 7,
+                "slot_policy": "FullBox",
+                "status": "Filled",
+                "user_id": "u_tsukasa"
+              },
+              {
+                "claim_id": "53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5",
+                "claim_line_index": 0,
+                "lock_reason": null,
+                "segment_id": "fullbox:u_tsukasa:53cf6961-6dca-4f8a-a2a1-0f231f1ee2c5:0",
+                "slot_index": 8,
+                "slot_policy": "FullBox",
+                "status": "Filled",
+                "user_id": "u_tsukasa"
+              }
+            ]
+          }
+        ],
+        "item_id": "acrylic_rinne",
+        "item_name": "燐音亚克力",
+        "kind": "split",
+        "singles": [],
+        "waiting": []
+      }
+    ],
+    "round_id": "es_2026_05",
+    "user_summaries": [
+      {
+        "display_name": "",
+        "items": [
+          {
+            "claim_type": "Split",
+            "gross": 9000,
+            "item_id": "badge_rinne",
+            "item_name": "燐音吧唧",
+            "quantity": 2,
+            "unit_price": 4500
+          }
+        ],
+        "user_id": "u_kanade"
+      },
+      {
+        "display_name": "",
+        "items": [
+          {
+            "claim_type": "Split",
+            "gross": 4500,
+            "item_id": "badge_ran",
+            "item_name": "蓝良吧唧",
+            "quantity": 1,
+            "unit_price": 4500
+          }
+        ],
+        "user_id": "u_ran"
+      },
+      {
+        "display_name": "",
+        "items": [
+          {
+            "claim_type": "Split",
+            "gross": 4500,
+            "item_id": "badge_rinne",
+            "item_name": "燐音吧唧",
+            "quantity": 1,
+            "unit_price": 4500
+          }
+        ],
+        "user_id": "u_niki"
+      },
+      {
+        "display_name": "",
+        "items": [
+          {
+            "claim_type": "Split",
+            "gross": 4500,
+            "item_id": "badge_rinne",
+            "item_name": "燐音吧唧",
+            "quantity": 1,
+            "unit_price": 4500
+          }
+        ],
+        "user_id": "u_hiyori"
+      },
+      {
+        "display_name": "",
+        "items": [
+          {
+            "claim_type": "Split",
+            "gross": 4500,
+            "item_id": "badge_ran",
+            "item_name": "蓝良吧唧",
+            "quantity": 1,
+            "unit_price": 4500
+          }
+        ],
+        "user_id": "u_aoi"
+      },
+      {
+        "display_name": "",
+        "items": [
+          {
+            "claim_type": "Split",
+            "gross": 30400,
+            "item_id": "acrylic_rinne",
+            "item_name": "燐音亚克力",
+            "quantity": 8,
+            "unit_price": 3800
+          }
+        ],
+        "user_id": "u_tsukasa"
+      },
+      {
+        "display_name": "",
+        "items": [
+          {
+            "claim_type": "Split",
+            "gross": 9000,
+            "item_id": "badge_rinne",
+            "item_name": "燐音吧唧",
+            "quantity": 2,
+            "unit_price": 4500
+          }
+        ],
+        "user_id": "u_rinne"
+      }
+    ],
+    "version": 8,
+    "warnings": []
+  },
+  "version": 8
+}

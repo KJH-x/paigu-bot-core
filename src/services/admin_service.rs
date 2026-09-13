@@ -64,6 +64,7 @@ impl AdminService {
             aliases,
             sort_order: 0,
             metadata: serde_json::Value::Null,
+            variants: vec![],
         };
         self.item_repo.insert(&item).await
     }

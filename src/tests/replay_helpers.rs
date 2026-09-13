@@ -22,6 +22,7 @@ fn claim_line(user_id: &str, item_id: &str, quantity: u32, ts_ms: i64, seq: i64,
         line_index: 0,
         user_id: UserId(user_id.to_string()),
         item_id: ItemId(item_id.to_string()),
+        variant_id: None,
         quantity,
         claim_type: ClaimType::Split,
         slot_policy: SlotPolicy::Normal,
@@ -31,12 +32,29 @@ fn claim_line(user_id: &str, item_id: &str, quantity: u32, ts_ms: i64, seq: i64,
     }
 }
 
+fn variant_line(user_id: &str, item_id: &str, variant_id: &str, quantity: u32, ts_ms: i64, seq: i64) -> EffectiveClaimLine {
+    EffectiveClaimLine {
+        claim_id: ClaimId(uuid::Uuid::new_v4().to_string()),
+        line_index: 0,
+        user_id: UserId(user_id.to_string()),
+        item_id: ItemId(item_id.to_string()),
+        variant_id: Some(variant_id.to_string()),
+        quantity,
+        claim_type: ClaimType::Split,
+        slot_policy: SlotPolicy::Normal,
+        effective_at: ts(ts_ms),
+        sequence: seq,
+        priority_level: 0,
+    }
+}
+
 fn tail_line(user_id: &str, item_id: &str, quantity: u32, ts_ms: i64) -> EffectiveClaimLine {
     EffectiveClaimLine {
         claim_id: ClaimId(uuid::Uuid::new_v4().to_string()),
         line_index: 0,
         user_id: UserId(user_id.to_string()),
         item_id: ItemId(item_id.to_string()),
+        variant_id: None,
         quantity,
         claim_type: ClaimType::Split,
         slot_policy: SlotPolicy::TailLocked,
@@ -184,6 +202,7 @@ fn test_replay_cancellation_removes_effective_claims() {
                 user_id: UserId("u1".to_string()),
                 items: vec![ClaimLine {
                     item_id: ItemId("badge".to_string()),
+                    variant_id: None,
                     quantity: 1,
                     claim_type: ClaimType::Split,
                     slot_policy: SlotPolicy::Normal,
@@ -245,6 +264,77 @@ fn test_eligibility_applies_to_item() {
     assert!(eligibility.applies_to_item(&ItemId("badge_rinne".to_string())));
     assert!(eligibility.applies_to_item(&ItemId("badge_aira".to_string())));
     assert!(!eligibility.applies_to_item(&ItemId("badge_himeru".to_string())));
+}
+
+#[test]
+fn test_variant_allocation_isolated_per_variant() {
+    use crate::domain::item::ItemVariant;
+
+    let mut split = fixtures::fixture_split_item("badge", "徽章", 4500, 10);
+    split.variants = vec![
+        ItemVariant {
+            variant_id: "v_yukari".to_string(),
+            name: "岳羽由加莉".to_string(),
+            unit_price: MoneyCents(4500),
+            capacity: Some(2),
+            aliases: vec![],
+        },
+        ItemVariant {
+            variant_id: "v_tora".to_string(),
+            name: "虎狼丸".to_string(),
+            unit_price: MoneyCents(4500),
+            capacity: Some(2),
+            aliases: vec![],
+        },
+    ];
+    let single = fixtures::fixture_single_item("gift", "特典", 1000, 10);
+
+    let a1 = variant_line("u1", "badge", "v_yukari", 1, 100, 1);
+    let a2 = variant_line("u2", "badge", "v_yukari", 1, 101, 2);
+    let b1 = variant_line("u3", "badge", "v_tora", 1, 102, 3);
+    let b2 = variant_line("u4", "badge", "v_tora", 1, 103, 4);
+    let mut s1 = claim_line("u5", "gift", 2, 104, 5, 0);
+    s1.claim_type = ClaimType::Single;
+
+    let engine = AllocationEngine::new();
+    let lines = vec![a1, a2, b1, b2, s1];
+    let events: Vec<EventEnvelope> = vec![];
+    let snapshot = engine.allocate(&[split, single], &lines, &events).unwrap();
+
+    let badge_rows: Vec<_> = snapshot
+        .item_allocations
+        .iter()
+        .filter(|i| i.item_id.0 == "badge")
+        .collect();
+    assert_eq!(badge_rows.len(), 2);
+
+    let yukari = badge_rows
+        .iter()
+        .find(|i| i.variant_id.as_deref() == Some("v_yukari"))
+        .unwrap();
+    let tora = badge_rows
+        .iter()
+        .find(|i| i.variant_id.as_deref() == Some("v_tora"))
+        .unwrap();
+
+    assert_eq!(yukari.boxes.len(), 1);
+    assert_eq!(tora.boxes.len(), 1);
+    assert_eq!(yukari.box_at(1).unwrap().slots.len(), 2);
+    assert_eq!(tora.box_at(1).unwrap().slots.len(), 2);
+
+    assert_eq!(yukari.box_at(1).unwrap().slots[0].user_id_str(), Some("u1"));
+    assert_eq!(yukari.box_at(1).unwrap().slots[1].user_id_str(), Some("u2"));
+    assert_eq!(tora.box_at(1).unwrap().slots[0].user_id_str(), Some("u3"));
+    assert_eq!(tora.box_at(1).unwrap().slots[1].user_id_str(), Some("u4"));
+
+    let gift = snapshot
+        .item_allocations
+        .iter()
+        .find(|i| i.item_id.0 == "gift")
+        .unwrap();
+    assert_eq!(gift.singles.len(), 1);
+    assert_eq!(gift.singles[0].user_id.0, "u5");
+    assert_eq!(gift.singles[0].quantity, 2);
 }
 
 #[test]

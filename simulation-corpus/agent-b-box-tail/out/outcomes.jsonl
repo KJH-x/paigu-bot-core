@@ -1,0 +1,49 @@
+{"source_sequence":1,"message_id":"b1","user_id":"u_b","nickname":"小乙","text":"燐音吧唧排1个","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":2,"message_id":"b2","user_id":"u_c","nickname":"丙丙","text":"排rinne吧唧2","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":3,"message_id":"b3","user_id":"u_f","nickname":"阿己","text":"罐徽排1","status":"Applied","detail":"claim: can_badgex1[normal]"}
+{"source_sequence":4,"message_id":"b4","user_id":"u_d","nickname":"丁丁","text":"蓝良吧唧排3","status":"Applied","detail":"claim: badge_ranx3[normal]"}
+{"source_sequence":5,"message_id":"b5","user_id":"u_a","nickname":"阿甲","text":"阿甲 燐音吧唧要3个","status":"Applied","detail":"claim: badge_rinnex3[normal]"}
+{"source_sequence":6,"message_id":"b6","user_id":"u_b","nickname":"小乙","text":"蓝良立牌单领1","status":"Applied","detail":"claim: stand_ranx1[normal]"}
+{"source_sequence":7,"message_id":"b7","user_id":"u_c","nickname":"丙丙","text":"罐徽包尾2","status":"Applied","detail":"claim: can_badgex2[tail_locked]"}
+{"source_sequence":8,"message_id":"b8","user_id":"u_e","nickname":"戊戊","text":"吧唧燐音排2 购物金","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":9,"message_id":"b9","user_id":"u_d","nickname":"丁丁","text":"立牌排2个","status":"Applied","detail":"claim: stand_ranx2[normal]"}
+{"source_sequence":10,"message_id":"b10","user_id":"u_g","nickname":"庚庚","text":"罐徽排2","status":"Applied","detail":"claim: can_badgex2[normal]"}
+{"source_sequence":11,"message_id":"b11","user_id":"u_d","nickname":"丁丁","text":"燐音吧唧整盒","status":"Applied","detail":"claim: badge_rinnex10[full_box]"}
+{"source_sequence":12,"message_id":"b12","user_id":"u_h","nickname":"辛辛","text":"罐徽再来1","status":"Applied","detail":"claim: can_badgex1[normal]"}
+{"source_sequence":13,"message_id":"b13","user_id":"u_f","nickname":"阿己","text":"吧唧排1","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":14,"message_id":"b14","user_id":"u_a","nickname":"阿甲","text":"蓝良立牌要3","status":"Applied","detail":"claim: stand_ranx3[normal]"}
+{"source_sequence":15,"message_id":"b15","user_id":"u_b","nickname":"小乙","text":"罐徽包尾巴1","status":"Applied","detail":"claim: can_badgex1[tail_locked]"}
+{"source_sequence":16,"message_id":"b16","user_id":"u_g","nickname":"庚庚","text":"再排个燐音吧唧","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":17,"message_id":"b17","user_id":"u_d","nickname":"丁丁","text":"罐徽留尾1","status":"Applied","detail":"claim: can_badgex1[tail_locked]"}
+{"source_sequence":18,"message_id":"b18","user_id":"u_h","nickname":"辛辛","text":"rinne +1","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":19,"message_id":"b19","user_id":"u_f","nickname":"阿己","text":"立牌1","status":"Applied","detail":"claim: stand_ranx1[normal]"}
+{"source_sequence":20,"message_id":"b20","user_id":"u_e","nickname":"戊戊","text":"蓝良 ran 2个 购物金","status":"Applied","detail":"claim: badge_ranx2[normal]"}
+{"source_sequence":21,"message_id":"b21","user_id":"u_h","nickname":"辛辛","text":"罐徽端了3","status":"Applied","detail":"claim: can_badgex3[tail_locked]"}
+{"source_sequence":22,"message_id":"b22","user_id":"u_g","nickname":"庚庚","text":"蓝良吧唧端盒2","status":"Applied","detail":"claim: badge_ranx2[tail_locked]"}
+{"source_sequence":23,"message_id":"b23","user_id":"u_c","nickname":"丙丙","text":"罐徽包尾8","status":"Applied","detail":"claim: can_badgex8[tail_locked]"}
+{"source_sequence":24,"message_id":"b24","user_id":"u_h","nickname":"辛辛","text":"蓝良吧唧包个尾1","status":"Applied","detail":"claim: badge_ranx1[tail_locked]"}
+{"source_sequence":25,"message_id":"b25","user_id":"u_b","nickname":"小乙","text":"撤销罐徽包尾巴1","status":"Applied","detail":"cancel: item=Some(\"can_badge\") qty=Some(1)"}
+{"source_sequence":26,"message_id":"b26","user_id":"u_b","nickname":"小乙","text":"蓝良吧唧要尾2","status":"Applied","detail":"claim: badge_ranx2[tail_locked]"}
+{"source_sequence":27,"message_id":"b27","user_id":"u_f","nickname":"阿己","text":"蓝良吧唧锁列1","status":"Applied","detail":"claim: badge_ranx1[column_locked]"}
+{"source_sequence":28,"message_id":"b28","user_id":"u_g","nickname":"庚庚","text":"蓝良吧唧锁一整列1","status":"Applied","detail":"claim: badge_ranx1[column_locked]"}
+{"source_sequence":29,"message_id":"b29","user_id":"u_f","nickname":"阿己","text":"蓝良吧唧一盒全包","status":"Applied","detail":"claim: badge_ranx10[full_box]"}
+{"source_sequence":30,"message_id":"b30","user_id":"u_a","nickname":"阿甲","text":"蓝良吧唧包一盒","status":"Applied","detail":"claim: badge_ranx10[full_box]"}
+{"source_sequence":31,"message_id":"b31","user_id":"u_e","nickname":"戊戊","text":"燐音吧唧包一盒","status":"Applied","detail":"claim: badge_rinnex10[full_box]"}
+{"source_sequence":32,"message_id":"b32","user_id":"u_g","nickname":"庚庚","text":"罐徽包盒","status":"Applied","detail":"claim: can_badgex6[full_box]"}
+{"source_sequence":33,"message_id":"b33","user_id":"u_b","nickname":"小乙","text":"蓝良吧唧排1","status":"Applied","detail":"claim: badge_ranx1[normal]"}
+{"source_sequence":34,"message_id":"b34","user_id":"u_d","nickname":"丁丁","text":"蓝良吧唧再来2 谢谢","status":"Applied","detail":"claim: badge_ranx2[normal]"}
+{"source_sequence":35,"message_id":"b35","user_id":"u_f","nickname":"阿己","text":"蓝良立牌再来1","status":"Applied","detail":"claim: stand_ranx1[normal]"}
+{"source_sequence":36,"message_id":"b36","user_id":"u_h","nickname":"辛辛","text":"蓝良吧唧排1","status":"Applied","detail":"claim: badge_ranx1[normal]"}
+{"source_sequence":37,"message_id":"b37","user_id":"u_c","nickname":"丙丙","text":"燐音吧唧排2","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":38,"message_id":"b38","user_id":"u_e","nickname":"戊戊","text":"燐音吧唧再来1 购物金","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":39,"message_id":"b39","user_id":"u_g","nickname":"庚庚","text":"罐徽排1","status":"Applied","detail":"claim: can_badgex1[normal]"}
+{"source_sequence":40,"message_id":"b40","user_id":"u_b","nickname":"小乙","text":"燐音吧唧排1 求求了","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":41,"message_id":"b41","user_id":"u_a","nickname":"阿甲","text":"蓝良吧唧排1","status":"Applied","detail":"claim: badge_ranx1[normal]"}
+{"source_sequence":42,"message_id":"b42","user_id":"u_d","nickname":"丁丁","text":"罐徽再来1","status":"Applied","detail":"claim: can_badgex1[normal]"}
+{"source_sequence":43,"message_id":"b43","user_id":"u_f","nickname":"阿己","text":"燐音吧唧锁列1","status":"Applied","detail":"claim: badge_rinnex1[column_locked]"}
+{"source_sequence":44,"message_id":"b44","user_id":"u_h","nickname":"辛辛","text":"蓝良立牌单领2","status":"Applied","detail":"claim: stand_ranx2[normal]"}
+{"source_sequence":45,"message_id":"b45","user_id":"u_c","nickname":"丙丙","text":"罐徽排1 别漏我","status":"Applied","detail":"claim: can_badgex1[normal]"}
+{"source_sequence":46,"message_id":"b46","user_id":"u_g","nickname":"庚庚","text":"蓝良吧唧排2","status":"Applied","detail":"claim: badge_ranx2[normal]"}
+{"source_sequence":47,"message_id":"b47","user_id":"u_e","nickname":"戊戊","text":"燐音罐徽排2","status":"Applied","detail":"claim: can_badgex2[normal]"}
+{"source_sequence":48,"message_id":"b48","user_id":"u_a","nickname":"阿甲","text":"立牌排1","status":"Applied","detail":"claim: stand_ranx1[normal]"}
+{"source_sequence":49,"message_id":"b49","user_id":"u_h","nickname":"辛辛","text":"罐徽包尾1 试试","status":"Applied","detail":"claim: can_badgex1[tail_locked]"}

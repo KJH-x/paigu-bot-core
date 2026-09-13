@@ -30,6 +30,16 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "simulate" {
+        simulation::verifier::run_cli(&args[2..]).await?;
+        return Ok(());
+    }
+    if args.len() > 1 && args[1] == "serve" {
+        simulation::chat_server::run_cli(&args[2..]).await?;
+        return Ok(());
+    }
+
     let config = config::Config::from_env()?;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(config.database.max_connections)

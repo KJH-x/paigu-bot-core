@@ -202,6 +202,7 @@ impl ReplayRuntimeState {
                         line_index: i as u32,
                         user_id: c.user_id.clone(),
                         item_id: l.item_id.clone(),
+                        variant_id: l.variant_id.clone(),
                         quantity: l.quantity,
                         claim_type: l.claim_type.clone(),
                         slot_policy: l.slot_policy.clone(),
@@ -213,15 +214,20 @@ impl ReplayRuntimeState {
             })
             .collect();
 
-        engine.allocate(&self.items, &effective_lines, &self.events)
-            .unwrap_or(AllocationSnapshot {
+        match engine.allocate(&self.items, &effective_lines, &self.events) {
+            Ok(mut snapshot) => {
+                snapshot.version = self.version;
+                snapshot
+            }
+            Err(_) => AllocationSnapshot {
                 round_id: self.round_id.clone(),
                 version: self.version,
                 generated_at: chrono::Utc::now(),
                 item_allocations: vec![],
                 user_summaries: vec![],
                 warnings: vec![],
-            })
+            },
+        }
     }
 
     fn add_claim(&mut self, claim: &crate::domain::event::ClaimCreated, event: &EventEnvelope) {
