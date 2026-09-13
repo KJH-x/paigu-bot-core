@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>排谷机器人</title>
+  <link rel="stylesheet" href="display.css" />
+  <script>
+    window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
+  </script>
+  <script defer src="common.js"></script>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <span class="brand">排谷机器人 · 前端</span>
+      <span id="health" class="status-badge"><span class="dot"></span>检查中…</span>
+      <span class="spacer"></span>
+      <label class="row tight">
+        <span class="hint">API</span>
+        <input id="api" size="26" />
+      </label>
+      <button id="check" class="small">健康检查</button>
+    </div>
+
+    <div id="banner" class="banner"></div>
+
+    <div class="nav-cards">
+      <a class="nav-card" href="display.html">
+        <h2>展示页</h2>
+        <p>排位表 + 消息流 + who-whats + 状态。5s 增量轮询、keyed diff、smart-scroll，不打断划词/点击/滚动。支持 local / remote 数据源。</p>
+      </a>
+      <a class="nav-card" href="admin.html">
+        <h2>管理面板</h2>
+        <p>编辑 config：LLM prompt、商品目录（items/variants）、预存用户、时段窗口、白名单、展示参数。revision 乐观并发 + 409 冲突提示；拉取群成员。</p>
+      </a>
+      <a class="nav-card" href="sim.html">
+        <h2>模拟器</h2>
+        <p>真实群成员身份切换/新建、时间偏移 ±DD HH MM SS、发送消息、转录与实时排位。走与真实链路完全相同的流水线。</p>
+      </a>
+    </div>
+
+    <p class="hint" style="margin-top:16px">
+      API 契约见 <span class="mono">docs/DESIGN.md §5</span>（默认 <span class="mono">http://127.0.0.1:21081</span>）。
+      可用 <span class="mono">?api=&lt;base&gt;</span> 或页面内联 <span class="mono">window.PAIGU_WEB</span> 覆盖。
+      建议用 <span class="mono">python -m http.server</span> 从 <span class="mono">127.0.0.1</span> 打开（CORS 允许 <span class="mono">http://127.0.0.1:*</span>）。
+    </p>
+  </div>
+
+  <script>
+    (function () {
+      function start() {
+        var P = window.PAIGU;
+        function $(id) { return document.getElementById(id); }
+        var base = P.resolveApiBase();
+        if (!P.qs('api')) {
+          try {
+            var stored = window.localStorage.getItem('paigu.display.api');
+            if (stored) base = P.stripSlash(stored);
+          } catch (e) { /* ignore */ }
+        }
+        $('api').value = base;
+
+        function check() {
+          $('health').className = 'status-badge';
+          $('health').innerHTML = '<span class="dot"></span>检查中…';
+          P.get('/api/health').then(function (data) {
+            $('health').className = 'status-badge ok';
+            $('health').innerHTML = '<span class="dot"></span>API 正常';
+            $('banner').className = 'banner';
+          }).catch(function (err) {
+            $('health').className = 'status-badge bad';
+            $('health').innerHTML = '<span class="dot"></span>API 不可用';
+            var b = $('banner');
+            b.textContent = '无法连接 ' + base + '：' + P.errorText(err) + '。静态页仍可打开；展示页可切换到 remote 数据源查看已发布快照。';
+            b.className = 'banner show bad';
+          });
+        }
+
+        $('check').addEventListener('click', check);
+        $('api').addEventListener('change', function (e) {
+          base = P.stripSlash(e.target.value) || P.DEFAULT_API;
+          e.target.value = base;
+          try { window.localStorage.setItem('paigu.display.api', base); } catch (err) { /* ignore */ }
+          check();
+        });
+        check();
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+      else start();
+    })();
+  </script>
+</body>
+</html>
