@@ -36,6 +36,7 @@ pub fn fixture_split_item(item_id: &str, name: &str, price_cents: i64, box_size:
         aliases: vec![],
         sort_order: 0,
         metadata: serde_json::json!({}),
+        variants: vec![],
     }
 }
 
@@ -53,6 +54,7 @@ pub fn fixture_single_item(item_id: &str, name: &str, price_cents: i64, max_quan
         aliases: vec![],
         sort_order: 0,
         metadata: serde_json::json!({}),
+        variants: vec![],
     }
 }
 

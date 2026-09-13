@@ -1,0 +1,43 @@
+{
+  "round_id": "es_2026_05",
+  "title": "ES5月新谷",
+  "group_id": "10001",
+  "items": [
+    {
+      "item_id": "badge_rinne",
+      "name": "燐音吧唧",
+      "kind": "split",
+      "unit_price_cents": 4500,
+      "box_size": 10,
+      "max_quantity": null,
+      "aliases": ["燐音", "rinne", "吧唧"]
+    },
+    {
+      "item_id": "badge_ran",
+      "name": "蓝良吧唧",
+      "kind": "split",
+      "unit_price_cents": 4500,
+      "box_size": 10,
+      "max_quantity": null,
+      "aliases": ["蓝良", "ran", "蓝良吧唧"]
+    },
+    {
+      "item_id": "stand_ran",
+      "name": "蓝良立牌",
+      "kind": "single",
+      "unit_price_cents": 6000,
+      "box_size": null,
+      "max_quantity": 20,
+      "aliases": ["蓝良立牌", "立牌"]
+    },
+    {
+      "item_id": "acrylic_rinne",
+      "name": "燐音亚克力",
+      "kind": "split",
+      "unit_price_cents": 3800,
+      "box_size": 8,
+      "max_quantity": null,
+      "aliases": ["亚克力", "燐音亚克力"]
+    }
+  ]
+}

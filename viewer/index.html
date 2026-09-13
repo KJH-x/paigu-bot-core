@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>排谷分配重放步进查看器</title>
+  <link rel="stylesheet" href="style.css?v=4" />
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script defer src="viewer.js?v=4"></script>
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="title-block">
+        <span id="title">排谷分配重放步进查看器</span>
+        <span id="step-info">未加载数据</span>
+      </div>
+      <div class="controls">
+        <button id="btn-first" title="跳到首步 (Home)">⏮ 首步</button>
+        <button id="btn-prev" title="上一步 (←)">◀ 上一步</button>
+        <button id="btn-play" title="播放/暂停 (空格)">▶ 播放</button>
+        <button id="btn-next" title="下一步 (→)">下一步 ▶</button>
+        <button id="btn-last" title="跳到末步 (End)">末步 ⏭</button>
+        <select id="speed" title="播放速度">
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+        </select>
+        <select id="sample" title="切换样本">
+          <option value="月行水上" selected>样本：月行水上（xlsx）</option>
+          <option value="覆雪于冬">样本：覆雪于冬（xlsx）</option>
+          <option value="真实聊天-月行水上">样本：真实聊天·月行水上</option>
+        </select>
+        <label class="file-label" title="载入任意 replay_view.json">
+          载入 JSON
+          <input type="file" id="file-input" accept=".json,application/json" />
+        </label>
+      </div>
+      <span id="source-info"></span>
+    </header>
+
+    <div id="check-bar" class="hidden"></div>
+
+    <div id="main" class="hidden">
+      <aside id="sidebar">
+        <div class="pane-title">
+          <span>消息 / 步骤</span>
+          <span id="step-count"></span>
+        </div>
+        <ol id="step-list"></ol>
+      </aside>
+
+      <section id="content">
+        <div id="view-switch">
+          <button id="tab-table" class="active" data-view="table">表格视图</button>
+          <button id="tab-column" data-view="column">列视图</button>
+          <button id="tab-mermaid" data-view="mermaid">Mermaid 视图</button>
+        </div>
+        <div id="legend">
+          <span class="lg"><span class="sw new"></span>▲ 新增填入</span>
+          <span class="lg"><span class="sw release"></span>▼ 撤销释放</span>
+          <span class="lg"><span class="sw forward"></span>↷ 自动前移</span>
+          <span class="lg"><span class="sw tail"></span>⛓ 包尾段创建</span>
+          <span class="lg"><span class="sw admin"></span>✚ 管理员固定</span>
+        </div>
+        <div id="table-view"></div>
+        <div id="column-view" class="hidden"></div>
+        <div id="mermaid-view" class="hidden"></div>
+      </section>
+    </div>
+
+    <section id="who-whats" class="hidden"></section>
+  </div>
+
+  <div id="empty-hint">
+    <p><strong>尚未加载重放数据。</strong></p>
+    <p>正在尝试读取同目录 <code>replay_view.json</code>；
+       若因 <code>file://</code> 限制失败，会自动回退到内置示例。</p>
+    <p>也可以点击右上角「载入 JSON」手动选择文件。</p>
+  </div>
+
+  <div id="toast"></div>
+</body>
+</html>

@@ -35,10 +35,8 @@ impl EventValidator {
     ) -> AppResult<ValidationOutcome> {
         use crate::inbound::command_router::BotReply;
 
-        if parsed.confidence < self.confidence_threshold {
-            return Ok(ValidationOutcome::Reject(BotReply::Text(
-                format!("识别置信度不足 ({:.0}%)，请按格式重发。", parsed.confidence * 100.0)
-            )));
+        if parsed.intent == ParsedIntent::Unknown {
+            return Ok(ValidationOutcome::Ignore);
         }
 
         if !parsed.ambiguous_parts.is_empty() {
@@ -48,32 +46,69 @@ impl EventValidator {
             }));
         }
 
+        if parsed.confidence < self.confidence_threshold {
+            return Ok(ValidationOutcome::Reject(BotReply::Text(
+                format!("识别置信度不足 ({:.0}%)，请按格式重发。", parsed.confidence * 100.0)
+            )));
+        }
+
         match parsed.intent {
             ParsedIntent::Claim => {
-                let resolved = alias_match::resolve_multiple_items(&parsed.items, active_rounds);
-
-                for (i, r) in resolved.iter().enumerate() {
-                    if !r.resolved {
-                        match &r.ambiguity {
-                            Some(msg) => {
-                                return Ok(ValidationOutcome::Reject(BotReply::Text(msg.clone())));
-                            }
-                            None => {
-                                return Ok(ValidationOutcome::Reject(BotReply::Text(
-                                    format!("无法识别商品：{}", parsed.items[i].name)
-                                )));
+                // Rule-parsed messages already resolved (item, variant) with context;
+                // use that hint directly. Otherwise fall back to alias matching.
+                let use_hint = parsed.items.iter().all(|pi| pi.resolved_item_id.is_some());
+                let (round_id, pairs): (crate::domain::ids::RoundId, Vec<(crate::domain::ids::ItemId, Option<String>)>) =
+                    if use_hint {
+                        let rid = parsed.items.iter()
+                            .find_map(|pi| pi.resolved_round_id.clone())
+                            .or_else(|| active_rounds.first().map(|r| r.round_id.0.clone()))
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let pairs = parsed.items.iter().map(|pi| {
+                            (crate::domain::ids::ItemId(pi.resolved_item_id.clone().unwrap()), pi.resolved_variant_id.clone())
+                        }).collect();
+                        (crate::domain::ids::RoundId(rid), pairs)
+                    } else {
+                        let resolved = alias_match::resolve_multiple_items(&parsed.items, active_rounds);
+                        for (i, r) in resolved.iter().enumerate() {
+                            if !r.resolved {
+                                match &r.ambiguity {
+                                    Some(msg) => {
+                                        return Ok(ValidationOutcome::Reject(BotReply::Text(msg.clone())));
+                                    }
+                                    None => {
+                                        return Ok(ValidationOutcome::Reject(BotReply::Text(
+                                            format!("无法识别商品：{}", parsed.items[i].name)
+                                        )));
+                                    }
+                                }
                             }
                         }
+                        let rid = resolved[0].round_id.clone().unwrap();
+                        let pairs = resolved.iter().map(|r| {
+                            (r.item_id.clone().unwrap(), r.variant_id.clone())
+                        }).collect();
+                        (rid, pairs)
+                    };
+
+                for pi in &parsed.items {
+                    if pi.quantity == 0 {
+                        return Ok(ValidationOutcome::Reject(BotReply::Text(
+                            format!("商品 {} 数量为 0，未记录。", pi.name)
+                        )));
+                    }
+                    if pi.quantity > 99 {
+                        return Ok(ValidationOutcome::Reject(BotReply::Text(
+                            format!("商品 {} 数量 {} 超出单次上限 99，请分开发送。", pi.name, pi.quantity)
+                        )));
                     }
                 }
 
-                let round_id = resolved[0].round_id.clone().unwrap();
                 let claim_id = crate::domain::ids::ClaimId(uuid::Uuid::new_v4().to_string());
                 let event_id = crate::domain::ids::EventId(uuid::Uuid::new_v4().to_string());
 
                 let items: Vec<ClaimLine> = parsed.items.iter().enumerate().map(|(i, pi)| {
                     let normalized = crate::parser::normalize::normalize_claim_item(pi);
-                    let item_id = resolved[i].item_id.clone().unwrap();
+                    let item_id = pairs[i].0.clone();
                     let claim_type = match normalized.claim_type.as_deref() {
                         Some("Single") => crate::domain::claim::ClaimType::Single,
                         Some("GiftClaim") => crate::domain::claim::ClaimType::GiftClaim,
@@ -83,10 +118,12 @@ impl EventValidator {
                         Some("TailLocked") => crate::domain::claim::SlotPolicy::TailLocked,
                         Some("AdminFixed") => crate::domain::claim::SlotPolicy::AdminFixed,
                         Some("ColumnLocked") => crate::domain::claim::SlotPolicy::ColumnLocked,
+                        Some("FullBox") => crate::domain::claim::SlotPolicy::FullBox,
                         _ => crate::domain::claim::SlotPolicy::Normal,
                     };
                     ClaimLine {
                         item_id,
+                        variant_id: pairs[i].1.clone(),
                         quantity: pi.quantity,
                         claim_type,
                         slot_policy,

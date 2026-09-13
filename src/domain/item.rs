@@ -46,6 +46,16 @@ impl ItemKind {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ItemVariant {
+    pub variant_id: String,
+    pub name: String,
+    pub unit_price: MoneyCents,
+    pub capacity: Option<u32>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Item {
     pub item_id: ItemId,
@@ -60,6 +70,8 @@ pub struct Item {
     pub aliases: Vec<String>,
     pub sort_order: i32,
     pub metadata: JsonValue,
+    #[serde(default)]
+    pub variants: Vec<ItemVariant>,
 }
 
 impl Item {
@@ -71,6 +83,16 @@ impl Item {
             return true;
         }
         self.aliases.iter().any(|a| a.contains(name))
+    }
+
+    pub fn find_variant_by_name(&self, name: &str) -> Option<&ItemVariant> {
+        self.variants
+            .iter()
+            .find(|v| v.name == name || v.aliases.iter().any(|a| a == name))
+    }
+
+    pub fn find_variant_by_id(&self, variant_id: &str) -> Option<&ItemVariant> {
+        self.variants.iter().find(|v| v.variant_id == variant_id)
     }
 
     pub fn exact_matches_item_id(&self, id: &str) -> bool {

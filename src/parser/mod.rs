@@ -5,3 +5,4 @@ pub mod normalize;
 pub mod alias_match;
 pub mod validation;
 pub mod parse_cache;
+pub mod rule_parser;

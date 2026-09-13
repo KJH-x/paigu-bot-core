@@ -1,0 +1,68 @@
+{"source_sequence":1,"message_id":"d1","user_id":"u_a","nickname":"甲","text":"排燐音吧唧2","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":2,"message_id":"d2","user_id":"u_b","nickname":"乙","text":"排蓝良吧唧1","status":"Applied","detail":"claim: badge_ranx1[normal]"}
+{"source_sequence":3,"message_id":"d3","user_id":"u_c","nickname":"丙","text":"蓝良立牌单领1","status":"Applied","detail":"claim: stand_ranx1[normal]"}
+{"source_sequence":4,"message_id":"d4","user_id":"u_d","nickname":"丁","text":"排燐音亚克力3","status":"Applied","detail":"claim: acrylic_rinnex3[normal]"}
+{"source_sequence":5,"message_id":"d5","user_id":"u_e","nickname":"戊","text":"排燐音吧唧1 蓝良吧唧1","status":"Applied","detail":"claim: badge_rinnex1[normal], badge_ranx1[normal]"}
+{"source_sequence":6,"message_id":"d6","user_id":"u_f","nickname":"己","text":"购物金排燐音吧唧2","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":7,"message_id":"d7","user_id":"u_g","nickname":"庚","text":"排亚克力1","status":"Applied","detail":"claim: acrylic_rinnex1[normal]"}
+{"source_sequence":8,"message_id":"d8","user_id":"u_h","nickname":"辛","text":"立牌2","status":"Applied","detail":"claim: stand_ranx2[normal]"}
+{"source_sequence":9,"message_id":"d9","user_id":"u_i","nickname":"壬","text":"排蓝良2","status":"Applied","detail":"claim: badge_ranx2[normal]"}
+{"source_sequence":10,"message_id":"d10","user_id":"u_j","nickname":"癸","text":"排燐音吧唧3","status":"Applied","detail":"claim: badge_rinnex3[normal]"}
+{"source_sequence":11,"message_id":"d11","user_id":"u_k","nickname":"子","text":"排蓝良吧唧2","status":"Applied","detail":"claim: badge_ranx2[normal]"}
+{"source_sequence":12,"message_id":"d12","user_id":"u_b","nickname":"乙","text":"非购物金排燐音吧唧1","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":13,"message_id":"d13","user_id":"u_f","nickname":"己","text":"我用购物金优先排蓝良吧唧1","status":"Applied","detail":"claim: badge_ranx1[normal]"}
+{"source_sequence":14,"message_id":"d14","user_id":"u_c","nickname":"丙","text":"包尾燐音吧唧2","status":"Applied","detail":"claim: badge_rinnex2[tail_locked]"}
+{"source_sequence":15,"message_id":"d15","user_id":"u_d","nickname":"丁","text":"包盒燐音吧唧","status":"Applied","detail":"claim: badge_rinnex10[full_box]"}
+{"source_sequence":16,"message_id":"d16","user_id":"u_e","nickname":"戊","text":"包尾蓝良吧唧8","status":"Applied","detail":"claim: badge_ranx8[tail_locked]"}
+{"source_sequence":17,"message_id":"d17","user_id":"u_k","nickname":"子","text":"包盒燐音吧唧 蓝良立牌单领1","status":"Applied","detail":"claim: badge_rinnex10[full_box], stand_ranx1[normal]"}
+{"source_sequence":18,"message_id":"d18","user_id":"u_g","nickname":"庚","text":"包尾燐音吧唧20","status":"Applied","detail":"claim: badge_rinnex20[tail_locked]"}
+{"source_sequence":19,"message_id":"d19","user_id":"u_h","nickname":"辛","text":"包盒蓝良吧唧","status":"Applied","detail":"claim: badge_ranx10[full_box]"}
+{"source_sequence":20,"message_id":"d20","user_id":"u_i","nickname":"壬","text":"包尾亚克力9","status":"Applied","detail":"claim: acrylic_rinnex9[tail_locked]"}
+{"source_sequence":21,"message_id":"d21","user_id":"u_j","nickname":"癸","text":"排燐音","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":22,"message_id":"d22","user_id":"u_a","nickname":"甲","text":"排燐音1","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":23,"message_id":"d23","user_id":"u_c","nickname":"丙","text":"我要燐音","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":24,"message_id":"d24","user_id":"u_d","nickname":"丁","text":"排吧唧","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":25,"message_id":"d25","user_id":"u_e","nickname":"戊","text":"排立牌","status":"Applied","detail":"claim: stand_ranx1[normal]"}
+{"source_sequence":26,"message_id":"d26","user_id":"u_k","nickname":"子","text":"排xxx","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":27,"message_id":"d27","user_id":"u_h","nickname":"辛","text":"排初音","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":28,"message_id":"d28","user_id":"u_i","nickname":"壬","text":"排手办","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":29,"message_id":"d29","user_id":"u_j","nickname":"癸","text":"排骨","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":30,"message_id":"d30","user_id":"u_a","nickname":"甲","text":"你好","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":31,"message_id":"d31","user_id":"u_b","nickname":"乙","text":"在吗","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":32,"message_id":"d32","user_id":"u_c","nickname":"丙","text":"[图片]","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":33,"message_id":"d33","user_id":"u_d","nickname":"丁","text":"图","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":34,"message_id":"d34","user_id":"u_e","nickname":"戊","text":"😂","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":35,"message_id":"d35","user_id":"u_f","nickname":"己","text":"！！！！！","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":36,"message_id":"d36","user_id":"u_g","nickname":"庚","text":"@甲 你排了吗","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":37,"message_id":"d37","user_id":"u_h","nickname":"辛","text":"","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":38,"message_id":"d38","user_id":"u_i","nickname":"壬","text":"哈哈哈哈哈哈","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":39,"message_id":"d39","user_id":"u_j","nickname":"癸","text":"？？？","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":40,"message_id":"d40","user_id":"u_k","nickname":"子","text":"排燐音吧唧0","status":"Rejected","detail":"商品 燐音吧唧 数量为 0，未记录。"}
+{"source_sequence":41,"message_id":"d41","user_id":"u_a","nickname":"甲","text":"排燐音吧唧999","status":"Rejected","detail":"商品 燐音吧唧 数量 999 超出单次上限 99，请分开发送。"}
+{"source_sequence":42,"message_id":"d42","user_id":"u_b","nickname":"乙","text":"排燐音吧唧","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":43,"message_id":"d5","user_id":"u_c","nickname":"丙","text":"排蓝良吧唧1","status":"Duplicate","detail":"重复 message_id，已按幂等忽略"}
+{"source_sequence":44,"message_id":"d44","user_id":"u_d","nickname":"丁","text":"排燐音吧","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":45,"message_id":"d45","user_id":"u_e","nickname":"戊","text":"排rinne badge 2","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":46,"message_id":"d46","user_id":"u_f","nickname":"己","text":"claim 燐音吧唧 x2","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":47,"message_id":"d47","user_id":"u_g","nickname":"庚","text":"牌燐音吧唧2","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":48,"message_id":"d48","user_id":"u_h","nickname":"辛","text":"排骨燐音吧唧1","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":49,"message_id":"d49","user_id":"u_i","nickname":"壬","text":"排 燐音 吧 唧 1","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":50,"message_id":"d50","user_id":"u_j","nickname":"癸","text":"排燐音吧唧２","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":55,"message_id":"d55","user_id":"u_b","nickname":"乙","text":"排蓝良吧唧1","status":"Applied","detail":"claim: badge_ranx1[normal]"}
+{"source_sequence":51,"message_id":"d51","user_id":"u_k","nickname":"子","text":"排燐音吧唧二","status":"Applied","detail":"claim: badge_rinnex2[normal]"}
+{"source_sequence":52,"message_id":"d52","user_id":"u_a","nickname":"甲","text":"排蓝良吧唧一百","status":"Rejected","detail":"商品 蓝良吧唧 数量 100 超出单次上限 99，请分开发送。"}
+{"source_sequence":53,"message_id":"d53","user_id":"u_b","nickname":"乙","text":"排燐音吧唧1","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":54,"message_id":"d54","user_id":"u_c","nickname":"丙","text":"排燐音吧唧1","status":"Applied","detail":"claim: badge_rinnex1[normal]"}
+{"source_sequence":60,"message_id":"d60","user_id":"u_k","nickname":"子","text":"/结团","status":"Unsupported","detail":"非管理员发送斜杠命令"}
+{"source_sequence":56,"message_id":"d56","user_id":"u_b","nickname":"乙","text":"排亚克力1","status":"Applied","detail":"claim: acrylic_rinnex1[normal]"}
+{"source_sequence":57,"message_id":"d57","user_id":"u_b","nickname":"乙","text":"排立牌1","status":"Applied","detail":"claim: stand_ranx1[normal]"}
+{"source_sequence":58,"message_id":"d58","user_id":"u_admin","nickname":"群主","text":"/锁位 燐音吧唧 box1","status":"Unsupported","detail":"管理员锁位/修正暂未进入模拟重放"}
+{"source_sequence":59,"message_id":"d59","user_id":"u_admin","nickname":"群主","text":"/结团","status":"Applied","detail":"结团"}
+{"source_sequence":61,"message_id":"d61","user_id":"u_k","nickname":"子","text":"/加商品 测试 100 5","status":"Unsupported","detail":"非管理员发送斜杠命令"}
+{"source_sequence":62,"message_id":"d62","user_id":"u_a","nickname":"甲","text":"/开团 测试团","status":"Unsupported","detail":"非管理员发送斜杠命令"}
+{"source_sequence":63,"message_id":"d63","user_id":"u_d","nickname":"丁","text":"排燐音吧唧1，蓝良吧唧1，燐音亚克力1，蓝良立牌单领1，包尾燐音吧唧2，包盒蓝良吧唧，购物金优先排燐音吧唧1，撤销蓝良吧唧1，燐音亚克力2，蓝良2，立牌1，燐音吧唧3，亚克力1，蓝良吧唧2，燐音吧唧4，蓝良立牌2，燐音亚克力3，包尾蓝良吧唧3，包盒燐音吧唧，排燐音吧唧5 这是一条非常长的消息用来测试解析器对超长文本的截断与处理能力同时包含多个商品与多种话术以及撤销意图等复杂语义组合最终观察系统是否能够正确切分并识别其中全部有效商品与意图","status":"Rejected","detail":"团已结团，拒绝排谷"}
+{"source_sequence":64,"message_id":"d64","user_id":"u_e","nickname":"戊","text":"排蓝良吧唧1（附言：我昨天说的那个立牌还算数吗，另外帮我看看蓝良吧唧还有没有位置，如果没有就帮我排亚克力吧，谢谢！）","status":"Rejected","detail":"团已结团，拒绝排谷"}
+{"source_sequence":65,"message_id":"d65","user_id":"u_c","nickname":"丙","text":"排燐音亚克力2","status":"Rejected","detail":"团已结团，拒绝排谷"}
+{"source_sequence":66,"message_id":"d66","user_id":"u_f","nickname":"己","text":"排燐音吧唧1","status":"Rejected","detail":"团已结团，拒绝排谷"}
+{"source_sequence":67,"message_id":"d67","user_id":"u_g","nickname":"庚","text":"排蓝良吧唧1","status":"Rejected","detail":"团已结团，拒绝排谷"}
+{"source_sequence":68,"message_id":"d68","user_id":"u_h","nickname":"辛","text":"排燐音吧唧1","status":"Rejected","detail":"团已结团，拒绝排谷"}

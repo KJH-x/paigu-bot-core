@@ -6,7 +6,7 @@ pub const SYSTEM_PROMPT: &str = r#"你是排谷系统的自然语言解析器。
 若不确定，填写 ambiguous_parts。
 输出必须是合法 JSON，不要包含任何解释文字。"#;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ParsedIntent {
     Claim,
     Cancel,
@@ -49,6 +49,12 @@ pub struct ParsedClaimItem {
     pub is_proxy_card: Option<bool>,
     pub slot_policy: Option<String>,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub resolved_item_id: Option<String>,
+    #[serde(default)]
+    pub resolved_variant_id: Option<String>,
+    #[serde(default)]
+    pub resolved_round_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +84,7 @@ pub enum ParsedAdminCommand {
 pub struct ResolveResult {
     pub round_id: Option<crate::domain::ids::RoundId>,
     pub item_id: Option<crate::domain::ids::ItemId>,
+    pub variant_id: Option<String>,
     pub candidates: Vec<(crate::domain::ids::RoundId, crate::domain::ids::ItemId, i32)>,
     pub resolved: bool,
     pub ambiguity: Option<String>,
@@ -88,6 +95,7 @@ impl ResolveResult {
         Self {
             round_id: None,
             item_id: None,
+            variant_id: None,
             candidates: vec![],
             resolved: false,
             ambiguity: None,
@@ -98,6 +106,22 @@ impl ResolveResult {
         Self {
             round_id: Some(round_id),
             item_id: Some(item_id),
+            variant_id: None,
+            candidates: vec![],
+            resolved: true,
+            ambiguity: None,
+        }
+    }
+
+    pub fn resolved_variant(
+        round_id: crate::domain::ids::RoundId,
+        item_id: crate::domain::ids::ItemId,
+        variant_id: String,
+    ) -> Self {
+        Self {
+            round_id: Some(round_id),
+            item_id: Some(item_id),
+            variant_id: Some(variant_id),
             candidates: vec![],
             resolved: true,
             ambiguity: None,
@@ -108,6 +132,7 @@ impl ResolveResult {
         Self {
             round_id: None,
             item_id: None,
+            variant_id: None,
             candidates,
             resolved: false,
             ambiguity: Some(msg),

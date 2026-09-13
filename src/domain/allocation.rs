@@ -105,6 +105,8 @@ pub struct ItemAllocation {
     pub item_id: ItemId,
     pub item_name: String,
     pub kind: String,
+    #[serde(default)]
+    pub variant_id: Option<String>,
     pub boxes: Vec<BoxAllocation>,
     pub singles: Vec<SingleAllocation>,
     pub waiting: Vec<WaitingLine>,
