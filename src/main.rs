@@ -14,6 +14,8 @@ mod simulation;
 mod audit;
 mod storage;
 mod ws;
+mod gateway;
+mod llm;
 #[cfg(test)]
 mod tests;
 
