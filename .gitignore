@@ -33,6 +33,9 @@ sample*.json
 /viewer/sample_replay.json
 cookies/
 *.log
+# 运行时配置与数据（本地）
+/config/
+/data/
 
 # ---------- 开发文档（不入库） ----------
 ARCHITECTURE.md

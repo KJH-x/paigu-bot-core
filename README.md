@@ -2,6 +2,10 @@
 
 QQ 机器人拼团排谷系统后端，基于事件溯源架构，使用 LLM 解析自然语言消息，确定性引擎执行业务逻辑。
 
+> **进行中：真实接入 + 本地处理 + 远程展示**
+> 反向 WS 接入 NapCat（`192.168.100.2:9801`）→ 白名单/丢弃 → LLM 清理与抽取 → 权限（时段/预存）→ 确定性排谷 → 快照发布；本地 HTTP API `:21081`；展示页（排位表 + 消息流 + who-whats + 状态，5s 增量不打断）部署 Cloudflare。
+> 必读文档：**[docs/POLICY.md](./docs/POLICY.md)**（业务政策）· **[docs/DESIGN.md](./docs/DESIGN.md)**（程序路线）· **[docs/TASKS.md](./docs/TASKS.md)**（任务拆分）· **[docs/AGENT-RULES.md](./docs/AGENT-RULES.md)**（协作规则）。
+
 ## 功能
 
 - 自然语言排谷/撤销/修改 → LLM 解析 → 结构化事件
@@ -202,9 +206,16 @@ HTTP API (port 8080) ←─── 前端/管理后台
 
 ## 文档
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - 完整系统架构与设计文档
-- [REPLAY_SIMULATION_ADDENDUM.md](./REPLAY_SIMULATION_ADDENDUM.md) - 事件重放、图形化审计与模拟排谷补充设计
-- [LOGIC_CHAINS.md](./LOGIC_CHAINS.md) - 全功能逻辑链条追踪（触发→事件流转→模块→结果）
+**现行（必读）**
+- [docs/POLICY.md](./docs/POLICY.md) - 业务政策（接入/白名单/清洗/LLM 流水线/权限时段/展示/成员/热载）
+- [docs/DESIGN.md](./docs/DESIGN.md) - 程序设计路线（架构/模块/接口/配置/路由/部署）
+- [docs/TASKS.md](./docs/TASKS.md) - 任务拆分与文件所有权
+- [docs/AGENT-RULES.md](./docs/AGENT-RULES.md) - 子 agent 协作规则
+
+**历史设计（gitignored，本地保留）**
+- `ARCHITECTURE.md` - 完整系统架构与设计文档
+- `REPLAY_SIMULATION_ADDENDUM.md` - 事件重放、图形化审计与模拟排谷补充设计
+- `LOGIC_CHAINS.md` - 全功能逻辑链条追踪（触发→事件流转→模块→结果）
 
 ## License
 

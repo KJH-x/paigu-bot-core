@@ -1,0 +1,87 @@
+{
+  "revision": 1,
+  "gateway": {
+    "bind": "192.168.100.2:9801",
+    "require_token": false,
+    "whitelist_groups": ["720675572"],
+    "heartbeat_secs": 15,
+    "reply_enabled": false,
+    "allowed_actions": [
+      "get_group_member_list",
+      "get_group_info",
+      "get_group_list",
+      "get_login_info"
+    ]
+  },
+  "llm": {
+    "enabled": true,
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "timeout_secs": 60,
+    "max_tokens": 2048,
+    "temperature": 0.1,
+    "fallback_to_rules": true,
+    "prompt_template": "你是排谷消息解析器。只抽取结构化信息，不计算价格、不排序、不生成回复。\n输入：QQ 群消息文本、当前商品目录、预存(购物金)用户、时段政策。\n输出：严格 JSON：{\"intent\":\"claim|cancel|admin|unknown\",\"items\":[{\"item\":\"商品名\",\"variant\":\"变体名\",\"quantity\":1,\"claim_type\":\"split|single\",\"slot_policy\":\"normal|tail|fullbox\"}],\"confidence\":0.0,\"ambiguous_parts\":[]}。\n非排谷消息（闲聊/表情/图片/无关）→ intent=unknown。\n商品歧义 → 填入 ambiguous_parts。\n中文口语别名：通行证→通行认证SP-月行水上、特典/特典卡组→特典卡组-校园凭证、一套→整套、人事部简历→人事部简历SP-月行水上、风尚速递→风尚速递SP-月行水上。"
+  },
+  "round": {
+    "round_id": "月行水上",
+    "title": "月行水上",
+    "group_id": "720675572",
+    "priority_users": ["kosame", "SIM", "芜笙", "林恩克里斯蒂安"],
+    "priority_window": { "start_ms": 1788782400000, "end_ms": 1788789600000 },
+    "items": [
+      {
+        "item_id": "pass_sp",
+        "name": "通行认证SP-月行水上",
+        "kind": "split",
+        "aliases": ["通行证", "通行认证SP", "通行认证"],
+        "variants": [
+          { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
+          { "variant_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
+          { "variant_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
+          { "variant_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] }
+        ]
+      },
+      {
+        "item_id": "hr_resume",
+        "name": "人事部简历SP-月行水上",
+        "kind": "split",
+        "aliases": ["人事部简历", "人事部简历SP"],
+        "variants": [
+          { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
+          { "variant_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
+          { "variant_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
+          { "variant_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] }
+        ]
+      },
+      {
+        "item_id": "fashion",
+        "name": "风尚速递SP-月行水上",
+        "kind": "split",
+        "aliases": ["风尚速递", "风尚速递SP"],
+        "variants": [
+          { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
+          { "variant_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
+          { "variant_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
+          { "variant_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] }
+        ]
+      },
+      {
+        "item_id": "gift_card",
+        "name": "特典卡组-校园凭证",
+        "kind": "split",
+        "aliases": ["特典卡组", "特典", "校园凭证"],
+        "variants": [
+          { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
+          { "variant_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] },
+          { "variant_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
+          { "variant_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
+          { "variant_id": "v_zt", "name": "整套", "capacity": null, "aliases": ["一套"] }
+        ]
+      }
+    ]
+  },
+  "display": { "refresh_ms": 5000, "data_source": "local", "remote_base_url": "" },
+  "members": { "group_id": "720675572", "cache_path": "data/members.json", "daily_pull_at": "19:00" }
+}
