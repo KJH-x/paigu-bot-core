@@ -8,6 +8,7 @@ pub mod display_routes;
 pub mod member_routes;
 pub mod message_routes;
 pub mod replay_routes;
+pub mod settlement_routes;
 pub mod sim_routes;
 
 use std::net::SocketAddr;
@@ -85,6 +86,7 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
     let admin_page = ServeFile::new(web.join("admin.html"));
     let sim_page = ServeFile::new(web.join("sim.html"));
     let replay_page = ServeFile::new(web.join("replay.html"));
+    let settlement_page = ServeFile::new(web.join("settlement.html"));
 
     Router::new()
         .merge(config_routes::routes())
@@ -94,10 +96,12 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .merge(member_routes::routes())
         .merge(message_routes::routes())
         .merge(replay_routes::routes())
+        .merge(settlement_routes::routes())
         .route("/", get_service(display_page))
         .route("/admin", get_service(admin_page))
         .route("/sim", get_service(sim_page))
         .route("/replay", get_service(replay_page))
+        .route("/settlement", get_service(settlement_page))
         .nest_service("/web", ServeDir::new(web.clone()))
         .fallback_service(ServeDir::new(web))
         .with_state(state)
