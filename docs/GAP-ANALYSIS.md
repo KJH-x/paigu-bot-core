@@ -49,6 +49,22 @@
 - `src/snapshot_bundle/mod.rs`：`SnapshotBundle` 结构。
 各 agent 在其上实现。
 
+## 四·补、完成状态（2026-09-14）
+
+| 任务 | 状态 | 交付 |
+|---|---|---|
+| T1 基础设施 | ✅ | `JsonlMessageStore`（`data/messages/<round>.jsonl`）；成员白名单；`RoundPhase` 权限矩阵；settings 增 `phases`/`whitelist_members`/`item.class`；每条入站（含 Drop/Reject）落日志 |
+| T3 全真模拟 | ✅ | `web/sim` 改为**真 WS 客户端**（OneBot11 事件）；`scripts/sim-run.mjs`（`--speed`/`--dry-run`）；`scripts/sim-record.mjs`（`--record`/`--replay`） |
+| T7 接口文档 | ✅ | `docs/INTERFACES.md`（模块/接口/契约/C1–C7 映射/解耦约束） |
+| T4 结算引擎 v2 | ✅ | `src/settlement/**`：调价两模式、折扣份数/首 n 包/A-B、特典多档单包叠加、折价→减均（最大余数）；`evaluate`/`order_table_from_allocation` |
+| T2 重放/快照/编辑 | ✅ | `replay(messages, overrides)` + diff；`SnapshotBundle` 导出/导入；`/api/messages` 增改删；`/api/replay/*` 实现 |
+| T5 planner | ✅ | `src/planner/**`：DFS/回溯；`GiftMax`/`DiscountMax` 两策略；剪枝与确定性截断；`manual_evaluate` |
+| T6 结算 UI | ✅ | `web/settlement.*`：配置表单/试算表/**拖拽 item→包**/两策略并排；`/api/settlement/*` + `/settlement` 路由 |
+
+**验证**：`cargo test` **129 passed**、`cargo build` 0 warning；`real-samples` ALL PASS；`real-xlsx` ALL PASS；`node tests/e2e/sim.mjs` **11/11**；路由 `/` `/admin` `/sim` `/replay` `/settlement` `/api/*` 全 200；跟踪文件真实昵称 **0 命中**。
+
+**遗留/待确认**：① `PlanRequest.prices` 需 UI 传入（否则单价 0，手填）；② `time_budget_ms` 超时结果非确定（测试用 `max_iters`）；③ zip 快照需 A0 加依赖（当前目录式）；④ 远程 Cloudflare 展示未接线；⑤ REQUIREMENTS §4 公式为**建议口径**，待用户定稿。
+
 ## 五、验收口径
 - C1：白名单外成员消息被 Drop 且落日志；白名单成员落库可查。
 - C2：同日志 + 不同 overrides → 结果差异可复现、可 diff。
