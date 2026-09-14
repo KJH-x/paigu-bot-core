@@ -100,20 +100,12 @@ node tests/e2e/sim.mjs      # 端到端测试
 
 **遗留/后续**：真实 NapCat 接入后 `reply_enabled=false`（不回复）——需用户确认后再开；成员拉取依赖 NapCat 已连接；Cloudflare 远程展示（R2 发布 + Pages）尚未接线。
 
-## 阻塞 / 待办（脱敏任务）
+## 整理阶段小结（2026-09-14，已结清）
 
-- ✅ **已由 A0 处理**：`src/llm/pipeline.rs` 测试改用占位优先用户 `prio_user`；`src/gateway/onebot.rs` 昵称测试改用占位名（`甲/乙/丙/丁/戊`）；`agent-d-adversarial/*` 与 `real-xlsx/README.md` 的真实昵称 → 占位。
-- **D6 归属**：`viewer/README.md`、`viewer/viewer.js` 仍含真实昵称（示例数据），合并进 `web/` 时须脱敏或删除。
-- **真实名单策略**：真实群成员名单只放 gitignored `data/members.seed.json`；入库仅 `data/members.example.json`（占位）。
-- **校验**：`git grep` 真实昵称在**跟踪文件**中应为 0 命中（`git grep -F "？？？"` 等）。
-
-## D2 · 安全红线 + 去重（2026-09-14）
-
-已完成（`src/llm/**`、`src/gateway/**`、`src/settings.rs`、`src/engine/replay.rs`）：
-- `reply_enabled` 强制：`Gateway::send_action` 对 `send_*` 仅当 `reply_enabled==true` **且** `action ∈ allowed_actions` 时放行，否则 `Err` + `tracing::warn!`（默认 `false` → 绝不发送）。
-- 删除死配置 `gateway.require_token`（`src/settings.rs` + `config.example.json`）。
-- 去重：昵称清洗 → `gateway::onebot::clean_nickname`（删 `pipeline::sanitize_identity/fullwidth_to_half`）；时段/预存 → `settings::{in_priority_window,is_priority_user}`（`simulation/verifier.rs` 复用）；重放 → `engine::replay::rebuild_allocation_snapshot`；`describe_event` → `engine::replay::describe_event`；`truncate` → `llm::truncate`。
-
-**待同步（非本 agent 范围）**：
-- **D5 文档**：`docs/DESIGN.md` §3 删除 `gateway.require_token`；`docs/FUNCTIONAL.md` §4.1/§10 的 `require_token` 行与 §10.1「reply_enabled 无发送路径」需更新（现 `send_*` 在 `reply_enabled=true` 且白名单时放行）。
-- **D4/A4 前端**：`web/admin.html`、`web/admin.js` 的 `gw-require-token` 控件已无对应配置字段（GET 不再返回；PUT 多余字段被 serde 忽略），应移除。
+- ✅ **脱敏**：`pipeline.rs`/`onebot.rs` 测试改占位名；`agent-d-adversarial/*`、`real-xlsx/README.md` 真实昵称 → 占位；`viewer/` 已删除（合并进 `web/replay`）。
+- ✅ **真实名单策略**：真实群成员名单只放 gitignored `data/members.seed.json`；入库仅 `data/members.example.json`（占位）。
+- ✅ **D2 安全 + 去重**：`reply_enabled` 强制（`send_*` 仅当开启且白名单才放行，默认 false 绝不发送）；删除 `require_token`；昵称/时段/重放/`describe_event`/`truncate` 收敛到单一真源。
+- ✅ **D3 死码/旧栈**：删除确认死代码；旧栈加 `#![allow(dead_code)]` + `//! DEPRECATED` 隔离；`cargo build` warning **142 → 0**；测试 **52 → 63**。
+- ✅ **D5 文档**：`README.md` 重写；新增 `docs/README.md`、`docs/MODULES.md`；`DESIGN`/`POLICY`/`FUNCTIONAL` 同步（删 `require_token`、`reply_enabled` 已强制、viewer→`web/replay`、`/replay` 路由、测试数）。
+- ✅ **D4/A4 前端**：`web/admin.html|js` 移除 `require_token` 控件。
+- **校验**：`git grep` 真实昵称在跟踪文件 **0 命中**。

@@ -65,7 +65,6 @@
     var gw = cfg.gateway || {};
     setVal('gw-bind', gw.bind);
     setVal('gw-heartbeat', gw.heartbeat_secs);
-    setChecked('gw-require-token', gw.require_token);
     setChecked('gw-reply', gw.reply_enabled);
     setVal('gw-whitelist', joinList(gw.whitelist_groups));
     setVal('gw-actions', joinList(gw.allowed_actions));
@@ -232,7 +231,6 @@
     cfg.gateway = cfg.gateway || {};
     cfg.gateway.bind = val('gw-bind');
     cfg.gateway.heartbeat_secs = P.num(val('gw-heartbeat'), cfg.gateway.heartbeat_secs);
-    cfg.gateway.require_token = checked('gw-require-token');
     cfg.gateway.reply_enabled = checked('gw-reply');
     cfg.gateway.whitelist_groups = splitList(val('gw-whitelist'));
     cfg.gateway.allowed_actions = splitList(val('gw-actions'));
@@ -351,7 +349,7 @@
       renderMembers(list);
     }).catch(function (err) {
       renderMembers(P.embeddedMembers());
-      banner('成员列表加载失败：' + P.errorText(err) + '。已显示内置子集（POLICY §8）。', false);
+      banner('成员列表加载失败：' + P.errorText(err) + '。已显示内置子集（DESIGN §8）。', false);
     });
   }
 

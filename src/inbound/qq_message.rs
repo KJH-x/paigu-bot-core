@@ -13,12 +13,4 @@ pub struct IncomingQqMessage {
     pub attachments: Vec<serde_json::Value>,
 }
 
-impl IncomingQqMessage {
-    pub fn is_admin_command_candidate(&self) -> bool {
-        self.is_admin && (self.text.starts_with('/') || self.text.starts_with('#'))
-    }
 
-    pub fn is_admin(&self) -> bool {
-        self.is_admin
-    }
-}

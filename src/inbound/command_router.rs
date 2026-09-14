@@ -19,17 +19,6 @@ impl BotReply {
         BotReply::Text(s.into())
     }
 
-    pub fn need_confirm(text: impl Into<String>, token: impl Into<String>) -> Self {
-        BotReply::NeedConfirm {
-            text: text.into(),
-            confirm_token: token.into(),
-        }
-    }
-
-    pub fn is_silent(&self) -> bool {
-        matches!(self, BotReply::Silent)
-    }
-
     pub fn text_content(&self) -> Option<&str> {
         match self {
             BotReply::Text(t) => Some(t.as_str()),

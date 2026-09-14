@@ -47,12 +47,10 @@ struct State {
 
 struct MessageRecord {
     seq: i64,
-    user_id: String,
     display: String,
     text: String,
     status: String,
     detail: String,
-    timestamp_ms: i64,
 }
 
 impl Pipeline {
@@ -85,12 +83,10 @@ impl Pipeline {
                 let seq = state.seq;
                 state.messages.push(MessageRecord {
                     seq,
-                    user_id: ev.user_id.clone(),
                     display: display.clone(),
                     text: ev.text.clone(),
                     status: "Duplicate".to_string(),
                     detail: detail.to_string(),
-                    timestamp_ms: ev.timestamp_ms,
                 });
                 return PipelineOutcome {
                     status: "Duplicate".to_string(),
@@ -296,12 +292,10 @@ impl Pipeline {
             state.snapshot = Some(snapshot);
             state.messages.push(MessageRecord {
                 seq,
-                user_id: ev.user_id.clone(),
                 display: display.clone(),
                 text: ev.text.clone(),
                 status: "Applied".to_string(),
                 detail: detail.clone(),
-                timestamp_ms: ev.timestamp_ms,
             });
             (version, snapshot_value, format!("已记录，当前版本 #{}", version))
         };
@@ -391,12 +385,10 @@ impl Pipeline {
         let mut state = self.state.lock().await;
         state.messages.push(MessageRecord {
             seq,
-            user_id: ev.user_id.clone(),
             display: display.to_string(),
             text: ev.text.clone(),
             status: status.to_string(),
             detail: detail.to_string(),
-            timestamp_ms: ev.timestamp_ms,
         });
         PipelineOutcome {
             status: status.to_string(),
@@ -684,7 +676,6 @@ mod tests {
             text: text.to_string(),
             timestamp_ms,
             is_admin: false,
-            raw: Value::Null,
         }
     }
 

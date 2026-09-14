@@ -1,3 +1,6 @@
+//! DEPRECATED: 旧栈（Postgres/R2/旧 WS），仅 `legacy` 路径使用，勿新增依赖。
+#![allow(dead_code)]
+
 pub mod message_service;
 pub mod round_service;
 pub mod admin_service;

@@ -21,12 +21,12 @@
         axum HTTP API :21081 ─┼─ /api/config /api/board /api/display /api/messages
                               ├─ /api/sim/*  (模拟器，仅本地)
                               ├─ /api/members(/refresh)
-                              └─ /web/* 静态页 (display/admin/sim)
+                              └─ /web/* 静态页 (display/admin/sim/replay)
                               ▼
         Cloudflare: R2(快照/回放) + Pages(静态展示页)
 ```
 
-**运行模式**：本地一个进程同时跑 Gateway + HTTP API + Pipeline；`cargo run -- serve-all`（或默认 `run`）。
+**运行模式**：本地一个进程同时跑 Gateway + HTTP API + Pipeline；`cargo run -- run`（默认）。
 保留既有 `simulate`（离线重放验证）与 `serve`（旧聊天服务器）子命令，但新界面统一走 HTTP API。
 
 ## 2. 目录与文件所有权
@@ -35,12 +35,14 @@
 |---|---|---|
 | `src/gateway/` | OneBot 协议、路由(白名单/drop)、WS server、动作回包 | **A1** |
 | `src/llm/` | OpenAI 兼容客户端、排谷流水线 | **A2** |
-| `src/config.rs` | `AppConfig` + 热载存储(revision) | **A2** |
-| `src/api/` | axum 路由：config/board/display/messages/sim/members/replay | **A3** |
-| `web/` | 静态页 display/admin/sim（vanilla，可部署） | **A4** |
-| `tests/` | Node `.mjs` Playwright e2e + Rust 集成测试 | **A5** |
+| `src/settings.rs` | `AppConfig` + `ConfigStore` 热载存储(revision) | **A2** |
+| `src/bus.rs` | 冻结接口：`IncomingEvent` / `EventSink` / `PipelineOutcome` | **A0** |
+| `src/api/` | axum 路由：config/board/display/messages/sim/members/gateway + 静态页 | **A3** |
+| `web/` | 静态页 display/admin/sim/replay（vanilla，可部署；`viewer/` 已合并至此） | **A4** |
+| `tests/e2e/` | Node `.mjs` Playwright e2e | **A5** |
 | `src/main.rs`、`src/app_state.rs`、各 `mod.rs` | 装配与接线 | **A0(主)** |
 | `src/engine/**`、`src/replay/**`、`src/parser/**`、`src/simulation/**` | 既有引擎（改动需 A0 同意） | 主 |
+| `src/config.rs`、`src/inbound/**`、`src/ws/**`、`src/services/**`、`src/repo/**`、`src/api/routes.rs` | **旧栈（已弃用）**：仅 `main.rs` 未识别子命令回退使用 | 主 |
 
 > 子 agent **不得**改他人归属文件；需要跨模块改动时在 `docs/TASKS.md` 记录并等 A0 处理。
 
@@ -51,10 +53,9 @@
   "revision": 1,
   "gateway": {
     "bind": "192.168.100.2:9801",
-    "require_token": false,
     "whitelist_groups": ["720675572"],
     "heartbeat_secs": 15,
-    "reply_enabled": false,          // 真实群：禁止发消息
+    "reply_enabled": false,          // 默认 false：绝不发送；send_* 仅当 true 且在白名单时放行（已强制）
     "allowed_actions": ["get_group_member_list","get_group_info","get_group_list","get_login_info"]
   },
   "llm": {
@@ -116,8 +117,9 @@
 | GET | `/api/members` | 成员列表（`data/members.seed.json` → `data/members.example.json` → 空） |
 | POST | `/api/members/refresh` | 经 Gateway 拉取 `get_group_member_list` |
 | GET | `/api/gateway/status` | WS 连接状态 |
-| GET | `/api/replay/*` | 既有回放桩，接线 |
-| GET | `/` `/admin` `/sim` | 静态页 |
+| GET | `/api/replay`、`/api/replay/*` | 桩，恒 `501 {"error":"not_implemented"}` |
+| GET | `/` `/admin` `/sim` `/replay` | 静态页（display / admin / sim / replay） |
+| GET | `/web/*` | 静态文件；未命中时 `fallback_service` 回退到目录 `web/` |
 
 CORS：本地开发允许 `http://127.0.0.1:*`；远程展示页读 R2，不经此 API。
 
@@ -160,4 +162,4 @@ CORS：本地开发允许 `http://127.0.0.1:*`；远程展示页读 R2，不经�
 
 - Rust：路由(白名单/drop)、配置 revision/热载、流水线(规则/LLM mock)、权限时段。
 - Node `.mjs` Playwright：驱动 `/sim` 页面 → 选身份/设偏移/发消息 → 断言排位与状态；覆盖时段拒绝与预存优先。
-- 回归：既有 `cargo test`（10）与 `simulation-corpus` 脚本必须保持通过。
+- 回归：既有 `cargo test`（52）与 `simulation-corpus` 脚本必须保持通过。

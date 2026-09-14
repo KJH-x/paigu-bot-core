@@ -63,7 +63,6 @@ async fn sim_message(State(state): State<Arc<ApiState>>, Json(body): Json<SimMes
         text: body.text,
         timestamp_ms: now_ms + body.offset_ms,
         is_admin: body.is_admin,
-        raw: Value::Null,
     };
 
     let outcome = state.pipeline.process(event).await;

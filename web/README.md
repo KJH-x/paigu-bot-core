@@ -31,7 +31,7 @@ python -m http.server 8098
 cargo run
 ```
 
-API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」横幅并每 5s 重试；管理页提示无法载入配置；模拟器提示 API 不可用且成员回退内置子集（POLICY §8）。
+API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」横幅并每 5s 重试；管理页提示无法载入配置；模拟器提示 API 不可用且成员回退内置子集（DESIGN §8）。
 
 ## 配置覆盖（优先级从高到低）
 
@@ -59,7 +59,7 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 
 ## 模拟器
 
-- 身份来自 `GET /api/members`（真实群成员子集，失败回退 POLICY §8 内置子集）；支持「＋ 新建/自定义身份」（`user_id/nickname/is_admin/是否预存`）。
+- 身份来自 `GET /api/members`（真实群成员子集，失败回退 DESIGN §8 内置子集）；支持「＋ 新建/自定义身份」（`user_id/nickname/is_admin/是否预存`）。
 - 时间偏移格式 `±DD HH MM SS`（可省略高位：`MM SS`、`SS` 亦可）；只作为该消息的 `offset_ms` 提交，服务器「现在」不变（POLICY §6）。
 - 发送 `POST /api/sim/message`，转录记录 `outcome` 与 `version`，并即时刷新排位；`Ctrl/Cmd+Enter` 快捷发送。
 - 「重置模拟会话」= `POST /api/sim/reset`。

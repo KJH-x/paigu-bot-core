@@ -13,8 +13,6 @@ mod api;
 mod publisher;
 mod replay;
 mod simulation;
-mod audit;
-mod storage;
 mod ws;
 mod gateway;
 mod llm;
@@ -46,6 +44,11 @@ async fn main() -> Result<()> {
     if args.len() <= 1 || args[1] == "run" {
         return run_gateway_stack().await;
     }
+
+    tracing::warn!(
+        "旧栈已弃用：未识别的子命令 `{}` 落入旧栈（Postgres/旧 WS），请使用 `run`/`simulate`/`serve`",
+        args[1]
+    );
 
     let config = config::Config::from_env()?;
     let pool = sqlx::postgres::PgPoolOptions::new()

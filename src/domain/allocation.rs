@@ -68,6 +68,7 @@ impl SlotAllocation {
             && self.segment_id.is_none()
     }
 
+    #[cfg(test)]
     pub fn user_id_str(&self) -> Option<&str> {
         self.user_id.as_ref().map(|u| u.0.as_str())
     }
@@ -77,27 +78,6 @@ impl SlotAllocation {
 pub struct BoxAllocation {
     pub box_index: u32,
     pub slots: Vec<SlotAllocation>,
-}
-
-impl BoxAllocation {
-    pub fn new(box_index: u32) -> Self {
-        Self {
-            box_index,
-            slots: Vec::new(),
-        }
-    }
-
-    pub fn slot(&self, index: usize) -> Option<&SlotAllocation> {
-        self.slots.get(index)
-    }
-
-    pub fn slot_mut(&mut self, index: usize) -> Option<&mut SlotAllocation> {
-        self.slots.get_mut(index)
-    }
-
-    pub fn first_empty_normal_slot(&self) -> Option<usize> {
-        self.slots.iter().position(|s| s.is_fillable())
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,23 +93,9 @@ pub struct ItemAllocation {
 }
 
 impl ItemAllocation {
+    #[cfg(test)]
     pub fn box_at(&self, index: u32) -> Option<&BoxAllocation> {
         self.boxes.iter().find(|b| b.box_index == index)
-    }
-
-    pub fn box_at_mut(&mut self, index: u32) -> Option<&mut BoxAllocation> {
-        self.boxes.iter_mut().find(|b| b.box_index == index)
-    }
-
-    pub fn get_or_create_box(&mut self, box_index: u32) -> &mut BoxAllocation {
-        let pos = self.boxes.iter().position(|b| b.box_index == box_index);
-        if let Some(pos) = pos {
-            &mut self.boxes[pos]
-        } else {
-            let new_box = BoxAllocation::new(box_index);
-            self.boxes.push(new_box);
-            self.boxes.last_mut().unwrap()
-        }
     }
 }
 

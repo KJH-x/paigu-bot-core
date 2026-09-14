@@ -1,6 +1,9 @@
+//! DEPRECATED: 旧栈（Postgres/R2/旧 WS），仅 `legacy` 路径使用，勿新增依赖。
+#![allow(dead_code)]
+
 use std::sync::Arc;
 use std::net::SocketAddr;
-use tokio::sync::{watch, mpsc, Mutex};
+use tokio::sync::{watch, Mutex};
 use tokio_tungstenite::tungstenite::{
     Message as WsMessage,
     handshake::server::{Request, Response, ErrorResponse},
@@ -13,7 +16,6 @@ use chrono::Utc;
 use crate::config::WsServerConfig;
 use crate::inbound::qq_message::IncomingQqMessage;
 use crate::services::message_service::MessageService;
-use crate::error::AppResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

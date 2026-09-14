@@ -234,7 +234,7 @@ pub fn decide_route(ev: &RouteMessageEvent, policy: &RoutePolicy) -> RouteKind {
     RouteKind::Message
 }
 
-pub fn to_incoming_event(ev: &RouteMessageEvent, raw: Value) -> IncomingEvent {
+pub fn to_incoming_event(ev: &RouteMessageEvent) -> IncomingEvent {
     let id = parse_identity(ev);
     let group_id = group_id_string(ev).unwrap_or_default();
     let message_id = value_to_string(ev.message_id.as_ref()).unwrap_or_default();
@@ -251,7 +251,6 @@ pub fn to_incoming_event(ev: &RouteMessageEvent, raw: Value) -> IncomingEvent {
         text,
         timestamp_ms,
         is_admin: id.is_admin,
-        raw,
     }
 }
 
@@ -387,7 +386,7 @@ mod tests {
     #[test]
     fn to_incoming_event_maps_fields() {
         let ev = group_event("720675572", "结城理 通行证");
-        let incoming = to_incoming_event(&ev, json!({ "post_type": "message" }));
+        let incoming = to_incoming_event(&ev);
         assert_eq!(incoming.group_id, "720675572");
         assert_eq!(incoming.user_id, "10001");
         assert_eq!(incoming.message_id, "42");

@@ -1,234 +1,126 @@
 # paigu-bot-core
 
-QQ 机器人拼团排谷系统后端，基于事件溯源架构，使用 LLM 解析自然语言消息，确定性引擎执行业务逻辑。
+QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。本机接收 QQ 群消息，经 LLM 清理与抽取、确定性引擎排谷计算；排位快照与回放发布到 Cloudflare（R2 + Pages）供成员查看。
 
-> **进行中：真实接入 + 本地处理 + 远程展示**
-> 反向 WS 接入 NapCat（`192.168.100.2:9801`）→ 白名单/丢弃 → LLM 清理与抽取 → 权限（时段/预存）→ 确定性排谷 → 快照发布；本地 HTTP API `:21081`；展示页（排位表 + 消息流 + who-whats + 状态，5s 增量不打断）部署 Cloudflare。
-> 必读文档：**[docs/POLICY.md](./docs/POLICY.md)**（业务政策）· **[docs/DESIGN.md](./docs/DESIGN.md)**（程序路线）· **[docs/TASKS.md](./docs/TASKS.md)**（任务拆分）· **[docs/AGENT-RULES.md](./docs/AGENT-RULES.md)**（协作规则）。
+> 定位：**本地处理 + 远程展示**。本地（本机 `192.168.100.2`）负责接入、解析、排谷；远程只负责只读展示。
+> 安全红线：`reply_enabled` 默认 `false`，**绝不主动发消息给真实群**（只读拉取成员名单允许）。
+> 必读文档：**[docs/POLICY.md](./docs/POLICY.md)**（业务政策）· **[docs/DESIGN.md](./docs/DESIGN.md)**（程序路线）· **[docs/TASKS.md](./docs/TASKS.md)**（任务拆分）· **[docs/AGENT-RULES.md](./docs/AGENT-RULES.md)**（协作规则）· **[docs/FUNCTIONAL.md](./docs/FUNCTIONAL.md)**（功能描述）· **[docs/MODULES.md](./docs/MODULES.md)**（模块契约与文件所有权）。
 
-## 功能
+## 运行时架构
 
-- 自然语言排谷/撤销/修改 → LLM 解析 → 结构化事件
-- 确定性排队与锁位引擎（优先级、包尾端盒、锁列、单领）
-- 优惠分摊与赠品分配（满减、购物金、满赠，最大余数法）
-- 账单结算（整数分 MoneyCents，无浮点误差）
-- 反向 WebSocket 服务器接收 QQ 框架消息（port 3001）
-- HTTP API 管理后台（port 8080）
-- 快照发布至 Cloudflare R2 / 本地文件，前端静态页面实时展示
-- CSV 导出（商品汇总、用户账单、下单辅助表）
-- 全量事件重放与 StateDiff 差异追踪
-- 离线仿真（JSONL 消息队列文件 + ParseCache 确定性重放）
-- 审计链路追踪（DecisionTrace / AllocationTrace / ParseTrace）
-
-## 技术栈
-
-| 层面 | 技术 |
-| --- | --- |
-| 语言 | Rust 2021 |
-| 异步运行时 | tokio |
-| HTTP API | axum 0.7 |
-| WebSocket | tokio-tungstenite 0.26 (反向WS服务器) |
-| 数据库 | PostgreSQL + sqlx 0.8 |
-| 对象存储 | Cloudflare R2 (aws-sdk-s3) |
-| LLM | 抽象 trait，可接入任意 OpenAI 兼容客户端 |
-| 日志 | tracing + tracing-subscriber |
-
-## 快速开始
-
-### 环境要求
-
-- Rust 1.75+
-- PostgreSQL 15+
-
-### 配置
-
-通过环境变量配置：
-
-```env
-# 数据库
-DATABASE_URL=postgres://user:password@localhost/paigu_bot
-DATABASE_MAX_CONNECTIONS=10
-
-# LLM
-LLM_API_BASE=https://api.openai.com/v1
-LLM_API_KEY=sk-xxx
-LLM_MODEL=gpt-4
-LLM_MAX_TOKENS=2048
-LLM_TEMPERATURE=0.0
-LLM_CONFIDENCE_THRESHOLD=0.65
-
-# R2 对象存储
-R2_BUCKET=paigu-snapshots
-R2_ENDPOINT=https://xxx.r2.cloudflarestorage.com
-R2_ACCESS_KEY_ID=xxx
-R2_SECRET_ACCESS_KEY=xxx
-
-# HTTP API
-HOST=0.0.0.0
-PORT=8080
-
-# WebSocket 服务器
-WS_ENABLED=true
-WS_HOST=0.0.0.0
-WS_PORT=3001
-WS_TOKEN=your-bearer-token
-
-# 其他
-DEFAULT_TIMEZONE=Asia/Shanghai
+```text
+ NapCatQQ ──反向 WS──▶ Gateway 192.168.100.2:9801
+                           │ 白名单/drop · 心跳 · 只读动作回包（禁止 send_*）
+                           ▼
+                    IncomingEvent（src/bus.rs）
+                           ▼
+   Pipeline：幂等 → 规则快路径 → LLM 清理/抽取 → 校验 → 权限(时段/预存)
+                           ▼
+        内存事件列表 → rebuild(Replay + Allocation) → AllocationSnapshot
+                           ▼
+   axum HTTP API 127.0.0.1:21081
+     /api/config /api/board /api/display /api/messages /api/sim/* /api/members /api/gateway/status
+     / /admin /sim /replay 与 /web/* 静态页（fallback 目录 web/）
+                           ▼
+   浏览器展示页（local 数据源，5s 增量轮询）
+   ┈┈┈┈（尚未接线）┈┈┈▶ Cloudflare R2(快照/回放) + Pages(静态展示)
 ```
 
-### 启动
+- 单进程：Gateway + Pipeline + HTTP API 同进程运行；`run` 模式**不连接 PostgreSQL**。
+- 确定性优先：LLM 只做自然语言 → 结构化；排序/分配/结算由确定性引擎完成，任何 LLM 输出都经校验层。
+- 事件溯源：所有操作记录为不可变事件，最终状态由事件流确定性重放得到。
+- 当前为内存态：事件/快照不持久化，进程重启即丢失（`data/` 仅存成员缓存）。
+
+## 运行
 
 ```bash
-# 数据库迁移（手动执行 SQL 文件）
-psql -f migrations/001_initial_schema.sql
-
-# 编译运行
-cargo run --release
-# HTTP API   → http://0.0.0.0:8080
-# WebSocket  → ws://0.0.0.0:3001
-
-# 运行测试
-cargo test
-```
-
-### 本地运行（真实接入 + 展示，无需 PostgreSQL）
-
-```bash
+# 新栈（默认）：Gateway + Pipeline + HTTP API + 每日 19:00 成员拉取
 cargo run -- run
-# Gateway(反向WS) → ws://192.168.100.2:9801   （NapCat 连入；白名单群 720675572；默认不回复）
-# HTTP API          → http://127.0.0.1:21081
-#   展示页 /admin /sim  ·  config 热载 config/app.json  ·  每日 19:00 拉取群成员
-node tests/e2e/sim.mjs        # Playwright 端到端（4 用例）
+#   反向 WS   → ws://192.168.100.2:9801（NapCat 主动连入；白名单群 720675572；默认不回复）
+#   HTTP API  → http://127.0.0.1:21081
+#   展示 /  管理 /admin  模拟 /sim  重放 /replay
+
+# 端到端测试（Playwright，脚本自带 cargo build + 临时服务）
+node tests/e2e/sim.mjs
 ```
 
-> 配置：首次运行会从 `config.example.json` 生成 `config/app.json`（gitignored，热载）。
-> 环境变量：`PAIGU_CONFIG_PATH`、`PAIGU_HTTP_PORT`、`DEEPSEEK_API_KEY`（LLM）。
-
-### 离线模拟与本地聊天（无需 LLM / PostgreSQL）
+离线验证（旧引擎，保留）：
 
 ```bash
-# 确定性重放验证：读取商品表 + JSONL 消息队列，逐条解析→校验→重放，输出排结果与报告
+# 确定性重放：商品表 + JSONL 消息队列 → 排结果与报告
 cargo run -- simulate \
   --round-config simulation-corpus/agent-a-normal/round_config.json \
   --queue        simulation-corpus/agent-a-normal/queue.jsonl \
   --out          simulation-corpus/agent-a-normal/out
-# 产物: out/report.md（逐条状态+最终排结果+结算）、out/result.json、out/outcomes.jsonl
 
-# 本地聊天界面模拟：浏览器输入话术，实时查看排结果（内存事件存储，实时重放）
+# 本地聊天界面模拟（内存事件存储，实时重放）
 cargo run -- serve \
   --round-config simulation-corpus/agent-a-normal/round_config.json \
   --port 8090
-# 浏览器打开 http://127.0.0.1:8090
 ```
 
-`simulate` 使用确定性规则解析器（`ParserMode::RuleOnly`），不调用 LLM，可完全复现。
-话术覆盖：排/要/来/帮排、中文与阿拉伯数量、别名与错位语序、单领、代牌、包盒、包尾、撤销。
-Policy：**购物金优先排（时间验证 valid_from），非购物金延后排**；排序键 `priority_level DESC → effective_at ASC → sequence ASC`。
+> 任何未被识别的子命令会落入**旧栈回退**（需 `DATABASE_URL`，连接 PostgreSQL，已弃用），请勿使用。
 
-验证结论与缺陷清单见 [simulation-corpus/VERIFICATION.md](./simulation-corpus/VERIFICATION.md)。
-真实「事件重放」样本（变体/包尾/单领/调价）改造与逐项比对见 [simulation-corpus/real-samples/README.md](./simulation-corpus/real-samples/README.md)。
-真实结果表（xlsx）解析、**逐格一致**验证与变体感知引擎见 [simulation-corpus/real-xlsx/README.md](./simulation-corpus/real-xlsx/README.md)。
-真实群聊语料复现（两张 QQ 截图 + 商品价格归档 md）见 [simulation-corpus/real-chat/README.md](./simulation-corpus/real-chat/README.md)。
-本次改造的操作-时间表见 [simulation-corpus/CHANGELOG.md](./simulation-corpus/CHANGELOG.md)。
-重放步进查看器（表格 / **列视图** / Mermaid、双向高亮、样本切换）见 [viewer/README.md](./viewer/README.md)：`pwsh -File viewer\serve.ps1` → `http://127.0.0.1:8095/`。
-
-## 项目结构
+## 目录结构
 
 ```text
 src/
-├── domain/       # 核心数据类型（IDs, Money, Round, Item, Claim, Event, Allocation, Settlement, Snapshot, Discount, Gift）
-├── engine/       # 业务引擎（EventStore, Replay, Allocation, Settlement, Discount, Gift, Priority, Policy）
-├── parser/       # LLM 解析层（LlmClient, Prompt, ParsedEvent, AliasMatch, Validation, ParseCache）
-├── services/     # 编排层（Message, Round, Admin, Claim, Cancel, Snapshot, Settlement, Export）
-├── repo/         # 数据访问层 trait 定义（PostgreSQL impl）
-├── api/          # HTTP API 路由（Admin, Public, Webhook, Replay, Simulation）
-├── inbound/      # QQ 消息接入（IncomingQqMessage, Intake, CommandRouter）
-├── ws/           # 反向 WebSocket 服务器（接收 QQ 框架消息）
-├── replay/       # 重放引擎（ReplayEngine, StateDiff, TimelineSnapshot, ReplayReport）
-├── simulation/   # 离线仿真（QueueFile, SimulationRunner, Fixtures）
-├── audit/        # 审计追踪（DecisionTrace, AllocationTrace, ParseTrace, RuleTrace）
-├── storage/      # Timeline 持久化（TimelineStore）
-├── publisher/    # 快照发布（R2Publisher, LocalPublisher）
-└── tests/        # 集成测试（9 个测试覆盖核心引擎）
+├── main.rs          # 入口分派：run（新栈）/ simulate / serve；其余 → 旧栈回退
+├── bus.rs           # 冻结接口：IncomingEvent / EventSink / PipelineOutcome
+├── settings.rs      # AppConfig + ConfigStore（revision + 热载）
+├── app_state.rs     # 装配状态
+├── gateway/         # OneBot 反向 WS：路由(白名单/drop)、心跳、echo 动作回包、只读动作
+├── llm/             # DeepSeek 客户端 + 排谷流水线（规则快路径 + LLM 清理/抽取 + 回退）
+├── api/             # axum 路由：config/board/display/messages/sim/members/gateway + 静态页
+├── config.rs        # 旧栈配置（仅 legacy 回退使用，已弃用）
+├── engine/ replay/ parser/ simulation/ domain/ services/ repo/ publisher/ audit/ storage/ ...
+│                    # 既有确定性引擎与重放/仿真/审计（改动需 A0 同意）
+web/                 # 静态前端：display / admin / sim / replay + common.js
+docs/                # POLICY / DESIGN / TASKS / AGENT-RULES / FUNCTIONAL / MODULES + archive/
+tests/e2e/           # Node .mjs Playwright 端到端测试
+config.example.json  # 配置模板（首次运行据此生成 config/app.json）
+data/members.example.json  # 占位成员（真实名单不入库）
+simulation-corpus/   # 回归语料（只读资产，不得修改）
 ```
 
-## 核心架构
+## 配置与热载
 
-```text
-QQ框架 ──WS──▶ ws_server (port 3001)
-                    │
-                    ▼
-          IncomingQqMessage
-                    │
-          ┌─────────┴──────────┐
-          │  command_router    │
-          │  classify_message  │
-          └─────────┬──────────┘
-                    │
-          ┌─────────┴──────────┐
-          │  MessageService    │
-          │  (幂等校验+状态检查)  │
-          └─────────┬──────────┘
-                    │
-     ┌──────────────┼──────────────┐
-     ▼              ▼              ▼
-  Parser        EventStore      Replay
-  (LLM解析)     (事件写入)      (事件重放)
-                    │
-     ┌──────────────┼──────────────┐
-     ▼              ▼              ▼
-  Allocation     Settlement     Snapshot
-  Engine         Engine         Publisher
-  (排队分配)     (结算分摊)     (R2发布)
+- 配置文件：`config/app.json`（gitignored）。首次运行若不存在，会由内嵌的 `config.example.json` 生成。
+- 存储：`ConfigStore`（`tokio::sync::RwLock<AppConfig>` + `revision`）。
+  - `PUT /api/config`：乐观并发，`revision` 不匹配 → `409 stale_revision`；成功则 `revision + 1` 并落盘。
+  - 文件变更：`notify` 监听 + 300ms 去抖后自动热载（`revision` 单调，不回退）。
+- 主要字段：`gateway.{bind,whitelist_groups,heartbeat_secs,reply_enabled,allowed_actions}`、`llm.*`、`round.{round_id,title,group_id,priority_users,priority_window,items}`、`display.*`、`members.*`。
+- 环境变量：`PAIGU_CONFIG_PATH`（默认 `config/app.json`）、`PAIGU_HTTP_PORT`（默认 `21081`）、`PAIGU_WEB_DIR`（默认 `web`）、`PAIGU_MEMBERS_SEED_PATH` / `PAIGU_MEMBERS_EXAMPLE_PATH`、`DEEPSEEK_API_KEY`（由 `llm.api_key_env` 指定名）。
 
-HTTP API (port 8080) ←─── 前端/管理后台
-```
+## 脱敏策略
 
-事件溯源：所有用户操作记录为不可变事件，最终状态由事件流确定性重放得到。LLM 仅负责自然语言到结构化数据的转换，不参与任何业务决策。
+- **真实群成员名单只放 gitignored 的 `data/members.seed.json`**；入库仅 `data/members.example.json`（占位名 `成员01`…`成员05`）。
+- `config/app.json`、`data/**`、`*.xlsx`、`sample*.json`、`simulation-corpus/real-*/` 均被 `.gitignore` 忽略，保持忽略状态。
+- 文档与语料使用占位名（`用户A` / `成员01` 等）；语料内部原版 `*.md` 被忽略，入库为 `*.public.md` 脱敏版。
+- 密钥不入代码：LLM key 仅经 `api_key_env`（`DEEPSEEK_API_KEY`）读取。
+- 校验：`git grep` 真实昵称在跟踪文件（含 `README.md`、`docs/**`）中应为 **0 命中**。
 
-## WebSocket 消息协议
+## 文档索引
 
-客户端（QQ 框架）连接 `ws://host:3001`，发送 JSON：
-
-```json
-{
-  "type": "qq_message",
-  "group_id": "123456",
-  "user_id": "789",
-  "nickname": "用户A",
-  "message_id": "msg_001",
-  "text": "排燐音吧唧2，蓝良单领1",
-  "timestamp_ms": 1778241601000,
-  "is_admin": false
-}
-```
-
-服务器回复：
-
-```json
-{
-  "message_id": null,
-  "replyType": "text",
-  "text": "已记录，当前版本 #128",
-  "confirmToken": null
-}
-```
-
-鉴权：在连接握手时携带 `Authorization: Bearer <token>` 头（`WS_TOKEN` 环境变量）。
-
-## 文档
-
-**现行（必读）**
+**现行（必读）** — 见 [docs/README.md](./docs/README.md)
 - [docs/POLICY.md](./docs/POLICY.md) - 业务政策（接入/白名单/清洗/LLM 流水线/权限时段/展示/成员/热载）
 - [docs/DESIGN.md](./docs/DESIGN.md) - 程序设计路线（架构/模块/接口/配置/路由/部署）
 - [docs/TASKS.md](./docs/TASKS.md) - 任务拆分与文件所有权
 - [docs/AGENT-RULES.md](./docs/AGENT-RULES.md) - 子 agent 协作规则
+- [docs/FUNCTIONAL.md](./docs/FUNCTIONAL.md) - 功能描述（面向评审，与实现一致）
+- [docs/MODULES.md](./docs/MODULES.md) - 模块契约与文件所有权
+- [docs/archive/README-legacy.md](./docs/archive/README-legacy.md) - 旧版 README 归档
 
-**历史设计（gitignored，本地保留）**
-- `ARCHITECTURE.md` - 完整系统架构与设计文档
-- `REPLAY_SIMULATION_ADDENDUM.md` - 事件重放、图形化审计与模拟排谷补充设计
-- `LOGIC_CHAINS.md` - 全功能逻辑链条追踪（触发→事件流转→模块→结果）
+**语料与前端**
+- [web/README.md](./web/README.md) - 前端说明（display / admin / sim / replay）
+- [simulation-corpus/VERIFICATION.public.md](./simulation-corpus/VERIFICATION.public.md) - 确定性重放验证报告（脱敏版）
+- [simulation-corpus/CHANGELOG.public.md](./simulation-corpus/CHANGELOG.public.md) - 操作-时间表（脱敏版）
+- [simulation-corpus/real-chat/README.public.md](./simulation-corpus/real-chat/README.public.md) - 真实群聊语料复现（脱敏版）
+- [simulation-corpus/real-samples/README.md](./simulation-corpus/real-samples/README.md) - 事件重放样本
+- [simulation-corpus/real-xlsx/README.md](./simulation-corpus/real-xlsx/README.md) - 真实结果表解析与逐格验证
+
+**历史（gitignored，勿引用）**
+- `ARCHITECTURE.md`、`LOGIC_CHAINS.md`、`REPLAY_SIMULATION_ADDENDUM.md`
 
 ## License
 

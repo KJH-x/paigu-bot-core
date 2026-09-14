@@ -214,3 +214,78 @@ impl EventValidator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parsed_event::ParsedClaimItem;
+
+    fn claim_item(name: &str, quantity: u32) -> ParsedClaimItem {
+        ParsedClaimItem {
+            name: name.to_string(),
+            category_hint: None,
+            quantity,
+            claim_type: Some("Split".to_string()),
+            is_proxy_card: Some(false),
+            slot_policy: Some("Normal".to_string()),
+            notes: None,
+            resolved_item_id: Some("item_a".to_string()),
+            resolved_variant_id: None,
+            resolved_round_id: Some("round_a".to_string()),
+        }
+    }
+
+    fn parsed(intent: ParsedIntent, items: Vec<ParsedClaimItem>) -> ParsedMessage {
+        ParsedMessage {
+            intent,
+            round_hint: None,
+            items,
+            cancel_target_hint: None,
+            admin_command: None,
+            confidence: 0.95,
+            ambiguous_parts: vec![],
+        }
+    }
+
+    async fn validate(parsed: ParsedMessage) -> ValidationOutcome {
+        let validator = EventValidator::new(0.65);
+        validator
+            .validate(
+                parsed,
+                &UserId("u1".to_string()),
+                "g1",
+                Some("m1".to_string()),
+                &[],
+                chrono::Utc::now(),
+                1,
+            )
+            .await
+            .expect("validate")
+    }
+
+    #[tokio::test]
+    async fn zero_quantity_is_rejected() {
+        let outcome = validate(parsed(ParsedIntent::Claim, vec![claim_item("商品甲", 0)])).await;
+        assert!(matches!(outcome, ValidationOutcome::Reject(_)));
+    }
+
+    #[tokio::test]
+    async fn quantity_over_limit_is_rejected() {
+        let outcome = validate(parsed(ParsedIntent::Claim, vec![claim_item("商品甲", 100)])).await;
+        assert!(matches!(outcome, ValidationOutcome::Reject(_)));
+    }
+
+    #[tokio::test]
+    async fn ambiguous_parts_need_confirm() {
+        let mut message = parsed(ParsedIntent::Claim, vec![claim_item("商品甲", 1)]);
+        message.ambiguous_parts = vec!["商品名不确定".to_string()];
+        let outcome = validate(message).await;
+        assert!(matches!(outcome, ValidationOutcome::NeedConfirm(_)));
+    }
+
+    #[tokio::test]
+    async fn unknown_intent_is_ignored() {
+        let outcome = validate(parsed(ParsedIntent::Unknown, vec![])).await;
+        assert!(matches!(outcome, ValidationOutcome::Ignore));
+    }
+}

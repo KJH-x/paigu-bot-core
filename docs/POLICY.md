@@ -12,11 +12,11 @@
 ## 1. 接入与白名单（Gateway）
 
 - 形态：**反向 WebSocket 服务器**，NapCat 主动连入 `ws://192.168.100.2:9801`。
-- 鉴权：**不校验 token**（`require_token=false`）。
+- 鉴权：**不校验 token**（反向 WS 接受连接时不校验；无 token 配置项）。
 - 只处理：`post_type == "message"` 且 `message_type == "group"` 且 `group_id ∈ whitelist_groups`。
 - 白名单群：`["720675572"]`（可在 admin 面板热改）。
 - 其余数据一律 **Drop**：非白名单群、私聊、非 message 事件（notice/meta_event/request）、空消息、无法解析帧。Drop 只记 debug 日志，不回复、不入库为业务事件。
-- 出站动作：仅允许只读动作（当前只允许 `get_group_member_list`、`get_group_info`、`get_group_list`、`get_login_info`）。**禁止 `send_*` 类动作**（由 `reply_enabled=false` 强制）。
+- 出站动作：仅允许只读动作（当前只允许 `get_group_member_list`、`get_group_info`、`get_group_list`、`get_login_info`）。**默认禁止 `send_*`**：`send_*` 仅当 `reply_enabled=true` **且** `action ∈ allowed_actions` 时才放行（默认 `reply_enabled=false` → 绝不发送）。
 
 ## 2. 昵称清洗与身份
 
@@ -26,6 +26,8 @@
   不同代理目标（`A(代B)` 与 `A(代C)`）**不合并**消费；who-whats 按显示串分组。
 - **全角归一**：`：`→`:`、全角数字/字母→半角。
 - **user_id 优先**：身份以 QQ `user_id` 为准；昵称仅用于展示。昵称↔user_id 映射来自群成员缓存（见 §7）。
+
+> **实现单一真源**：昵称清洗（全角归一 + 去括号备注 + 代理识别）只在 `src/gateway/onebot.rs` 的 `clean_nickname` 实现；Pipeline 与校验层复用，不得另起一套。
 
 ## 3. 消息判定流水线（LLM-first + 规则兜底）
 
@@ -39,7 +41,9 @@
    - 商品未找到 → **Reject**（提示可用商品）。
 5. **校验**：置信度阈值、数量（0 拒绝、>99 拒绝）、别名唯一匹配。
 6. **权限**（§4）。
-7. **执行**：写事件 → 重放 → 排位快照 → （若 `reply_enabled`）回复 `已记录，当前版本 #N`。
+7. **执行**：写事件 → 重放 → 排位快照 → （若 `reply_enabled=true` 且动作在白名单）回复 `已记录，当前版本 #N`。
+
+**回复开关（已强制）**：`reply_enabled` 默认 `false`，此时**绝不发送任何消息**；置 `true` 后 `send_*` 仍须 `action ∈ allowed_actions` 才放行，否则拒绝并告警。回复与否不影响事件写入与快照更新。
 
 LLM 失败/超时：`fallback_to_rules=true` 时回退规则解析器；仍失败 → 回复“没识别成功”。
 
@@ -61,6 +65,7 @@ LLM 输出契约（严格 JSON）：
 - **排序**：预存用户全程 `priority_level=10`；排序键 `priority DESC → effective_at ASC → sequence ASC`（购物金优先排、非购物金延后排）。
 - **时间基准**：政策按**消息 `timestamp_ms`** 判定（真实链路即 QQ 上报时间）。偏移仅用于模拟/测试（§6），不在真实链路。
 - **管理员命令**：仅 `is_admin`（群主/管理员角色）可用；非管理员的 `/` 命令 → 拒绝/忽略。
+- **回复开关与权限解耦**：`reply_enabled`（默认 `false`）只控制是否发送回复，且 `send_*` 仍受 `allowed_actions` 白名单约束（已强制）；权限政策只决定事件是否写入，与是否回复无关。
 
 ## 5. 排谷执行与数据
 

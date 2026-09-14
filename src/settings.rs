@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -242,16 +242,8 @@ impl ConfigStore {
         })
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub async fn get(&self) -> AppConfig {
         self.inner.read().await.clone()
-    }
-
-    pub async fn revision(&self) -> u64 {
-        self.inner.read().await.revision
     }
 
     pub async fn put(&self, mut cfg: AppConfig, expected: u64) -> Result<u64, ConfigError> {
@@ -339,5 +331,45 @@ mod tests {
         assert!(is_priority_user(&users, &["x", "user_a"]));
         assert!(!is_priority_user(&users, &["user_c"]));
         assert!(!is_priority_user(&[], &["user_a"]));
+    }
+
+    #[tokio::test]
+    async fn put_rejects_stale_revision() {
+        let path = std::env::temp_dir().join(format!(
+            "paigu-settings-test-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let store = ConfigStore::load(&path).expect("load config");
+        let current = store.get().await.revision;
+
+        let next = store
+            .put(store.get().await, current)
+            .await
+            .expect("put with current revision");
+        assert_eq!(next, current + 1);
+
+        match store.put(store.get().await, current).await {
+            Err(ConfigError::StaleRevision { expected, actual }) => {
+                assert_eq!(expected, current);
+                assert_eq!(actual, current + 1);
+            }
+            other => panic!("expected StaleRevision, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn reload_bumps_revision() {
+        let path = std::env::temp_dir().join(format!(
+            "paigu-settings-reload-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let store = ConfigStore::load(&path).expect("load config");
+        let before = store.get().await.revision;
+
+        let after = store.reload().await.expect("reload");
+        assert_eq!(after, before + 1);
+        assert_eq!(store.get().await.revision, before + 1);
+        let _ = std::fs::remove_file(&path);
     }
 }

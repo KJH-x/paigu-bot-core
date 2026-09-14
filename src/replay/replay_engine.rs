@@ -12,14 +12,12 @@ use crate::replay::state_diff::StateDiff;
 use crate::error::ReplayError;
 
 pub struct ReplayEngine {
-    pub allocation_engine: AllocationEngine,
     pub settlement_engine: SettlementEngine,
 }
 
 impl ReplayEngine {
     pub fn new() -> Self {
         Self {
-            allocation_engine: AllocationEngine::new(),
             settlement_engine: SettlementEngine::new(),
         }
     }
@@ -52,7 +50,6 @@ impl ReplayEngine {
                         allocation: after_snapshot.clone(),
                         items: state.items.clone(),
                         discount_rules: state.discount_rules.clone(),
-                        gift_valuations: vec![],
                     }
                 ).map_err(|e| ReplayError::SnapshotRestoreFailed(0, e.to_string()))?)
             } else {

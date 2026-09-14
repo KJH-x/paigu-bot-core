@@ -1,23 +1,29 @@
+#![cfg(test)]
+
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 
 use super::ws_server::Gateway;
 
+#[cfg(test)]
 pub async fn get_group_member_list(gw: &Arc<Gateway>, group_id: &str) -> anyhow::Result<Value> {
     gw.send_action("get_group_member_list", json!({ "group_id": group_id }))
         .await
 }
 
+#[cfg(test)]
 pub async fn get_group_info(gw: &Arc<Gateway>, group_id: &str) -> anyhow::Result<Value> {
     gw.send_action("get_group_info", json!({ "group_id": group_id }))
         .await
 }
 
+#[cfg(test)]
 pub async fn get_group_list(gw: &Arc<Gateway>) -> anyhow::Result<Value> {
     gw.send_action("get_group_list", json!({})).await
 }
 
+#[cfg(test)]
 pub async fn get_login_info(gw: &Arc<Gateway>) -> anyhow::Result<Value> {
     gw.send_action("get_login_info", json!({})).await
 }

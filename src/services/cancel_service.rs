@@ -1,3 +1,6 @@
+//! DEPRECATED: 旧栈（Postgres/R2/旧 WS），仅 `legacy` 路径使用，勿新增依赖。
+#![allow(dead_code)]
+
 use crate::domain::ids::{UserId, RoundId, ItemId};
 use crate::domain::event::{EventEnvelope, DomainEvent, ClaimCancelled};
 use crate::engine::event_store::EventStore;

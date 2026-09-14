@@ -8,16 +8,9 @@ impl MoneyCents {
         Self(0)
     }
 
+    #[cfg(test)]
     pub fn from_yuan(yuan: i64) -> Self {
         Self(yuan * 100)
-    }
-
-    pub fn from_yuan_float(yuan: f64) -> Self {
-        Self((yuan * 100.0).round() as i64)
-    }
-
-    pub fn to_yuan_float(self) -> f64 {
-        self.0 as f64 / 100.0
     }
 
     pub fn checked_add(self, rhs: Self) -> Option<Self> {
@@ -34,14 +27,6 @@ impl MoneyCents {
 
     pub fn checked_mul_u32(self, n: u32) -> Option<Self> {
         self.0.checked_mul(n as i64).map(Self)
-    }
-
-    pub fn checked_div_i64(self, n: i64) -> Option<Self> {
-        if n == 0 {
-            None
-        } else {
-            Some(Self(self.0 / n))
-        }
     }
 
     pub fn as_cents(self) -> i64 {

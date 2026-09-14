@@ -1,16 +1,50 @@
 #![cfg(test)]
 
 use crate::domain::ids::{RoundId, ItemId, UserId, ClaimId};
-use crate::domain::round::Round;
 use crate::domain::item::{Item, ItemKind};
 use crate::domain::money::MoneyCents;
-use crate::domain::claim::{EffectiveClaimLine, ClaimType, SlotPolicy, Claim, ClaimStatus, Eligibility, EligibilityScope, ClaimLine};
-use crate::domain::event::{EventEnvelope, DomainEvent, ClaimCreated, ClaimCancelled, EventStatus};
+use crate::domain::claim::{EffectiveClaimLine, ClaimType, SlotPolicy, Eligibility, EligibilityScope, ClaimLine};
+use crate::domain::event::{EventEnvelope, DomainEvent, ClaimCreated, EventStatus};
 use crate::engine::allocation_engine::AllocationEngine;
 use crate::engine::replay::ReplayService;
 use crate::engine::event_store::InMemoryEventStore;
-use crate::simulation::fixtures;
 use std::sync::Arc;
+
+fn fixture_split_item(item_id: &str, name: &str, price_cents: i64, box_size: u32) -> Item {
+    Item {
+        item_id: ItemId(item_id.to_string()),
+        round_id: RoundId("test_round_1".to_string()),
+        name: name.to_string(),
+        kind: ItemKind::Split,
+        unit_price: MoneyCents(price_cents),
+        box_size: Some(box_size),
+        max_quantity: None,
+        is_blind: false,
+        is_proxy_card: false,
+        aliases: vec![],
+        sort_order: 0,
+        metadata: serde_json::json!({}),
+        variants: vec![],
+    }
+}
+
+fn fixture_single_item(item_id: &str, name: &str, price_cents: i64, max_quantity: u32) -> Item {
+    Item {
+        item_id: ItemId(item_id.to_string()),
+        round_id: RoundId("test_round_1".to_string()),
+        name: name.to_string(),
+        kind: ItemKind::Single,
+        unit_price: MoneyCents(price_cents),
+        box_size: None,
+        max_quantity: Some(max_quantity),
+        is_blind: false,
+        is_proxy_card: false,
+        aliases: vec![],
+        sort_order: 0,
+        metadata: serde_json::json!({}),
+        variants: vec![],
+    }
+}
 
 fn ts(ms: i64) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::from_timestamp_millis(ms).unwrap_or_else(|| chrono::Utc::now())
@@ -66,7 +100,7 @@ fn tail_line(user_id: &str, item_id: &str, quantity: u32, ts_ms: i64) -> Effecti
 
 #[test]
 fn test_priority_user_before_normal_user() {
-    let item = fixtures::fixture_split_item("badge", "badge", 4500, 10);
+    let item = fixture_split_item("badge", "badge", 4500, 10);
     let normal = claim_line("u1", "badge", 1, 100, 1, 0);
     let priority = claim_line("u2", "badge", 1, 101, 2, 10);
 
@@ -92,7 +126,7 @@ fn test_priority_user_before_normal_user() {
 
 #[test]
 fn test_tail_locked_creates_new_box() {
-    let item = fixtures::fixture_split_item("bonus", "bonus", 3000, 5);
+    let item = fixture_split_item("bonus", "bonus", 3000, 5);
     let a = claim_line("u1", "bonus", 1, 100, 1, 0);
     let tail = tail_line("u2", "bonus", 2, 101);
     let b = claim_line("u3", "bonus", 1, 102, 2, 0);
@@ -113,7 +147,7 @@ fn test_tail_locked_creates_new_box() {
 
 #[test]
 fn test_cancel_moves_slots_forward() {
-    let item = fixtures::fixture_split_item("item_a", "item_a", 4500, 5);
+    let item = fixture_split_item("item_a", "item_a", 4500, 5);
     let u1 = claim_line("u1", "item_a", 1, 100, 1, 0);
     let u2 = claim_line("u2", "item_a", 1, 101, 2, 0);
     let u3 = claim_line("u3", "item_a", 1, 102, 3, 0);
@@ -270,7 +304,7 @@ fn test_eligibility_applies_to_item() {
 fn test_variant_allocation_isolated_per_variant() {
     use crate::domain::item::ItemVariant;
 
-    let mut split = fixtures::fixture_split_item("badge", "徽章", 4500, 10);
+    let mut split = fixture_split_item("badge", "徽章", 4500, 10);
     split.variants = vec![
         ItemVariant {
             variant_id: "v_yukari".to_string(),
@@ -287,7 +321,7 @@ fn test_variant_allocation_isolated_per_variant() {
             aliases: vec![],
         },
     ];
-    let single = fixtures::fixture_single_item("gift", "特典", 1000, 10);
+    let single = fixture_single_item("gift", "特典", 1000, 10);
 
     let a1 = variant_line("u1", "badge", "v_yukari", 1, 100, 1);
     let a2 = variant_line("u2", "badge", "v_yukari", 1, 101, 2);

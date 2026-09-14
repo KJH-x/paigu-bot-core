@@ -15,6 +15,7 @@ pub struct AllocationSnapshot {
 }
 
 impl AllocationSnapshot {
+    #[cfg(test)]
     pub fn item(&self, name: &str) -> Option<&ItemAllocation> {
         self.item_allocations.iter().find(|i| i.item_name == name || i.item_id.0 == name)
     }
@@ -56,18 +57,6 @@ pub struct PublicSlotView {
     pub display_name: Option<String>,
     pub policy: String,
     pub segment_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminSlotView {
-    pub user_id: String,
-    pub nickname: String,
-    pub raw_message_id: Option<String>,
-    pub claim_id: Option<String>,
-    pub slot_policy: String,
-    pub status: String,
-    pub slot_index: u32,
-    pub box_index: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,17 +121,6 @@ impl AllocationSnapshot {
         }
     }
 
-    pub fn short_ack_for_user(&self, user_id: &str) -> String {
-        for summary in &self.user_summaries {
-            if summary.user_id.0 == user_id {
-                let items: Vec<String> = summary.items.iter()
-                    .map(|i| format!("{} x{}", i.item_name, i.quantity))
-                    .collect();
-                return format!("{}，当前版本 #{}", items.join("，"), self.version);
-            }
-        }
-        format!("当前版本 #{}", self.version)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

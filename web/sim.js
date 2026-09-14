@@ -303,12 +303,12 @@
     return P.get('/api/members').then(function (res) {
       var list = P.normalizeMembers(res);
       state.members = list.length ? list : P.embeddedMembers();
-      if (!list.length) showBanner('未能从 API 获取成员，已使用内置子集（POLICY §8）。', false);
+      if (!list.length) showBanner('未能从 API 获取成员，已使用内置子集（DESIGN §8）。', false);
       buildIdentitySelect();
     }).catch(function () {
       state.members = P.embeddedMembers();
       buildIdentitySelect();
-      showBanner('成员列表不可用，已使用内置子集（POLICY §8）。', false);
+      showBanner('成员列表不可用，已使用内置子集（DESIGN §8）。', false);
     });
   }
 

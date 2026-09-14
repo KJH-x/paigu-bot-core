@@ -16,19 +16,6 @@ pub enum ParsedIntent {
     Unknown,
 }
 
-impl ParsedIntent {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ParsedIntent::Claim => "Claim",
-            ParsedIntent::Cancel => "Cancel",
-            ParsedIntent::Modify => "Modify",
-            ParsedIntent::ConfirmAmbiguous => "ConfirmAmbiguous",
-            ParsedIntent::AdminCommand => "AdminCommand",
-            ParsedIntent::Unknown => "Unknown",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedMessage {
     pub intent: ParsedIntent,

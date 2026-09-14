@@ -8,7 +8,6 @@ use crate::error::AppResult;
 pub trait EventStore: Send + Sync {
     async fn append(&self, event: &EventEnvelope) -> AppResult<EventEnvelope>;
     async fn read_all(&self, round_id: &RoundId) -> AppResult<Vec<EventEnvelope>>;
-    async fn read_after_sequence(&self, round_id: &RoundId, after_sequence: i64) -> AppResult<Vec<EventEnvelope>>;
 }
 
 pub struct InMemoryEventStore {
@@ -36,15 +35,6 @@ impl EventStore for InMemoryEventStore {
         Ok(events
             .iter()
             .filter(|e| &e.round_id == round_id)
-            .cloned()
-            .collect())
-    }
-
-    async fn read_after_sequence(&self, round_id: &RoundId, after_sequence: i64) -> AppResult<Vec<EventEnvelope>> {
-        let events = self.events.read().await;
-        Ok(events
-            .iter()
-            .filter(|e| &e.round_id == round_id && e.sequence > after_sequence)
             .cloned()
             .collect())
     }

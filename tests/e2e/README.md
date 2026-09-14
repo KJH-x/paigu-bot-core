@@ -60,7 +60,3 @@ pwsh tests/e2e/run.ps1
 8. **`remote` 数据源**：本地静态服务提供 `rounds/<id>/current`（无 `.json`），`/display?source=remote` 渲染远程快照。
 
 断言以 HTTP API（`/api/sim/message` 响应）为主，页面元素/表格文本为辅。
-
-## 已知问题（遗留）
-
-- 无（`web/` 已通过根路径静态回退提供相对资源，`/sim` 可直接使用）。
