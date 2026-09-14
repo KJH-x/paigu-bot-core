@@ -3,6 +3,7 @@
   "gateway": {
     "bind": "192.168.100.2:9801",
     "whitelist_groups": ["720675572"],
+    "whitelist_members": [],
     "heartbeat_secs": 15,
     "reply_enabled": false,
     "allowed_actions": [
@@ -29,11 +30,13 @@
     "group_id": "720675572",
     "priority_users": ["user_a", "user_b", "user_c", "user_d"],
     "priority_window": { "start_ms": 1788782400000, "end_ms": 1788789600000 },
+    "phases": [],
     "items": [
       {
         "item_id": "pass_sp",
         "name": "通行认证SP-月行水上",
         "kind": "split",
+        "class": "A",
         "aliases": ["通行证", "通行认证SP", "通行认证"],
         "variants": [
           { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
@@ -46,6 +49,7 @@
         "item_id": "hr_resume",
         "name": "人事部简历SP-月行水上",
         "kind": "split",
+        "class": "A",
         "aliases": ["人事部简历", "人事部简历SP"],
         "variants": [
           { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
@@ -58,6 +62,7 @@
         "item_id": "fashion",
         "name": "风尚速递SP-月行水上",
         "kind": "split",
+        "class": "A",
         "aliases": ["风尚速递", "风尚速递SP"],
         "variants": [
           { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
@@ -70,6 +75,7 @@
         "item_id": "gift_card",
         "name": "特典卡组-校园凭证",
         "kind": "split",
+        "class": "B",
         "aliases": ["特典卡组", "特典", "校园凭证"],
         "variants": [
           { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },

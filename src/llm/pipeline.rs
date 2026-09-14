@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,14 +11,16 @@ use tracing::warn;
 
 use crate::bus::{EventSink, IncomingEvent, PipelineOutcome};
 use crate::domain::claim::{Eligibility, EligibilityScope};
-use crate::domain::event::EventEnvelope;
+use crate::domain::event::{DomainEvent, EventEnvelope};
 use crate::domain::ids::{EligibilityId, RoundId, UserId};
 use crate::domain::item::{Item, RoundContext};
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
+use crate::messages::{JsonlMessageStore, MessageRecord as LogMessageRecord, MessageStore};
 use crate::parser::parsed_event::{ParsedClaimItem, ParsedIntent, ParsedMessage};
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidationOutcome};
+use crate::round::{can_cancel, can_claim, phase_at, RoundPhase};
 use crate::settings::{AppConfig, ConfigStore};
 
 use super::client::{LlmClient, OpenAiClient};
@@ -30,6 +33,7 @@ pub struct Pipeline {
     cfg: Arc<ConfigStore>,
     llm: Arc<dyn LlmClient>,
     state: Mutex<State>,
+    messages_dir: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -59,10 +63,29 @@ impl Pipeline {
     }
 
     pub fn new_with_client(cfg: Arc<ConfigStore>, llm: Arc<dyn LlmClient>) -> Arc<Self> {
+        Self::build(cfg, llm, None)
+    }
+
+    /// 指定消息日志目录（测试隔离用）；生产默认 `PAIGU_MESSAGES_DIR` / `data/messages`。
+    #[cfg(test)]
+    pub fn new_with_client_dir(
+        cfg: Arc<ConfigStore>,
+        llm: Arc<dyn LlmClient>,
+        messages_dir: impl Into<PathBuf>,
+    ) -> Arc<Self> {
+        Self::build(cfg, llm, Some(messages_dir.into()))
+    }
+
+    fn build(
+        cfg: Arc<ConfigStore>,
+        llm: Arc<dyn LlmClient>,
+        messages_dir: Option<PathBuf>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             cfg,
             llm,
             state: Mutex::new(State::default()),
+            messages_dir,
         })
     }
 
@@ -88,15 +111,19 @@ impl Pipeline {
                     status: "Duplicate".to_string(),
                     detail: detail.to_string(),
                 });
+                let version = state.version;
+                let snapshot = state
+                    .snapshot
+                    .as_ref()
+                    .and_then(|s| serde_json::to_value(s).ok());
+                drop(state);
+                self.persist(&ev, "Duplicate", detail, "message").await;
                 return PipelineOutcome {
                     status: "Duplicate".to_string(),
                     detail: detail.to_string(),
                     reply: None,
-                    version: state.version,
-                    snapshot: state
-                        .snapshot
-                        .as_ref()
-                        .and_then(|s| serde_json::to_value(s).ok()),
+                    version,
+                    snapshot,
                 };
             }
             state.seq += 1;
@@ -275,6 +302,17 @@ impl Pipeline {
                 .await;
         }
 
+        if !cfg.round.phases.is_empty() {
+            if let Some(phase) = phase_at(&cfg.round.phases, ev.timestamp_ms) {
+                if let Some(detail) = phase_rejection(&cfg, &event, phase, is_priority) {
+                    let reply = detail.clone();
+                    return self
+                        .finish(&ev, &display, seq, "Rejected", &detail, Some(reply))
+                        .await;
+                }
+            }
+        }
+
         let detail = describe_event(&event);
         let (version, snapshot_value, reply) = {
             let mut state = self.state.lock().await;
@@ -299,6 +337,8 @@ impl Pipeline {
             });
             (version, snapshot_value, format!("已记录，当前版本 #{}", version))
         };
+
+        self.persist(&ev, "Applied", &detail, "message").await;
 
         PipelineOutcome {
             status: "Applied".to_string(),
@@ -373,6 +413,31 @@ impl Pipeline {
             .collect()
     }
 
+    /// 持久化一条入站消息日志（`routed=message`，`status` 记处理结果）。
+    async fn persist(&self, ev: &IncomingEvent, status: &str, detail: &str, routed: &str) {
+        let round_id = self.cfg.get().await.round.round_id.clone();
+        let store = match &self.messages_dir {
+            Some(dir) => JsonlMessageStore::new(dir, &round_id),
+            None => JsonlMessageStore::from_env(&round_id),
+        };
+        let rec = LogMessageRecord {
+            seq: crate::messages::next_seq(),
+            group_id: ev.group_id.clone(),
+            user_id: ev.user_id.clone(),
+            nickname: ev.nickname.clone(),
+            message_id: ev.message_id.clone(),
+            text: ev.text.clone(),
+            timestamp_ms: ev.timestamp_ms,
+            is_admin: ev.is_admin,
+            routed: routed.to_string(),
+            status: status.to_string(),
+            detail: detail.to_string(),
+        };
+        if let Err(e) = store.append(&rec).await {
+            warn!("消息日志写入失败: {e}");
+        }
+    }
+
     async fn finish(
         &self,
         ev: &IncomingEvent,
@@ -382,6 +447,7 @@ impl Pipeline {
         detail: &str,
         reply: Option<String>,
     ) -> PipelineOutcome {
+        self.persist(ev, status, detail, "message").await;
         let mut state = self.state.lock().await;
         state.messages.push(MessageRecord {
             seq,
@@ -435,6 +501,43 @@ fn priority_eligibility(round_id: &RoundId, user_id: &str) -> Eligibility {
         valid_from: Some(DateTime::<Utc>::from_timestamp_millis(0).unwrap_or_else(Utc::now)),
         valid_until: None,
         note: Some("预存(购物金)用户".to_string()),
+    }
+}
+
+fn phase_label(phase: RoundPhase) -> &'static str {
+    match phase {
+        RoundPhase::Phase0 => "Phase 0",
+        RoundPhase::PhaseI => "Phase I",
+        RoundPhase::PhaseII => "Phase II",
+        RoundPhase::PhaseIII => "Phase III",
+        RoundPhase::Settling => "结算",
+        RoundPhase::Locked => "锁定",
+    }
+}
+
+/// 阶段越权判定；返回 `Some(detail)` 表示应拒绝（detail 含「阶段」）。
+fn phase_rejection(
+    cfg: &AppConfig,
+    event: &EventEnvelope,
+    phase: RoundPhase,
+    is_priority: bool,
+) -> Option<String> {
+    let label = phase_label(phase);
+    if phase == RoundPhase::Locked {
+        return Some(format!("阶段越权：{label}阶段已锁定，禁止操作"));
+    }
+    match &event.payload {
+        DomainEvent::ClaimCreated(c) => c.items.iter().find_map(|line| {
+            let class = cfg.round.item_class(&line.item_id.0);
+            (!can_claim(phase, class, is_priority))
+                .then_some(format!("阶段越权：{label}阶段不允许排该商品"))
+        }),
+        DomainEvent::ClaimCancelled(c) => c.target_item_id.as_ref().and_then(|item_id| {
+            let class = cfg.round.item_class(&item_id.0);
+            (!can_cancel(phase, class, is_priority))
+                .then_some(format!("阶段越权：{label}阶段不允许撤销该商品"))
+        }),
+        _ => None,
     }
 }
 
@@ -607,6 +710,7 @@ fn extract_json(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::round::PhaseWindow;
     use crate::settings::{default_config, LlmSettings};
 
     struct MockClient {
@@ -667,6 +771,33 @@ mod tests {
         Arc::new(ConfigStore::load(path).unwrap())
     }
 
+    fn test_pipeline_with_dir(
+        cfg: &AppConfig,
+        llm: Arc<dyn LlmClient>,
+    ) -> (Arc<Pipeline>, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "paigu-msgs-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        (Pipeline::new_with_client_dir(store(cfg), llm, dir.clone()), dir)
+    }
+
+    fn test_pipeline(cfg: &AppConfig, llm: Arc<dyn LlmClient>) -> Arc<Pipeline> {
+        test_pipeline_with_dir(cfg, llm).0
+    }
+
+    fn set_class(cfg: &mut AppConfig, item_id: &str, class: &str) {
+        for it in &mut cfg.round.items {
+            if it.item_id == item_id {
+                it.class = Some(class.to_string());
+            }
+        }
+    }
+
+    fn phase_window(phase: RoundPhase, start_ms: i64, end_ms: i64) -> PhaseWindow {
+        PhaseWindow { phase, start_ms, end_ms }
+    }
+
     fn event(user_id: &str, nickname: &str, text: &str, timestamp_ms: i64) -> IncomingEvent {
         IncomingEvent {
             group_id: "720675572".to_string(),
@@ -703,7 +834,7 @@ mod tests {
 
     #[tokio::test]
     async fn rule_claim_success() {
-        let pipeline = Pipeline::new_with_client(store(&base_config()), MockClient::ok("{}"));
+        let pipeline = test_pipeline(&base_config(), MockClient::ok("{}"));
         let outcome = pipeline
             .process(event("u1", "小明", "排 通行证 结城理 1", 1_000))
             .await;
@@ -716,7 +847,7 @@ mod tests {
     #[tokio::test]
     async fn llm_claim_success() {
         let body = r#"{"intent":"claim","items":[{"item":"通行认证SP-月行水上","variant":"岳羽由加莉","quantity":1,"claim_type":"split","slot_policy":"normal"}],"confidence":0.95,"ambiguous_parts":[]}"#;
-        let pipeline = Pipeline::new_with_client(store(&base_config()), MockClient::ok(body));
+        let pipeline = test_pipeline(&base_config(), MockClient::ok(body));
         let outcome = pipeline
             .process(event("u1", "小明", "帮我抢个yukari", 1_000))
             .await;
@@ -729,7 +860,7 @@ mod tests {
     #[tokio::test]
     async fn non_claim_ignored() {
         let body = r#"{"intent":"unknown","items":[],"confidence":0.2,"ambiguous_parts":[]}"#;
-        let pipeline = Pipeline::new_with_client(store(&base_config()), MockClient::ok(body));
+        let pipeline = test_pipeline(&base_config(), MockClient::ok(body));
         let outcome = pipeline
             .process(event("u1", "小明", "今天天气不错", 1_000))
             .await;
@@ -739,7 +870,7 @@ mod tests {
     #[tokio::test]
     async fn ambiguous_need_confirm() {
         let body = r#"{"intent":"claim","items":[{"variant":"结城理","quantity":1,"claim_type":"split"}],"confidence":0.95,"ambiguous_parts":[]}"#;
-        let pipeline = Pipeline::new_with_client(store(&base_config()), MockClient::ok(body));
+        let pipeline = test_pipeline(&base_config(), MockClient::ok(body));
         let outcome = pipeline
             .process(event("u1", "小明", "帮我留一份yukari", 1_000))
             .await;
@@ -753,7 +884,7 @@ mod tests {
             start_ms: 0,
             end_ms: i64::MAX,
         });
-        let pipeline = Pipeline::new_with_client(store(&cfg), MockClient::ok("{}"));
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
         let outcome = pipeline
             .process(event("u1", "小明", "排 通行证 结城理 1", 1_000))
             .await;
@@ -763,7 +894,7 @@ mod tests {
 
     #[tokio::test]
     async fn priority_user_sorts_first() {
-        let pipeline = Pipeline::new_with_client(store(&base_config()), MockClient::ok("{}"));
+        let pipeline = test_pipeline(&base_config(), MockClient::ok("{}"));
         let first = pipeline
             .process(event("u1", "小明", "排 通行证 结城理 1", 1_000))
             .await;
@@ -781,7 +912,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_failure_falls_back_to_rules() {
-        let pipeline = Pipeline::new_with_client(store(&base_config()), MockClient::err("timeout"));
+        let pipeline = test_pipeline(&base_config(), MockClient::err("timeout"));
         let outcome = pipeline
             .process(event("u1", "小明", "嗯嗯好的", 1_000))
             .await;
@@ -792,11 +923,111 @@ mod tests {
     async fn llm_failure_without_fallback_rejected() {
         let mut cfg = base_config();
         cfg.llm.fallback_to_rules = false;
-        let pipeline = Pipeline::new_with_client(store(&cfg), MockClient::err("timeout"));
+        let pipeline = test_pipeline(&cfg, MockClient::err("timeout"));
         let outcome = pipeline
             .process(event("u1", "小明", "嗯嗯好的", 1_000))
             .await;
         assert_eq!(outcome.status, "Rejected");
         assert_eq!(outcome.detail, "没识别成功");
+    }
+
+    #[tokio::test]
+    async fn phase_ii_non_priority_class_a_rejected() {
+        let mut cfg = base_config();
+        cfg.round.phases = vec![phase_window(RoundPhase::PhaseII, 0, i64::MAX)];
+        set_class(&mut cfg, "pass_sp", "A");
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+        let outcome = pipeline
+            .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+            .await;
+        assert_eq!(outcome.status, "Rejected");
+        assert!(outcome.detail.contains("阶段"), "detail={}", outcome.detail);
+    }
+
+    #[tokio::test]
+    async fn phase_ii_priority_class_a_applied() {
+        let mut cfg = base_config();
+        cfg.round.phases = vec![phase_window(RoundPhase::PhaseII, 0, i64::MAX)];
+        set_class(&mut cfg, "pass_sp", "A");
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+        let outcome = pipeline
+            .process(event("prio_user", "成员09", "排 通行证 结城理 1", 1_000))
+            .await;
+        assert_eq!(outcome.status, "Applied");
+    }
+
+    #[tokio::test]
+    async fn phase_ii_class_b_allowed_for_non_priority() {
+        let mut cfg = base_config();
+        cfg.round.phases = vec![phase_window(RoundPhase::PhaseII, 0, i64::MAX)];
+        set_class(&mut cfg, "pass_sp", "B");
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+        let outcome = pipeline
+            .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+            .await;
+        assert_eq!(outcome.status, "Applied");
+    }
+
+    #[tokio::test]
+    async fn phase_i_class_a_rejected() {
+        let mut cfg = base_config();
+        cfg.round.phases = vec![phase_window(RoundPhase::PhaseI, 0, i64::MAX)];
+        set_class(&mut cfg, "pass_sp", "A");
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+        let outcome = pipeline
+            .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+            .await;
+        assert_eq!(outcome.status, "Rejected");
+        assert!(outcome.detail.contains("阶段"));
+    }
+
+    #[tokio::test]
+    async fn locked_phase_rejects_claim() {
+        let mut cfg = base_config();
+        cfg.round.phases = vec![phase_window(RoundPhase::Locked, 0, i64::MAX)];
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+        let outcome = pipeline
+            .process(event("prio_user", "成员09", "排 通行证 结城理 1", 1_000))
+            .await;
+        assert_eq!(outcome.status, "Rejected");
+        assert!(outcome.detail.contains("阶段"));
+    }
+
+    #[tokio::test]
+    async fn empty_phases_are_unrestricted() {
+        let mut cfg = base_config();
+        cfg.round.phases = Vec::new();
+        set_class(&mut cfg, "pass_sp", "A");
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+        let outcome = pipeline
+            .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+            .await;
+        assert_eq!(outcome.status, "Applied");
+    }
+
+    #[tokio::test]
+    async fn message_log_records_every_inbound() {
+        let cfg = base_config();
+        let (pipeline, dir) = test_pipeline_with_dir(&cfg, MockClient::ok("{}"));
+        pipeline
+            .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+            .await;
+        pipeline
+            .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+            .await;
+        pipeline
+            .process(event("u2", "成员02", "今天天气不错", 2_000))
+            .await;
+
+        let store = JsonlMessageStore::new(&dir, &cfg.round.round_id);
+        let recs = store.read_all().await.unwrap();
+        assert_eq!(recs.len(), 3);
+        assert_eq!(recs[0].status, "Applied");
+        assert_eq!(recs[1].status, "Duplicate");
+        assert_eq!(recs[2].status, "Ignored");
+        assert!(recs.iter().all(|r| r.routed == "message"));
+        assert_eq!(recs[0].nickname, "成员01");
+        assert_eq!(recs[0].timestamp_ms, 1_000);
+        assert!(recs.windows(2).all(|w| w[1].seq > w[0].seq));
     }
 }

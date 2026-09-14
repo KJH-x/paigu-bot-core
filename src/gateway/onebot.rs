@@ -43,12 +43,20 @@ pub struct RouteMessageEvent {
 pub struct RoutePolicy {
     #[serde(default)]
     pub whitelist_groups: Vec<String>,
+    #[serde(default)]
+    pub whitelist_members: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteKind {
     Drop,
     Message,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouteDecision {
+    Message,
+    Drop(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,23 +223,67 @@ pub fn parse_identity(ev: &RouteMessageEvent) -> Identity {
     }
 }
 
-pub fn decide_route(ev: &RouteMessageEvent, policy: &RoutePolicy) -> RouteKind {
+pub fn decide_route_with_reason(ev: &RouteMessageEvent, policy: &RoutePolicy) -> RouteDecision {
     if ev.post_type != "message" {
-        return RouteKind::Drop;
+        return RouteDecision::Drop("not_message".to_string());
     }
     if ev.message_type.as_deref() != Some("group") {
-        return RouteKind::Drop;
+        return RouteDecision::Drop("not_group_message".to_string());
     }
     let Some(group_id) = group_id_string(ev) else {
-        return RouteKind::Drop;
+        return RouteDecision::Drop("missing_group_id".to_string());
     };
     if !policy.whitelist_groups.iter().any(|g| g == &group_id) {
-        return RouteKind::Drop;
+        return RouteDecision::Drop("not_whitelisted_group".to_string());
+    }
+    if !policy.whitelist_members.is_empty() {
+        let id = parse_identity(ev);
+        let candidates = [id.user_id.as_str(), id.identity.as_str(), id.display.as_str()];
+        let allowed = policy.whitelist_members.iter().any(|m| {
+            let m = m.trim();
+            !m.is_empty() && candidates.iter().any(|c| *c == m)
+        });
+        if !allowed {
+            return RouteDecision::Drop("not_whitelisted_member".to_string());
+        }
     }
     if normalize_message(ev).is_empty() {
-        return RouteKind::Drop;
+        return RouteDecision::Drop("empty_message".to_string());
     }
-    RouteKind::Message
+    RouteDecision::Message
+}
+
+pub fn decide_route(ev: &RouteMessageEvent, policy: &RoutePolicy) -> RouteKind {
+    match decide_route_with_reason(ev, policy) {
+        RouteDecision::Message => RouteKind::Message,
+        RouteDecision::Drop(_) => RouteKind::Drop,
+    }
+}
+
+/// 把入站事件归一化为持久化日志记录（Drop 与已处理消息共用）。
+pub fn to_message_record(
+    ev: &RouteMessageEvent,
+    routed: &str,
+    status: &str,
+    detail: &str,
+) -> crate::messages::MessageRecord {
+    let id = parse_identity(ev);
+    crate::messages::MessageRecord {
+        seq: crate::messages::next_seq(),
+        group_id: group_id_string(ev).unwrap_or_default(),
+        user_id: id.user_id,
+        nickname: id.display,
+        message_id: value_to_string(ev.message_id.as_ref()).unwrap_or_default(),
+        text: normalize_message(ev),
+        timestamp_ms: ev
+            .time
+            .map(|t| t.saturating_mul(1000))
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
+        is_admin: id.is_admin,
+        routed: routed.to_string(),
+        status: status.to_string(),
+        detail: detail.to_string(),
+    }
 }
 
 pub fn to_incoming_event(ev: &RouteMessageEvent) -> IncomingEvent {
@@ -262,6 +314,7 @@ mod tests {
     fn policy() -> RoutePolicy {
         RoutePolicy {
             whitelist_groups: vec!["720675572".to_string()],
+            whitelist_members: Vec::new(),
         }
     }
 
@@ -304,6 +357,72 @@ mod tests {
         let mut private = group_event("720675572", "结城理");
         private.message_type = Some("private".to_string());
         assert_eq!(decide_route(&private, &policy()), RouteKind::Drop);
+    }
+
+    #[test]
+    fn decide_route_member_whitelist() {
+        let mut p = policy();
+        p.whitelist_members = vec!["10001".to_string()];
+        assert_eq!(
+            decide_route(&group_event("720675572", "结城理"), &p),
+            RouteKind::Message
+        );
+
+        p.whitelist_members = vec!["99999".to_string()];
+        assert_eq!(
+            decide_route(&group_event("720675572", "结城理"), &p),
+            RouteKind::Drop
+        );
+        assert_eq!(
+            decide_route_with_reason(&group_event("720675572", "结城理"), &p),
+            RouteDecision::Drop("not_whitelisted_member".to_string())
+        );
+    }
+
+    #[test]
+    fn decide_route_member_whitelist_matches_identity_and_display() {
+        let mut p = policy();
+        p.whitelist_members = vec!["甲".to_string()];
+        let mut ev = group_event("720675572", "结城理");
+        ev.sender = Some(Sender {
+            user_id: Some(json!("10001")),
+            nickname: Some("nick".to_string()),
+            card: Some("甲（备注）".to_string()),
+            role: None,
+        });
+        assert_eq!(decide_route(&ev, &p), RouteKind::Message);
+    }
+
+    #[test]
+    fn decide_route_empty_member_whitelist_allows_all() {
+        let mut ev = group_event("720675572", "结城理");
+        ev.sender = Some(Sender {
+            user_id: Some(json!("10001")),
+            ..Default::default()
+        });
+        assert_eq!(decide_route(&ev, &policy()), RouteKind::Message);
+    }
+
+    #[test]
+    fn to_message_record_marks_drop_reason() {
+        let mut ev = group_event("720675572", "结城理 通行证");
+        ev.sender = Some(Sender {
+            user_id: Some(json!("10001")),
+            nickname: Some("成员01".to_string()),
+            role: Some("admin".to_string()),
+            ..Default::default()
+        });
+        let rec = to_message_record(&ev, "drop:not_whitelisted_member", "Dropped", "not_whitelisted_member");
+        assert_eq!(rec.routed, "drop:not_whitelisted_member");
+        assert_eq!(rec.status, "Dropped");
+        assert_eq!(rec.detail, "not_whitelisted_member");
+        assert_eq!(rec.group_id, "720675572");
+        assert_eq!(rec.user_id, "10001");
+        assert_eq!(rec.nickname, "成员01");
+        assert_eq!(rec.message_id, "42");
+        assert_eq!(rec.text, "结城理 通行证");
+        assert_eq!(rec.timestamp_ms, 1_788_782_400_000);
+        assert!(rec.is_admin);
     }
 
     #[test]

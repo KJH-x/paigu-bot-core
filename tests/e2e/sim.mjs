@@ -18,6 +18,7 @@ const EXE = path.join(
 const FIXED_WINDOW = { start_ms: 1600000000000, end_ms: 1600003600000 };
 const TARGET_IDENTITY = '成员01';
 const BLOCKED_IDENTITY = '成员02';
+const GROUP_ID = '720675572';
 
 function log(line) {
   process.stdout.write(line + '\n');
@@ -61,9 +62,9 @@ function buildBinary() {
   if (!fs.existsSync(EXE)) throw new Error('未找到二进制: ' + EXE);
 }
 
-function prepareConfig(tmpDir) {
+function prepareConfig(tmpDir, gatewayPort) {
   const cfg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'config.example.json'), 'utf8'));
-  cfg.gateway.bind = '127.0.0.1:0';
+  cfg.gateway.bind = '127.0.0.1:' + gatewayPort;
   cfg.gateway.reply_enabled = false;
   cfg.llm.enabled = false;
   cfg.llm.fallback_to_rules = true;
@@ -160,6 +161,23 @@ async function waitForHealth(base, timeoutMs) {
   throw new Error('服务未就绪: ' + lastError);
 }
 
+async function waitForGateway(base, expected, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let last = '无响应';
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(base + '/api/gateway/status', { signal: AbortSignal.timeout(2000) });
+      const body = await res.json();
+      last = JSON.stringify(body);
+      if (body.listening && (!expected || body.bound_addr === expected)) return body;
+    } catch (err) {
+      last = err.message;
+    }
+    await sleep(200);
+  }
+  throw new Error('Gateway 未就绪: ' + last);
+}
+
 async function api(base, method, urlPath, body) {
   const init = { method, signal: AbortSignal.timeout(10000) };
   if (body !== undefined) {
@@ -196,14 +214,48 @@ function firstSlotUser(board) {
   return null;
 }
 
-async function openSim(page, base) {
-  const primary = `${base}/sim?api=${encodeURIComponent(base)}`;
+function variantFirstSlotUser(board, variantId) {
+  const allocations = board && Array.isArray(board.item_allocations) ? board.item_allocations : [];
+  for (const alloc of allocations) {
+    if (alloc.item_id === 'pass_sp' && alloc.variant_id === variantId) {
+      const box = (alloc.boxes || [])[0];
+      const slot = box && (box.slots || [])[0];
+      return slot ? (slot.user_id ?? null) : null;
+    }
+  }
+  return null;
+}
+
+async function waitForMessage(base, predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const payload = await api(base, 'GET', '/api/display?since=0');
+    const msgs = payload.messages || [];
+    for (const m of msgs) {
+      if (predicate(m)) return { message: m, board: payload.board, version: payload.version };
+    }
+    await sleep(150);
+  }
+  throw new Error('等待 /api/display 消息超时');
+}
+
+async function resetViaPage(page) {
+  await page.click('#reset');
+  await page.waitForFunction(() => {
+    const b = document.querySelector('#reset');
+    return !!b && !b.disabled;
+  }, { timeout: 10000 });
+  await sleep(150);
+}
+
+async function openSim(page, base, wsUrl) {
+  const primary = `${base}/sim?api=${encodeURIComponent(base)}&ws=${encodeURIComponent(wsUrl)}`;
   await page.goto(primary, { waitUntil: 'domcontentloaded' });
   const loaded = await page
     .evaluate(() => typeof window.PAIGU !== 'undefined')
     .catch(() => false);
   if (loaded) return { url: primary, note: null };
-  const fallback = `${base}/web/sim.html?api=${encodeURIComponent(base)}`;
+  const fallback = `${base}/web/sim.html?api=${encodeURIComponent(base)}&ws=${encodeURIComponent(wsUrl)}`;
   await page.goto(fallback, { waitUntil: 'domcontentloaded' });
   return {
     url: fallback,
@@ -211,7 +263,7 @@ async function openSim(page, base) {
   };
 }
 
-async function sendViaUI(page, opts) {
+async function sendViaUI(page, ctx, opts) {
   await page.selectOption('#identity-select', opts.identity);
   await page.waitForFunction(
     (identity) => {
@@ -223,14 +275,13 @@ async function sendViaUI(page, opts) {
   );
   await page.fill('#offset', opts.offsetText);
   await page.fill('#text', opts.text);
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes('/api/sim/message') && res.request().method() === 'POST',
-      { timeout: 15000 }
-    ),
-    page.click('#send'),
-  ]);
-  const payload = await response.json();
+  await page.waitForFunction(() => window.__simWsReady === true, { timeout: 15000 });
+  await page.click('#send');
+  const found = await waitForMessage(
+    ctx.base,
+    (m) => m.text === opts.text && m.display === opts.identity,
+    15000
+  );
   await page.waitForFunction(
     (status) => {
       const outs = document.querySelectorAll('#transcript .out');
@@ -238,9 +289,9 @@ async function sendViaUI(page, opts) {
       return (outs[outs.length - 1].textContent || '').includes(status);
     },
     opts.expectStatus,
-    { timeout: 10000 }
+    { timeout: 15000 }
   );
-  return payload;
+  return { outcome: { status: found.message.status, detail: found.message.detail }, board: found.board, message: found.message };
 }
 
 async function waitBoardFirstCell(page, expected) {
@@ -254,12 +305,53 @@ async function waitBoardFirstCell(page, expected) {
   );
 }
 
+function runNode(args, input) {
+  return spawnSync('node', args, {
+    cwd: REPO_ROOT,
+    input: input === undefined ? undefined : input,
+    encoding: 'utf8',
+    timeout: 120000,
+  });
+}
+
+function stripVolatile(key, value) {
+  if (key === 'claim_id' || key === 'segment_id' || key === 'generated_at') return undefined;
+  return value;
+}
+
+function normalizeState(state) {
+  const alloc = state.board && Array.isArray(state.board.item_allocations) ? state.board.item_allocations : [];
+  const messages = (state.messages || []).map((m) => ({
+    display: m.display,
+    text: m.text,
+    status: m.status,
+    detail: m.detail,
+  }));
+  messages.sort((a, b) =>
+    `${a.display}\u0000${a.text}\u0000${a.status}\u0000${a.detail}`
+      .localeCompare(`${b.display}\u0000${b.text}\u0000${b.status}\u0000${b.detail}`)
+  );
+  return JSON.stringify({ alloc, messages }, stripVolatile);
+}
+
 function buildCases() {
   return [
     {
-      name: '常规排谷',
-      fn: async (page) => {
-        const r = await sendViaUI(page, {
+      name: 'WS 连接成功',
+      fn: async (page, ctx) => {
+        const status = await api(ctx.base, 'GET', '/api/gateway/status');
+        assert(status.listening === true, 'Gateway 应处于监听: ' + JSON.stringify(status));
+        assert(status.clients >= 1, 'Gateway 应有 WS 客户端: ' + JSON.stringify(status));
+        const ready = await page.evaluate(() => window.__simWsReady === true);
+        assert(ready, '页面 window.__simWsReady 应为 true');
+        const badge = await page.textContent('#ws-badge');
+        assert(badge.includes('WS 已连接'), 'WS 徽章应显示已连接，实际: ' + badge);
+      },
+    },
+    {
+      name: '常规排谷（经真实 WS）',
+      fn: async (page, ctx) => {
+        const r = await sendViaUI(page, ctx, {
           identity: TARGET_IDENTITY,
           offsetText: '+00 00 00 00',
           text: '排 通行证 结城理 1',
@@ -272,8 +364,8 @@ function buildCases() {
     },
     {
       name: '非排谷忽略',
-      fn: async (page) => {
-        const r = await sendViaUI(page, {
+      fn: async (page, ctx) => {
+        const r = await sendViaUI(page, ctx, {
           identity: TARGET_IDENTITY,
           offsetText: '+00 00 00 00',
           text: '今天天气不错',
@@ -284,11 +376,11 @@ function buildCases() {
     },
     {
       name: '时段拒绝',
-      fn: async (page) => {
+      fn: async (page, ctx) => {
         const offsetMs = Math.round(
           (FIXED_WINDOW.start_ms + FIXED_WINDOW.end_ms) / 2 - Date.now()
         );
-        const r = await sendViaUI(page, {
+        const r = await sendViaUI(page, ctx, {
           identity: BLOCKED_IDENTITY,
           offsetText: formatOffset(offsetMs),
           text: '排 通行证 结城理 1',
@@ -303,8 +395,8 @@ function buildCases() {
     },
     {
       name: '预存优先',
-      fn: async (page) => {
-        const first = await sendViaUI(page, {
+      fn: async (page, ctx) => {
+        const first = await sendViaUI(page, ctx, {
           identity: BLOCKED_IDENTITY,
           offsetText: '+00 00 00 00',
           text: '排 通行证 结城理 1',
@@ -312,7 +404,7 @@ function buildCases() {
         });
         assertEq(first.outcome.status, 'Applied', '非预存先排状态');
         assertEq(firstSlotUser(first.board), BLOCKED_IDENTITY, '非预存首格');
-        const second = await sendViaUI(page, {
+        const second = await sendViaUI(page, ctx, {
           identity: TARGET_IDENTITY,
           offsetText: '+00 00 00 00',
           text: '排 通行证 结城理 1',
@@ -321,6 +413,78 @@ function buildCases() {
         assertEq(second.outcome.status, 'Applied', '预存排状态');
         assertEq(firstSlotUser(second.board), TARGET_IDENTITY, '预存应占首格');
         await waitBoardFirstCell(page, TARGET_IDENTITY);
+      },
+    },
+    {
+      name: 'scripts/sim-run --speed 0 回放',
+      fn: async (page, ctx) => {
+        const inputFile = path.join(ctx.tmpDir, 'run-input.jsonl');
+        const wsUrl = ctx.wsUrl;
+        const lines = [
+          { ts: 1000, user_id: TARGET_IDENTITY, nickname: TARGET_IDENTITY, text: '排 通行证 结城理 1', offset_ms: 0, group_id: GROUP_ID },
+          { ts: 5000, user_id: BLOCKED_IDENTITY, nickname: BLOCKED_IDENTITY, text: '排 通行证 岳羽由加莉 1', offset_ms: 0, group_id: GROUP_ID },
+        ];
+        fs.writeFileSync(inputFile, lines.map((l) => JSON.stringify(l)).join('\n') + '\n', 'utf8');
+        const res = runNode([
+          'scripts/sim-run.mjs',
+          '--input', inputFile,
+          '--ws', wsUrl,
+          '--speed', '0',
+          '--api', ctx.base,
+          '--group', GROUP_ID,
+        ]);
+        assertEq(res.status, 0, 'sim-run 退出码 (stderr: ' + (res.stderr || '').trim() + ')');
+        const summary = JSON.parse((res.stdout || '').trim());
+        assertEq(summary.total, 2, 'sim-run total');
+        assertEq(summary.sent, 2, 'sim-run sent');
+        assertEq(summary.failed, 0, 'sim-run failed');
+        assertEq(summary.statuses.Applied, 2, 'sim-run 应用状态统计');
+        const m1 = await waitForMessage(ctx.base, (m) => m.text === '排 通行证 结城理 1' && m.display === TARGET_IDENTITY, 10000);
+        await waitForMessage(ctx.base, (m) => m.text === '排 通行证 岳羽由加莉 1' && m.display === BLOCKED_IDENTITY, 10000);
+        assertEq(variantFirstSlotUser(m1.board, 'v_jcl'), TARGET_IDENTITY, 'run 回放首格');
+      },
+    },
+    {
+      name: '录制→重放一致',
+      fn: async (page, ctx) => {
+        const recordFile = path.join(ctx.tmpDir, 'record.jsonl');
+        const wsUrl = ctx.wsUrl;
+        const scripted = [
+          'id ' + TARGET_IDENTITY + ' ' + TARGET_IDENTITY,
+          '排 通行证 结城理 1',
+          'id ' + BLOCKED_IDENTITY + ' ' + BLOCKED_IDENTITY,
+          '排 通行证 岳羽由加莉 1',
+        ].join('\n') + '\n';
+        const rec = runNode(
+          ['scripts/sim-record.mjs', '--record', recordFile, '--ws', wsUrl, '--group', GROUP_ID],
+          scripted
+        );
+        assertEq(rec.status, 0, '录制退出码 (stderr: ' + (rec.stderr || '').trim() + ')');
+        const recorded = fs.readFileSync(recordFile, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+        assertEq(recorded.length, 2, 'record.jsonl 行数');
+        const firstRecord = JSON.parse(recorded[0]);
+        for (const key of ['ts', 'user_id', 'nickname', 'text', 'offset_ms', 'group_id']) {
+          assert(Object.prototype.hasOwnProperty.call(firstRecord, key), 'record 字段缺失: ' + key);
+        }
+        await waitForMessage(ctx.base, (m) => m.text === '排 通行证 岳羽由加莉 1', 10000);
+        const stateA = await api(ctx.base, 'GET', '/api/display?since=0');
+        const normalizedA = normalizeState(stateA);
+
+        await resetViaPage(page);
+
+        const rep = runNode([
+          'scripts/sim-record.mjs',
+          '--replay', recordFile,
+          '--ws', wsUrl,
+          '--speed', '0',
+          '--api', ctx.base,
+          '--group', GROUP_ID,
+        ]);
+        assertEq(rep.status, 0, '重放退出码 (stderr: ' + (rep.stderr || '').trim() + ')');
+        await waitForMessage(ctx.base, (m) => m.text === '排 通行证 岳羽由加莉 1', 10000);
+        const stateB = await api(ctx.base, 'GET', '/api/display?since=0');
+        const normalizedB = normalizeState(stateB);
+        assertEq(normalizedB, normalizedA, '录制与重放结果应一致');
       },
     },
     {
@@ -390,9 +554,11 @@ async function main() {
   buildBinary();
 
   const port = await getFreePort();
+  const gatewayPort = await getFreePort();
   const base = `http://127.0.0.1:${port}`;
+  const wsUrl = `ws://127.0.0.1:${gatewayPort}`;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'paigu-e2e-'));
-  const cfgPath = prepareConfig(tmpDir);
+  const cfgPath = prepareConfig(tmpDir, gatewayPort);
 
   let child = null;
   let serverLogs = () => '';
@@ -408,6 +574,8 @@ async function main() {
 
     const health = await waitForHealth(base, 40000);
     log(`· 服务就绪 ${base} (version ${health.version})`);
+    const gw = await waitForGateway(base, `127.0.0.1:${gatewayPort}`, 20000);
+    log(`· Gateway 就绪 ${gw.bound_addr}`);
 
     remote = await startRemoteServer({
       round_id: '月行水上',
@@ -424,13 +592,13 @@ async function main() {
         },
       ],
     });
-    const ctx = { base, remote };
+    const ctx = { base, remote, wsUrl, tmpDir };
 
     browser = await chromium.launch();
     const page = await browser.newPage();
     page.setDefaultTimeout(15000);
 
-    const opened = await openSim(page, base);
+    const opened = await openSim(page, base, wsUrl);
     if (opened.note) log('NOTE ' + opened.note);
 
     await page.waitForFunction(
@@ -440,6 +608,7 @@ async function main() {
       },
       { timeout: 15000 }
     );
+    await page.waitForFunction(() => window.__simWsReady === true, { timeout: 15000 });
     await page.evaluate(() => {
       try {
         Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
@@ -448,7 +617,9 @@ async function main() {
     });
 
     for (const testCase of cases) {
-      await api(base, 'POST', '/api/sim/reset', {});
+      if (testCase.name !== 'remote 数据源') {
+        await resetViaPage(page);
+      }
       try {
         await testCase.fn(page, ctx);
         log(`PASS ${testCase.name}`);

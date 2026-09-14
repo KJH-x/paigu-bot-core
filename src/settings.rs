@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 use crate::domain::ids::{ItemId, RoundId};
 use crate::domain::item::{Item, ItemKind, ItemVariant};
 use crate::domain::money::MoneyCents;
+use crate::round::{ItemClass, PhaseWindow};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -24,6 +25,9 @@ pub struct GatewayConfig {
     pub bind: String,
     #[serde(default)]
     pub whitelist_groups: Vec<String>,
+    /// 成员白名单（user_id / 身份 / 显示名任一命中即放行）；空 = 不限制。
+    #[serde(default)]
+    pub whitelist_members: Vec<String>,
     #[serde(default = "default_heartbeat")]
     pub heartbeat_secs: u64,
     #[serde(default)]
@@ -83,6 +87,9 @@ pub struct RoundSettings {
     pub priority_users: Vec<String>,
     #[serde(default)]
     pub priority_window: Option<PriorityWindow>,
+    /// 阶段时间窗（可配）；空 = 不限制。
+    #[serde(default)]
+    pub phases: Vec<PhaseWindow>,
     #[serde(default)]
     pub items: Vec<ItemConfig>,
 }
@@ -92,6 +99,9 @@ pub struct ItemConfig {
     pub item_id: String,
     pub name: String,
     pub kind: String,
+    /// 商品类别：`"A"`（盲盒/变体，阶段受限）或 `"B"`（固定价单领）；缺省按 B 处理。
+    #[serde(default)]
+    pub class: Option<String>,
     #[serde(default)]
     pub aliases: Vec<String>,
     #[serde(default)]
@@ -109,6 +119,16 @@ pub struct VariantConfig {
 }
 
 impl RoundSettings {
+    /// 商品类别；未配置或非法值按 `B`（不限制）处理。
+    pub fn item_class(&self, item_id: &str) -> ItemClass {
+        self.items
+            .iter()
+            .find(|it| it.item_id == item_id)
+            .and_then(|it| it.class.as_deref())
+            .and_then(ItemClass::parse)
+            .unwrap_or(ItemClass::B)
+    }
+
     pub fn to_items(&self) -> Vec<Item> {
         let round_id = RoundId(self.round_id.clone());
         self.items
@@ -331,6 +351,21 @@ mod tests {
         assert!(is_priority_user(&users, &["x", "user_a"]));
         assert!(!is_priority_user(&users, &["user_c"]));
         assert!(!is_priority_user(&[], &["user_a"]));
+    }
+
+    #[test]
+    fn item_class_reads_config_and_defaults_to_b() {
+        let cfg = default_config();
+        assert_eq!(cfg.round.item_class("pass_sp"), ItemClass::A);
+        assert_eq!(cfg.round.item_class("gift_card"), ItemClass::B);
+        assert_eq!(cfg.round.item_class("does_not_exist"), ItemClass::B);
+    }
+
+    #[test]
+    fn new_fields_default_to_unrestricted() {
+        let cfg = default_config();
+        assert!(cfg.gateway.whitelist_members.is_empty());
+        assert!(cfg.round.phases.is_empty());
     }
 
     #[tokio::test]
