@@ -153,14 +153,20 @@
     }
   }
 
+  function priorityList() {
+    var fromMeta = (state.meta && state.meta.priorityUsers) || [];
+    return fromMeta.length ? fromMeta : P.PRIORITY_USERS;
+  }
+
   function buildIdentitySelect() {
     var sel = $('identity-select');
+    var priorities = priorityList();
     while (sel.firstChild) sel.removeChild(sel.firstChild);
     for (var i = 0; i < state.members.length; i++) {
       var m = state.members[i];
       var opt = document.createElement('option');
       opt.value = m.user_id;
-      opt.textContent = m.cleaned + (m.fallback ? '（内置子集）' : '') + (P.PRIORITY_USERS.indexOf(m.cleaned) >= 0 ? ' · 预存' : '');
+      opt.textContent = m.cleaned + (m.fallback ? '（内置子集）' : '') + (priorities.indexOf(m.cleaned) >= 0 ? ' · 预存' : '');
       sel.appendChild(opt);
     }
     var custom = document.createElement('option');
@@ -170,7 +176,7 @@
   }
 
   function setIdentity(member) {
-    var isPriority = P.PRIORITY_USERS.indexOf(P.cleanNickname(member.nickname || member.cleaned || '')) >= 0;
+    var isPriority = priorityList().indexOf(P.cleanNickname(member.nickname || member.cleaned || '')) >= 0;
     state.identity = {
       user_id: member.user_id,
       nickname: member.cleaned || P.cleanNickname(member.nickname) || member.user_id,

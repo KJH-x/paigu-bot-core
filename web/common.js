@@ -753,15 +753,10 @@
   }
 
   var EMBEDDED_MEMBERS = [
-    '澄猫三崎', '雨落', '霜星厨', 'KJH', 'SIM', '空格', 'Dele.', 'HOA', '梓寒', '齐布/阿布', '晏', '以后当屯屯鼠',
-    'Xnze', '聆听风声', '琉羽', 'cz', 'KitaKita', '羽翼青冥', 'Yomi', '双双', '竹璃', 'kosame', '二黑', '万事', '3206',
-    '鱼见见', '少年', '終夏', '雪雉厨', 'umbb', '林苏', '不长談', '特别周', '幽烛黎夜', 'Malanda', '星砾', '林恩克里斯蒂安',
-    '荷兰豆', '阿文AkameAya', 'code:015', 'wuchang', 'karie', 'LORD', '祁无争', '？？？', '嘟嘟', '枯枯', '可怜酱',
-    'Kang', '芜笙', '韩江', '尤娜', '雾日', '楚狂', '稀饭', 'Nian', '稗子酒商', '千阳', '天江衣', '雀雀', '南极', '谌晨',
-    '静边辰', '豆腐脑', '约德莱卡', '朔夜', '建安文容', 'goya', 'ソクサル'
+    '成员01', '成员02', '成员03', '成员04', '成员05'
   ];
 
-  var PRIORITY_USERS = ['kosame', 'SIM', '芜笙', '林恩克里斯蒂安'];
+  var PRIORITY_USERS = ['user_a', 'user_b', 'user_c', 'user_d'];
 
   function embeddedMembers() {
     return EMBEDDED_MEMBERS.map(function (n) {
@@ -844,8 +839,8 @@
     if (!base) return [];
     if (/\.json(\?|$)/i.test(base)) return [base];
     var list = [];
-    if (roundId) list.push(base + '/rounds/' + encodeURIComponent(roundId) + '/current.json');
-    list.push(base + '/current.json');
+    if (roundId) list.push(base + '/rounds/' + encodeURIComponent(roundId) + '/current');
+    list.push(base + '/current');
     return list;
   }
 

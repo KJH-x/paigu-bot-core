@@ -72,7 +72,7 @@
     "round_id": "月行水上",
     "title": "月行水上",
     "group_id": "720675572",
-    "priority_users": ["kosame","SIM","芜笙","林恩克里斯蒂安"],
+    "priority_users": ["user_a","user_b","user_c","user_d"],
     "priority_window": { "start_ms": 1788782400000, "end_ms": 1788789600000 },
     "items": [ /* 见 §4 */ ]
   },
@@ -83,6 +83,7 @@
 
 - 存储：`ConfigStore`（`tokio::sync::RwLock<AppConfig>` + `revision`）；`PUT` 时校验 `revision`，成功 `revision+1`；`notify` 监听文件变更自动热载。
 - 环境变量覆盖：`PAIGU_CONFIG_PATH`（默认 `config/app.json`）、`PAIGU_HTTP_PORT`（默认 `21081`）。
+- 成员名单读取顺序：`data/members.seed.json`（gitignored，真实名单，支持 `[...]` 或 `{"members":[...]}`）→ `data/members.example.json`（入库占位）→ 空数组；`/api/members` 的 `source` 为 `seed|example|empty`。路径可用 `PAIGU_MEMBERS_SEED_PATH` / `PAIGU_MEMBERS_EXAMPLE_PATH` 覆盖。
 
 ## 4. 商品目录（`round.items`，种子来自 `simulation-corpus/real-chat/月行水上`）
 
@@ -112,7 +113,7 @@
 | POST | `/api/sim/message` | `{user_id, nickname, text, offset_ms, group_id?, is_admin?}` → `{outcome, board, version}` |
 | POST | `/api/sim/identity` | `{user_id, nickname, is_admin?, priority?}` |
 | POST | `/api/sim/reset` | 清空模拟会话 |
-| GET | `/api/members` | 缓存的成员列表 |
+| GET | `/api/members` | 成员列表（`data/members.seed.json` → `data/members.example.json` → 空） |
 | POST | `/api/members/refresh` | 经 Gateway 拉取 `get_group_member_list` |
 | GET | `/api/gateway/status` | WS 连接状态 |
 | GET | `/api/replay/*` | 既有回放桩，接线 |
@@ -138,22 +139,21 @@ CORS：本地开发允许 `http://127.0.0.1:*`；远程展示页读 R2，不经�
 - 展示 5s 增量轮询；`version` 单调；前端 keyed diff。
 - 发布：每次快照变更后异步发布 R2（失败不阻塞业务）。
 
-## 8. 成员子集（内置兜底，已按 POLICY §2 清洗）
+## 8. 成员名单（占位示例）
+
+内置/示例成员使用占位名（`成员01`…`成员05`），入库文件 `data/members.example.json`；
+真实名单放在 gitignored 的 `data/members.seed.json`（支持 `[...]` 或 `{"members":[...]}`）。
+`/api/members` 读取顺序 seed → example → 空，`source` 为 `seed|example|empty`。
 
 ```
-澄猫三崎, 雨落, 霜星厨, KJH, SIM, 空格, Dele., HOA, 梓寒, 齐布/阿布, 晏, 以后当屯屯鼠,
-Xnze, 聆听风声, 琉羽, cz, KitaKita, 羽翼青冥, Yomi, 双双, 竹璃, kosame, 二黑, 万事, 3206,
-鱼见见, 少年, 終夏, 雪雉厨, umbb, 林苏, 不长談, 特别周, 幽烛黎夜, Malanda, 星砾, 林恩克里斯蒂安,
-荷兰豆, 阿文AkameAya, code:015, wuchang, karie, LORD, 祁无争, ？？？, 嘟嘟, 枯枯, 可怜酱,
-Kang, 芜笙, 韩江, 尤娜, 雾日, 楚狂, 稀饭, Nian, 稗子酒商, 千阳, 天江衣, 雀雀, 南极, 谌晨,
-静边辰, 豆腐脑, 约德莱卡, 朔夜, 建安文容, goya, ソクサル
+成员01, 成员02, 成员03, 成员04, 成员05
 ```
-（原始含备注：`Dele.（凛冬）`、`齐布/阿布（俩都是我）`、`code：015` → 已清洗。）
+（占位名单可按需扩展；真实昵称不得写入被 git 跟踪的文件。）
 
 ## 9. 部署（将来）
 
 - 本地：`cargo run`（Gateway + API + Pipeline），数据落 `data/`。
-- 远程：`web/display` 静态页部署 Cloudflare Pages；快照/回放发布 R2；页面按 `display.data_source=remote` 读 `remote_base_url` 下 `rounds/{round_id}/current.json` 等。
+- 远程：`web/display` 静态页部署 Cloudflare Pages；快照/回放发布 R2；页面按 `display.data_source=remote` 读 `remote_base_url` 下 `rounds/{round_id}/current`（**无 `.json` 后缀**，与后端 `GET /rounds/{id}/current` 契约一致；实现见 `web/common.js` 的 `resolveRemoteCandidates`）。
 - 展示页需支持两种数据源适配器（local/remote），同一套渲染。
 
 ## 10. 测试

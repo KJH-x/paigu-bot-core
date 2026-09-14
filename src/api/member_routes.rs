@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -9,22 +9,41 @@ use serde_json::{json, Value};
 
 use super::ApiState;
 
-const BUILTIN_MEMBERS: &[&str] = &[
-    "澄猫三崎", "雨落", "霜星厨", "KJH", "SIM", "空格", "Dele.", "HOA", "梓寒", "齐布/阿布",
-    "晏", "以后当屯屯鼠", "Xnze", "聆听风声", "琉羽", "cz", "KitaKita", "羽翼青冥", "Yomi",
-    "双双", "竹璃", "kosame", "二黑", "万事", "3206", "鱼见见", "少年", "終夏", "雪雉厨",
-    "umbb", "林苏", "不长談", "特别周", "幽烛黎夜", "Malanda", "星砾", "林恩克里斯蒂安",
-    "荷兰豆", "阿文AkameAya", "code:015", "wuchang", "karie", "LORD", "祁无争", "？？？",
-    "嘟嘟", "枯枯", "可怜酱", "Kang", "芜笙", "韩江", "尤娜", "雾日", "楚狂", "稀饭", "Nian",
-    "稗子酒商", "千阳", "天江衣", "雀雀", "南极", "谌晨", "静边辰", "豆腐脑", "约德莱卡",
-    "朔夜", "建安文容", "goya", "ソクサル",
-];
+const SEED_PATH: &str = "data/members.seed.json";
+const EXAMPLE_PATH: &str = "data/members.example.json";
 
-fn builtin_members() -> Vec<Value> {
-    BUILTIN_MEMBERS
-        .iter()
-        .map(|name| json!({ "user_id": Value::Null, "nickname": name }))
-        .collect()
+fn seed_path() -> PathBuf {
+    std::env::var("PAIGU_MEMBERS_SEED_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(SEED_PATH))
+}
+
+fn example_path() -> PathBuf {
+    std::env::var("PAIGU_MEMBERS_EXAMPLE_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(EXAMPLE_PATH))
+}
+
+fn parse_members(raw: &str) -> Option<Vec<Value>> {
+    let value: Value = serde_json::from_str(raw).ok()?;
+    let members = value.get("members").cloned().unwrap_or(value);
+    members.as_array().cloned()
+}
+
+fn load_members(path: &Path) -> Option<Vec<Value>> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| parse_members(&raw))
+}
+
+fn members_from_disk() -> (Vec<Value>, &'static str) {
+    if let Some(members) = load_members(&seed_path()) {
+        return (members, "seed");
+    }
+    if let Some(members) = load_members(&example_path()) {
+        return (members, "example");
+    }
+    (Vec::new(), "empty")
 }
 
 pub fn routes() -> Router<Arc<ApiState>> {
@@ -33,18 +52,9 @@ pub fn routes() -> Router<Arc<ApiState>> {
         .route("/api/members/refresh", post(refresh_members))
 }
 
-async fn get_members(State(state): State<Arc<ApiState>>) -> Json<Value> {
-    let cfg = state.cfg.get().await;
-    match std::fs::read_to_string(Path::new(&cfg.members.cache_path)) {
-        Ok(raw) => match serde_json::from_str::<Value>(&raw) {
-            Ok(value) => {
-                let members = value.get("members").cloned().unwrap_or(value);
-                Json(json!({ "members": members, "source": "cache" }))
-            }
-            Err(_) => Json(json!({ "members": builtin_members(), "source": "builtin" })),
-        },
-        Err(_) => Json(json!({ "members": builtin_members(), "source": "builtin" })),
-    }
+async fn get_members(State(_state): State<Arc<ApiState>>) -> Json<Value> {
+    let (members, source) = members_from_disk();
+    Json(json!({ "members": members, "source": source }))
 }
 
 /// 拉取群成员并写入缓存（供路由与每日 19:00 调度复用）。只读动作，绝不发消息。
@@ -95,10 +105,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtin_subset_is_non_empty_and_shaped() {
-        let members = builtin_members();
-        assert_eq!(members.len(), BUILTIN_MEMBERS.len());
-        assert!(members.iter().any(|m| m["nickname"] == "SIM"));
-        assert!(members.iter().any(|m| m["nickname"] == "code:015"));
+    fn parse_members_accepts_array_and_object() {
+        assert_eq!(parse_members(r#"[{"nickname":"a"}]"#).unwrap().len(), 1);
+        assert_eq!(
+            parse_members(r#"{"members":[{"nickname":"a"},{"nickname":"b"}]}"#)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(parse_members("not json").is_none());
+        assert!(parse_members(r#"{"other":1}"#).is_none());
+    }
+
+    #[test]
+    fn example_members_are_placeholders() {
+        let members =
+            load_members(Path::new(EXAMPLE_PATH)).expect("data/members.example.json 应存在");
+        assert!(!members.is_empty());
+        for m in &members {
+            let nickname = m["nickname"].as_str().unwrap_or("");
+            assert!(nickname.starts_with("成员"), "占位昵称异常: {nickname}");
+        }
     }
 }

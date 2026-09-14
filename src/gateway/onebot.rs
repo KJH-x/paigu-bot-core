@@ -349,10 +349,10 @@ mod tests {
 
     #[test]
     fn clean_nickname_removes_remark() {
-        assert_eq!(clean_nickname("SIM（良乡囤货）").1, "SIM");
-        assert_eq!(clean_nickname("Dele.（凛冬）").1, "Dele.");
-        assert_eq!(clean_nickname("齐布/阿布（俩都是我）").1, "齐布/阿布");
-        assert_eq!(clean_nickname("芜笙（阴暗潜水king👀）").1, "芜笙");
+        assert_eq!(clean_nickname("甲（备注甲）").1, "甲");
+        assert_eq!(clean_nickname("乙.（备注乙）").1, "乙.");
+        assert_eq!(clean_nickname("丙/丁（备注丙）").1, "丙/丁");
+        assert_eq!(clean_nickname("戊（备注戊👀）").1, "戊");
     }
 
     #[test]
@@ -360,12 +360,12 @@ mod tests {
         let (identity, display) = clean_nickname("A（代B）");
         assert_eq!(identity, "A");
         assert_eq!(display, "A(B)");
-        assert_eq!(clean_nickname("SIM(代 芜笙)").0, "SIM");
+        assert_eq!(clean_nickname("甲(代 乙)").0, "甲");
     }
 
     #[test]
     fn clean_nickname_normalizes_fullwidth() {
-        assert_eq!(clean_nickname("code：015").1, "code:015");
+        assert_eq!(clean_nickname("名：015").1, "名:015");
     }
 
     #[test]
@@ -374,13 +374,13 @@ mod tests {
         ev.sender = Some(Sender {
             user_id: Some(json!("10001")),
             nickname: Some("nick".to_string()),
-            card: Some("SIM（良乡囤货）".to_string()),
+            card: Some("甲（备注甲）".to_string()),
             role: Some("admin".to_string()),
         });
         let id = parse_identity(&ev);
         assert_eq!(id.user_id, "10001");
-        assert_eq!(id.identity, "SIM");
-        assert_eq!(id.display, "SIM");
+        assert_eq!(id.identity, "甲");
+        assert_eq!(id.display, "甲");
         assert!(id.is_admin);
     }
 

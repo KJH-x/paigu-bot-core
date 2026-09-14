@@ -28,7 +28,7 @@
     "round_id": "月行水上",
     "title": "月行水上",
     "group_id": "720675572",
-    "priority_users": ["kosame", "SIM", "芜笙", "林恩克里斯蒂安"],
+    "priority_users": ["user_a", "user_b", "user_c", "user_d"],
     "priority_window": { "start_ms": 1788782400000, "end_ms": 1788789600000 },
     "items": [
       {

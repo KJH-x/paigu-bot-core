@@ -99,3 +99,10 @@ node tests/e2e/sim.mjs      # 端到端测试
 ```
 
 **遗留/后续**：真实 NapCat 接入后 `reply_enabled=false`（不回复）——需用户确认后再开；成员拉取依赖 NapCat 已连接；Cloudflare 远程展示（R2 发布 + Pages）尚未接线。
+
+## 阻塞 / 待办（脱敏任务）
+
+- ✅ **已由 A0 处理**：`src/llm/pipeline.rs` 测试改用占位优先用户 `prio_user`；`src/gateway/onebot.rs` 昵称测试改用占位名（`甲/乙/丙/丁/戊`）；`agent-d-adversarial/*` 与 `real-xlsx/README.md` 的真实昵称 → 占位。
+- **D6 归属**：`viewer/README.md`、`viewer/viewer.js` 仍含真实昵称（示例数据），合并进 `web/` 时须脱敏或删除。
+- **真实名单策略**：真实群成员名单只放 gitignored `data/members.seed.json`；入库仅 `data/members.example.json`（占位）。
+- **校验**：`git grep` 真实昵称在**跟踪文件**中应为 0 命中（`git grep -F "？？？"` 等）。

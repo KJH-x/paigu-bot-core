@@ -36,7 +36,7 @@
 {"source_sequence":36,"message_id":"d36","user_id":"u_g","nickname":"庚","text":"@甲 你排了吗","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
 {"source_sequence":37,"message_id":"d37","user_id":"u_h","nickname":"辛","text":"","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
 {"source_sequence":38,"message_id":"d38","user_id":"u_i","nickname":"壬","text":"哈哈哈哈哈哈","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
-{"source_sequence":39,"message_id":"d39","user_id":"u_j","nickname":"癸","text":"？？？","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
+{"source_sequence":39,"message_id":"d39","user_id":"u_j","nickname":"癸","text":"某成员","status":"Ignored","detail":"无法识别为排谷/撤销意图"}
 {"source_sequence":40,"message_id":"d40","user_id":"u_k","nickname":"子","text":"排燐音吧唧0","status":"Rejected","detail":"商品 燐音吧唧 数量为 0，未记录。"}
 {"source_sequence":41,"message_id":"d41","user_id":"u_a","nickname":"甲","text":"排燐音吧唧999","status":"Rejected","detail":"商品 燐音吧唧 数量 999 超出单次上限 99，请分开发送。"}
 {"source_sequence":42,"message_id":"d42","user_id":"u_b","nickname":"乙","text":"排燐音吧唧","status":"Applied","detail":"claim: badge_rinnex1[normal]"}

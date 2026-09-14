@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,8 +16,8 @@ const EXE = path.join(
   process.platform === 'win32' ? 'paigu-bot-core.exe' : 'paigu-bot-core'
 );
 const FIXED_WINDOW = { start_ms: 1600000000000, end_ms: 1600003600000 };
-const TARGET_IDENTITY = 'SIM';
-const BLOCKED_IDENTITY = '齐布/阿布';
+const TARGET_IDENTITY = '成员01';
+const BLOCKED_IDENTITY = '成员02';
 
 function log(line) {
   process.stdout.write(line + '\n');
@@ -67,6 +68,7 @@ function prepareConfig(tmpDir) {
   cfg.llm.enabled = false;
   cfg.llm.fallback_to_rules = true;
   cfg.round.priority_window = { ...FIXED_WINDOW };
+  cfg.round.priority_users = [TARGET_IDENTITY];
   cfg.members.cache_path = path.join(tmpDir, 'members.json');
   const cfgDir = path.join(tmpDir, 'config');
   fs.mkdirSync(cfgDir, { recursive: true });
@@ -83,6 +85,8 @@ function startServer(port, cfgPath) {
       PAIGU_CONFIG_PATH: cfgPath,
       PAIGU_HTTP_PORT: String(port),
       PAIGU_WEB_DIR: path.join(REPO_ROOT, 'web'),
+      PAIGU_MEMBERS_SEED_PATH: path.join(path.dirname(cfgPath), 'members.seed.json'),
+      PAIGU_MEMBERS_EXAMPLE_PATH: path.join(REPO_ROOT, 'data', 'members.example.json'),
       RUST_LOG: process.env.RUST_LOG || 'warn',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -95,6 +99,35 @@ function startServer(port, cfgPath) {
   child.stdout.on('data', capture);
   child.stderr.on('data', capture);
   return { child, logs: () => logs };
+}
+
+function startRemoteServer(snapshot) {
+  return new Promise((resolve) => {
+    const paths = [];
+    const server = http.createServer((req, res) => {
+      const pathname = decodeURIComponent((req.url || '/').split('?')[0]);
+      paths.push(pathname);
+      const headers = {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      };
+      if (pathname.endsWith('/current')) {
+        res.writeHead(200, headers);
+        res.end(JSON.stringify(snapshot));
+      } else {
+        res.writeHead(404, headers);
+        res.end(JSON.stringify({ error: 'not_found' }));
+      }
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({
+        base: `http://127.0.0.1:${port}`,
+        paths,
+        close: () => new Promise((done) => server.close(() => done())),
+      });
+    });
+  });
 }
 
 function waitExit(child, timeoutMs) {
@@ -290,6 +323,66 @@ function buildCases() {
         await waitBoardFirstCell(page, TARGET_IDENTITY);
       },
     },
+    {
+      name: '/sim 静态资源 200',
+      fn: async (page, ctx) => {
+        for (const urlPath of ['/sim', '/common.js', '/sim.js', '/display.css']) {
+          const res = await fetch(ctx.base + urlPath, { signal: AbortSignal.timeout(10000) });
+          assertEq(res.status, 200, urlPath + ' 状态');
+        }
+      },
+    },
+    {
+      name: 'PUT /api/config 冲突 409',
+      fn: async (page, ctx) => {
+        const current = await fetch(ctx.base + '/api/config', {
+          signal: AbortSignal.timeout(10000),
+        }).then((res) => res.json());
+        const res = await fetch(ctx.base + '/api/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config: current.config, revision: (current.revision || 0) + 999 }),
+          signal: AbortSignal.timeout(10000),
+        });
+        assertEq(res.status, 409, '陈旧 revision 状态');
+        const body = await res.json();
+        assertEq(body.error, 'stale_revision', '错误码');
+      },
+    },
+    {
+      name: '/api/members 回退 example',
+      fn: async (page, ctx) => {
+        const res = await fetch(ctx.base + '/api/members', {
+          signal: AbortSignal.timeout(10000),
+        }).then((r) => r.json());
+        assertEq(res.source, 'example', '成员来源');
+        assertEq(res.members.length, 5, '占位成员数');
+        assert(
+          res.members.every((m) => String(m.nickname || '').startsWith('成员')),
+          '占位昵称应以「成员」开头'
+        );
+      },
+    },
+    {
+      name: 'remote 数据源',
+      fn: async (page, ctx) => {
+        const url =
+          `${ctx.base}/?api=${encodeURIComponent(ctx.base)}` +
+          `&source=remote&remote=${encodeURIComponent(ctx.remote.base)}` +
+          `&round=${encodeURIComponent('月行水上')}`;
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction(
+          () => {
+            const cell = document.querySelector('#board .cell-user');
+            return !!cell && cell.textContent.trim() === '远程用户';
+          },
+          { timeout: 15000 }
+        );
+        const hit = ctx.remote.paths.find((p) => p.endsWith('/current'));
+        assert(hit, 'remote 应请求 rounds/<id>/current');
+        assert(!hit.includes('.json'), 'remote 路径不应带 .json: ' + hit);
+      },
+    },
   ];
 }
 
@@ -304,6 +397,7 @@ async function main() {
   let child = null;
   let serverLogs = () => '';
   let browser = null;
+  let remote = null;
   let failures = 0;
   const cases = buildCases();
 
@@ -314,6 +408,23 @@ async function main() {
 
     const health = await waitForHealth(base, 40000);
     log(`· 服务就绪 ${base} (version ${health.version})`);
+
+    remote = await startRemoteServer({
+      round_id: '月行水上',
+      title: '月行水上',
+      version: 7,
+      updated_at: '2026-09-07 22:00',
+      item_allocations: [
+        {
+          item_id: 'pass_sp',
+          variant_id: 'v_jcl',
+          boxes: [
+            { box_index: 1, slots: [{ slot_index: 1, user_id: '远程用户', status: 'filled' }] },
+          ],
+        },
+      ],
+    });
+    const ctx = { base, remote };
 
     browser = await chromium.launch();
     const page = await browser.newPage();
@@ -339,7 +450,7 @@ async function main() {
     for (const testCase of cases) {
       await api(base, 'POST', '/api/sim/reset', {});
       try {
-        await testCase.fn(page);
+        await testCase.fn(page, ctx);
         log(`PASS ${testCase.name}`);
       } catch (err) {
         failures += 1;
@@ -354,6 +465,10 @@ async function main() {
   } finally {
     try {
       if (browser) await browser.close();
+    } catch (err) {
+    }
+    try {
+      if (remote) await remote.close();
     } catch (err) {
     }
     if (child) {

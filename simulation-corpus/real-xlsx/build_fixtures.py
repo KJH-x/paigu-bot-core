@@ -5,8 +5,9 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
-ROOT = r"C:\_CustomPrograms\AnAgent\workspace\paigu-bot-core-20260510"
+ROOT = Path(__file__).resolve().parents[2]
 OUT = os.path.join(ROOT, "simulation-corpus", "real-xlsx")
 EXE = os.path.join(ROOT, "target", "debug", "paigu-bot-core.exe")
 SAMPLES = [

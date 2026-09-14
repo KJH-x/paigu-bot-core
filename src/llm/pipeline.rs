@@ -762,6 +762,7 @@ mod tests {
         cfg.llm.enabled = true;
         cfg.llm.fallback_to_rules = true;
         cfg.llm.api_key_env = "PAIGU_TEST_KEY_UNSET".to_string();
+        cfg.round.priority_users = vec!["prio_user".to_string()];
         cfg.round.priority_window = None;
         cfg
     }
@@ -878,11 +879,14 @@ mod tests {
             .await;
         assert_eq!(first.status, "Applied");
         let second = pipeline
-            .process(event("SIM", "SIM", "排 通行证 结城理 1", 2_000))
+            .process(event("prio_user", "prio_user", "排 通行证 结城理 1", 2_000))
             .await;
         assert_eq!(second.status, "Applied");
         let (_, snapshot) = pipeline.board().await;
-        assert_eq!(slot_user(&snapshot, "pass_sp", "v_jcl"), Some("SIM".to_string()));
+        assert_eq!(
+            slot_user(&snapshot, "pass_sp", "v_jcl"),
+            Some("prio_user".to_string())
+        );
     }
 
     #[tokio::test]
