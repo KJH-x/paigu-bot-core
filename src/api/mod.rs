@@ -59,6 +59,7 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
     let display_page = ServeFile::new(web.join("display.html"));
     let admin_page = ServeFile::new(web.join("admin.html"));
     let sim_page = ServeFile::new(web.join("sim.html"));
+    let replay_page = ServeFile::new(web.join("replay.html"));
 
     Router::new()
         .merge(config_routes::routes())
@@ -71,6 +72,7 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .route("/", get_service(display_page))
         .route("/admin", get_service(admin_page))
         .route("/sim", get_service(sim_page))
+        .route("/replay", get_service(replay_page))
         .nest_service("/web", ServeDir::new(web.clone()))
         .fallback_service(ServeDir::new(web))
         .with_state(state)

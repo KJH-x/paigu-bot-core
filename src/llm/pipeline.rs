@@ -10,13 +10,11 @@ use tracing::warn;
 
 use crate::bus::{EventSink, IncomingEvent, PipelineOutcome};
 use crate::domain::claim::{Eligibility, EligibilityScope};
-use crate::domain::event::{DomainEvent, EventEnvelope};
+use crate::domain::event::EventEnvelope;
 use crate::domain::ids::{EligibilityId, RoundId, UserId};
 use crate::domain::item::{Item, RoundContext};
 use crate::domain::snapshot::AllocationSnapshot;
-use crate::engine::allocation_engine::AllocationEngine;
-use crate::engine::event_store::{EventStore, InMemoryEventStore};
-use crate::engine::replay::ReplayService;
+use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
 use crate::parser::parsed_event::{ParsedClaimItem, ParsedIntent, ParsedMessage};
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidationOutcome};
@@ -72,7 +70,7 @@ impl Pipeline {
 
     pub async fn process(&self, ev: IncomingEvent) -> PipelineOutcome {
         let cfg = self.cfg.get().await;
-        let (identity, display_raw) = sanitize_identity(&ev.nickname);
+        let (identity, display_raw) = crate::gateway::onebot::clean_nickname(&ev.nickname);
         let display = if display_raw.trim().is_empty() {
             ev.user_id.clone()
         } else {
@@ -254,8 +252,21 @@ impl Pipeline {
             }
         };
 
-        let is_priority = is_priority_user(&cfg, &ev, &identity, &display);
-        if in_priority_window(&cfg, ev.timestamp_ms) && !is_priority {
+        let is_priority = crate::settings::is_priority_user(
+            &cfg.round.priority_users,
+            &[
+                ev.user_id.as_str(),
+                ev.nickname.as_str(),
+                identity.as_str(),
+                display.as_str(),
+            ],
+        );
+        let window = cfg
+            .round
+            .priority_window
+            .as_ref()
+            .map(|w| (w.start_ms, w.end_ms));
+        if crate::settings::in_priority_window(window, ev.timestamp_ms) && !is_priority {
             return self
                 .finish(
                     &ev,
@@ -277,7 +288,9 @@ impl Pipeline {
                     .push(priority_eligibility(&round_id, &ev.user_id));
             }
             state.events.push(event);
-            let (version, snapshot) = rebuild(&items, &state.events, &state.eligibilities);
+            let snapshot =
+                rebuild_allocation_snapshot(&items, &state.events, &state.eligibilities);
+            let version = snapshot.version;
             let snapshot_value = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
             state.version = version;
             state.snapshot = Some(snapshot);
@@ -413,57 +426,6 @@ impl EventSink for Pipeline {
     }
 }
 
-fn rebuild(
-    items: &[Item],
-    events: &[EventEnvelope],
-    eligibilities: &[Eligibility],
-) -> (i64, AllocationSnapshot) {
-    let mut sorted = events.to_vec();
-    sorted.sort_by(crate::domain::event::compare_event_order);
-    let store: Arc<dyn EventStore> = Arc::new(InMemoryEventStore::new());
-    let service = ReplayService::new(store);
-    let lines = service.collect_effective_claims(&sorted, eligibilities);
-    let engine = AllocationEngine::new();
-    let mut snapshot = engine
-        .allocate(items, &lines, &sorted)
-        .unwrap_or_else(|_| empty_snapshot(items));
-    snapshot.version = sorted.len() as i64;
-    (snapshot.version, snapshot)
-}
-
-fn empty_snapshot(items: &[Item]) -> AllocationSnapshot {
-    AllocationSnapshot {
-        round_id: items
-            .first()
-            .map(|i| i.round_id.clone())
-            .unwrap_or_else(|| RoundId("unknown".to_string())),
-        version: 0,
-        generated_at: Utc::now(),
-        item_allocations: vec![],
-        user_summaries: vec![],
-        warnings: vec![],
-    }
-}
-
-fn describe_event(event: &EventEnvelope) -> String {
-    match &event.payload {
-        DomainEvent::ClaimCreated(c) => {
-            let items: Vec<String> = c
-                .items
-                .iter()
-                .map(|l| format!("{}x{}[{}]", l.item_id.0, l.quantity, l.slot_policy.as_str()))
-                .collect();
-            format!("claim: {}", items.join(", "))
-        }
-        DomainEvent::ClaimCancelled(c) => format!(
-            "cancel: item={:?} qty={:?}",
-            c.target_item_id.as_ref().map(|i| i.0.clone()),
-            c.quantity
-        ),
-        other => format!("event: {}", other.event_type_str()),
-    }
-}
-
 fn priority_eligibility(round_id: &RoundId, user_id: &str) -> Eligibility {
     Eligibility {
         eligibility_id: EligibilityId(uuid::Uuid::new_v4().to_string()),
@@ -482,58 +444,6 @@ fn priority_eligibility(round_id: &RoundId, user_id: &str) -> Eligibility {
         valid_until: None,
         note: Some("预存(购物金)用户".to_string()),
     }
-}
-
-fn in_priority_window(cfg: &AppConfig, timestamp_ms: i64) -> bool {
-    match &cfg.round.priority_window {
-        Some(window) => timestamp_ms >= window.start_ms && timestamp_ms < window.end_ms,
-        None => false,
-    }
-}
-
-fn is_priority_user(cfg: &AppConfig, ev: &IncomingEvent, identity: &str, display: &str) -> bool {
-    cfg.round.priority_users.iter().any(|u| {
-        let u = u.trim();
-        u == ev.user_id || u == ev.nickname || u == identity || u == display
-    })
-}
-
-fn sanitize_identity(nickname: &str) -> (String, String) {
-    let normalized = fullwidth_to_half(nickname);
-    let trimmed = normalized.trim();
-
-    if let Some(pos) = trimmed.find("(代") {
-        let identity = trimmed[..pos].trim().to_string();
-        let rest = &trimmed[pos + 1..];
-        if let Some(close) = rest.find(')') {
-            let display = format!("{}({})", identity, &rest[..close]);
-            return (identity, display);
-        }
-    }
-
-    let identity = match trimmed.find('(') {
-        Some(pos) => trimmed[..pos].trim().to_string(),
-        None => trimmed.to_string(),
-    };
-    (identity.clone(), identity)
-}
-
-fn fullwidth_to_half(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        let mapped = match ch {
-            '０'..='９' => char::from_u32(ch as u32 - 0xFF10 + '0' as u32).unwrap_or(ch),
-            'Ａ'..='Ｚ' => char::from_u32(ch as u32 - 0xFF21 + 'A' as u32).unwrap_or(ch),
-            'ａ'..='ｚ' => char::from_u32(ch as u32 - 0xFF41 + 'a' as u32).unwrap_or(ch),
-            '：' => ':',
-            '（' => '(',
-            '）' => ')',
-            '　' => ' ',
-            _ => ch,
-        };
-        out.push(mapped);
-    }
-    out
 }
 
 #[derive(Deserialize)]
@@ -575,7 +485,7 @@ fn parse_llm_json(raw: &str, items: &[Item], round_id: &str) -> anyhow::Result<P
     let out: LlmOut = serde_json::from_str(&json_text).map_err(|e| {
         anyhow::anyhow!(
             "LLM JSON 解析失败: {e}; raw={}",
-            truncate(raw, 200)
+            super::truncate(raw, 200)
         )
     })?;
 
@@ -700,17 +610,6 @@ fn extract_json(raw: &str) -> String {
         (Some(start), Some(end)) if end > start => stripped[start..=end].to_string(),
         _ => stripped.to_string(),
     }
-}
-
-fn truncate(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        return text.to_string();
-    }
-    let mut end = max;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}…", &text[..end])
 }
 
 #[cfg(test)]

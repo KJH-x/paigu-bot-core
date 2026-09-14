@@ -8,7 +8,7 @@ use crate::domain::event::{EventEnvelope, DomainEvent, compare_event_order};
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::domain::settlement::SettlementSnapshot;
 use crate::domain::discount::DiscountRule;
-use crate::engine::event_store::EventStore;
+use crate::engine::event_store::{EventStore, InMemoryEventStore};
 use crate::engine::allocation_engine::AllocationEngine;
 use crate::engine::settlement_engine::SettlementEngine;
 use crate::error::AppResult;
@@ -192,5 +192,60 @@ impl ReplayService {
             }
         }
         None
+    }
+}
+
+/// 用内存事件列表重建分配快照（Pipeline 等同步重放的唯一入口）。
+/// 先按 `(effective_at, sequence)` 排序，再收集生效 claim 并按优先级排序，最后分配。
+pub fn rebuild_allocation_snapshot(
+    items: &[Item],
+    events: &[EventEnvelope],
+    eligibilities: &[Eligibility],
+) -> AllocationSnapshot {
+    let mut sorted = events.to_vec();
+    sorted.sort_by(compare_event_order);
+    let store: Arc<dyn EventStore> = Arc::new(InMemoryEventStore::new());
+    let service = ReplayService::new(store);
+    let lines = service.collect_effective_claims(&sorted, eligibilities);
+    match service.allocation_engine.allocate(items, &lines, &sorted) {
+        Ok(mut snapshot) => {
+            snapshot.version = sorted.len() as i64;
+            snapshot
+        }
+        Err(_) => empty_snapshot(items),
+    }
+}
+
+fn empty_snapshot(items: &[Item]) -> AllocationSnapshot {
+    AllocationSnapshot {
+        round_id: items
+            .first()
+            .map(|i| i.round_id.clone())
+            .unwrap_or_else(|| RoundId("unknown".to_string())),
+        version: 0,
+        generated_at: chrono::Utc::now(),
+        item_allocations: vec![],
+        user_summaries: vec![],
+        warnings: vec![],
+    }
+}
+
+/// 事件的人类可读摘要（消息流展示用）。
+pub fn describe_event(event: &EventEnvelope) -> String {
+    match &event.payload {
+        DomainEvent::ClaimCreated(c) => {
+            let items: Vec<String> = c
+                .items
+                .iter()
+                .map(|l| format!("{}x{}[{}]", l.item_id.0, l.quantity, l.slot_policy.as_str()))
+                .collect();
+            format!("claim: {}", items.join(", "))
+        }
+        DomainEvent::ClaimCancelled(c) => format!(
+            "cancel: item={:?} qty={:?}",
+            c.target_item_id.as_ref().map(|i| i.0.clone()),
+            c.quantity
+        ),
+        other => format!("event: {}", other.event_type_str()),
     }
 }

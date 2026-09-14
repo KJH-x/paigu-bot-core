@@ -23,8 +23,6 @@ pub struct AppConfig {
 pub struct GatewayConfig {
     pub bind: String,
     #[serde(default)]
-    pub require_token: bool,
-    #[serde(default)]
     pub whitelist_groups: Vec<String>,
     #[serde(default = "default_heartbeat")]
     pub heartbeat_secs: u64,
@@ -149,6 +147,19 @@ impl RoundSettings {
             })
             .collect()
     }
+}
+
+/// 是否落在优先时段 `[start_ms, end_ms)` 内（end 独占）。
+pub fn in_priority_window(window: Option<(i64, i64)>, timestamp_ms: i64) -> bool {
+    matches!(window, Some((start, end)) if timestamp_ms >= start && timestamp_ms < end)
+}
+
+/// 任一候选串（user_id/昵称/身份/显示）命中预存(购物金)名单即视为预存用户。
+pub fn is_priority_user(priority_users: &[String], candidates: &[&str]) -> bool {
+    priority_users.iter().any(|u| {
+        let u = u.trim();
+        candidates.iter().any(|c| u == *c)
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -305,5 +316,28 @@ impl ConfigStore {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn priority_window_is_end_exclusive() {
+        assert!(in_priority_window(Some((100, 200)), 100));
+        assert!(in_priority_window(Some((100, 200)), 199));
+        assert!(!in_priority_window(Some((100, 200)), 200));
+        assert!(!in_priority_window(Some((100, 200)), 99));
+        assert!(!in_priority_window(None, 150));
+    }
+
+    #[test]
+    fn priority_user_matches_any_candidate() {
+        let users = vec!["user_a".to_string(), "user_b".to_string()];
+        assert!(is_priority_user(&users, &["user_b"]));
+        assert!(is_priority_user(&users, &["x", "user_a"]));
+        assert!(!is_priority_user(&users, &["user_c"]));
+        assert!(!is_priority_user(&[], &["user_a"]));
     }
 }

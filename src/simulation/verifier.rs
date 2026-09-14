@@ -308,14 +308,14 @@ pub async fn verify(queue_path: &Path, fixture: RoundFixture) -> anyhow::Result<
         }
 
         // 优先时段：仅预存(购物金)用户可排，其余请求拒绝。
-        if let Some((start_ms, end_ms)) = fixture.priority_window {
-            if rec.timestamp_ms >= start_ms
-                && rec.timestamp_ms < end_ms
-                && !fixture.priority_users.iter().any(|u| u == &rec.user_id)
-            {
-                outcomes.push(outcome(rec, "Rejected", "优先时段仅限预存(购物金)用户，请求已拒绝".to_string()));
-                continue;
-            }
+        if crate::settings::in_priority_window(fixture.priority_window, rec.timestamp_ms)
+            && !crate::settings::is_priority_user(
+                &fixture.priority_users,
+                &[rec.user_id.as_str()],
+            )
+        {
+            outcomes.push(outcome(rec, "Rejected", "优先时段仅限预存(购物金)用户，请求已拒绝".to_string()));
+            continue;
         }
 
         if text.contains("购物金") && !text.contains("非购物金") && !fund_users.contains(&rec.user_id) {

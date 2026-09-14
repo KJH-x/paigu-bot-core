@@ -2,7 +2,6 @@
   "revision": 1,
   "gateway": {
     "bind": "192.0.2.1:9801",
-    "require_token": false,
     "whitelist_groups": ["123456789"],
     "heartbeat_secs": 15,
     "reply_enabled": false,
