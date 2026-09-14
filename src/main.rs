@@ -16,6 +16,10 @@ mod simulation;
 mod ws;
 mod gateway;
 mod llm;
+mod messages;
+mod round;
+mod settlement;
+mod snapshot_bundle;
 #[cfg(test)]
 mod tests;
 
