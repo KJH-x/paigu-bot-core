@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>排谷结算 · 下单表</title>
+  <link rel="stylesheet" href="display.css" />
+  <link rel="stylesheet" href="settlement.css" />
+  <script>
+    window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
+  </script>
+  <script defer src="common.js"></script>
+  <script defer src="settlement.js"></script>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <span class="brand">排谷结算 · 下单表</span>
+      <span id="rev-badge" class="status-badge">revision —</span>
+      <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
+      <span class="spacer"></span>
+      <label class="row tight">
+        <span class="hint">API</span>
+        <input id="api" size="26" />
+      </label>
+      <button id="load" class="small">重新载入</button>
+      <button id="save" class="primary">保存结算配置</button>
+      <span class="nav-links">
+        <a href="index.html">首页</a>
+        <a href="display.html">展示</a>
+        <a href="admin.html">管理</a>
+        <a href="sim.html">模拟器</a>
+      </span>
+    </div>
+
+    <div id="banner" class="banner"></div>
+
+    <datalist id="item-ids"></datalist>
+    <datalist id="variant-ids"></datalist>
+
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-head">
+          <span>结算配置</span>
+          <span class="spacer"></span>
+          <span id="cfg-hint" class="hint"></span>
+        </div>
+        <div class="panel-body">
+          <div class="card">
+            <div class="card-head">
+              <span>调价（pricing）</span>
+              <span class="spacer"></span>
+              <label class="row tight"><span class="hint">新模式</span>
+                <select id="price-mode-global">
+                  <option value="AdjustBy">原价加减</option>
+                  <option value="SetFinal">直设调后价</option>
+                </select>
+              </label>
+              <button id="price-add" class="small">添加调价</button>
+            </div>
+            <div class="hint">调价只生成「调后价」列，不参与折扣/特典/减均计算（基准为原价）。</div>
+            <div id="pricing-list" class="rows"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <span>折扣（discounts）</span>
+              <span class="spacer"></span>
+              <button id="disc-add" class="small">添加折扣</button>
+            </div>
+            <label class="field"><span>作用范围 scope_mode</span>
+              <select id="scope-mode">
+                <option value="ExcludeGift">B：所有商品，不含特典</option>
+                <option value="IncludeGift">A：含已认购特典</option>
+              </select>
+            </label>
+            <div class="hint">满减＝每包达门槛减 amount；全单＝按折扣率回摊。份数 n：-1 表示全部，n≥1 只作用金额最高的前 n 个包。</div>
+            <div id="discount-list" class="rows"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <span>特典档位（gift_tiers）</span>
+              <span class="spacer"></span>
+              <button id="tier-add" class="small">添加档位</button>
+            </div>
+            <div class="hint">每个下单包金额满门槛即附赠；多档叠加、单包独立、不跨包累计；各档可设各自价格。</div>
+            <div id="tier-list" class="rows"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span>减均（reduce_average）</span></div>
+            <label class="row tight">
+              <input id="reduce-include" type="checkbox" style="width:auto" />
+              <span>减均范围包含特典价格（不勾选＝只对实购商品减均）</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <span>下单表（拖拽 item → 包）</span>
+          <span class="spacer"></span>
+          <button id="load-allocation" class="small">从当前排位生成</button>
+          <button id="load-sample" class="small">载入占位示例</button>
+          <button id="pkg-add" class="small">添加包</button>
+          <button id="evaluate" class="primary">试算</button>
+        </div>
+        <div class="panel-body">
+          <div id="order-table" class="order-table"></div>
+          <div id="order-empty" class="empty">尚无下单表：点「载入占位示例」或「从当前排位生成」。</div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:12px">
+      <div class="panel-head">
+        <span>试算结果</span>
+        <span class="spacer"></span>
+        <span id="result-summary" class="hint"></span>
+      </div>
+      <div class="panel-body">
+        <div id="result-empty" class="empty">尚未试算。</div>
+        <div id="result-body" class="hidden">
+          <div id="totals" class="totals"></div>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>下单包</th>
+                  <th>折前(元)</th>
+                  <th>调后(元)</th>
+                  <th>折扣(元)</th>
+                  <th>减均(元)</th>
+                  <th>应付(元)</th>
+                  <th>特典数</th>
+                  <th>特典价(元)</th>
+                </tr>
+              </thead>
+              <tbody id="result-packages"></tbody>
+            </table>
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="card-head"><span>特典清单</span></div>
+            <div id="gift-list"></div>
+          </div>
+          <div id="warnings" class="banner"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:12px">
+      <div class="panel-head">
+        <span>两策略对比</span>
+        <span class="spacer"></span>
+        <button id="run-plans" class="primary">运行两策略</button>
+      </div>
+      <div class="panel-body">
+        <div class="layout">
+          <div class="card plan-col" id="plan-gift_max">
+            <div class="card-head"><span>特典最多化（gift_max）</span></div>
+            <div class="plan-body empty">未运行。</div>
+          </div>
+          <div class="card plan-col" id="plan-discount_max">
+            <div class="card-head"><span>折扣最大化（discount_max）</span></div>
+            <div class="plan-body empty">未运行。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

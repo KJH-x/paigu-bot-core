@@ -19,6 +19,7 @@ mod llm;
 mod messages;
 mod round;
 mod settlement;
+mod planner;
 mod snapshot_bundle;
 #[cfg(test)]
 mod tests;
