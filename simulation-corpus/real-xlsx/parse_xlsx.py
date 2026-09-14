@@ -11,8 +11,9 @@ import re
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
-ROOT = r"C:\_CustomPrograms\AnAgent\workspace\paigu-bot-core-20260510"
+ROOT = Path(__file__).resolve().parents[2]
 OUT = os.path.join(ROOT, "simulation-corpus", "real-xlsx")
 
 SAMPLES = [

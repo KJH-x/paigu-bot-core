@@ -23,7 +23,8 @@ node_modules/
 *.xlsx
 *.xls
 sample*.json
-/simulation-corpus/real-chat/
+/simulation-corpus/real-chat/*
+!/simulation-corpus/real-chat/README.public.md
 /simulation-corpus/real-xlsx/月行水上/
 /simulation-corpus/real-xlsx/覆雪于冬/
 /simulation-corpus/real-samples/sample1/
@@ -35,7 +36,11 @@ cookies/
 *.log
 # 运行时配置与数据（本地）
 /config/
-/data/
+/data/*
+!/data/members.example.json
+
+# 生成物：逐条 result.json 体积大，只保留 report.md / outcomes.jsonl
+/simulation-corpus/agent-*/out/result.json
 
 # ---------- 开发文档（不入库） ----------
 ARCHITECTURE.md
@@ -43,3 +48,5 @@ LOGIC_CHAINS.md
 REPLAY_SIMULATION_ADDENDUM.md
 /simulation-corpus/VERIFICATION.md
 /simulation-corpus/CHANGELOG.md
+!/simulation-corpus/VERIFICATION.public.md
+!/simulation-corpus/CHANGELOG.public.md

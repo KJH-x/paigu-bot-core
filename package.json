@@ -7,8 +7,9 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "test:e2e": "node tests/e2e/sim.mjs"
+    "test:e2e": "node tests/e2e/sim.mjs",
+    "sim:verify": "node simulation-corpus/real-samples/verify-samples.mjs simulation-corpus/real-samples",
+    "web:serve": "python -m http.server --directory web 8000"
   },
   "repository": {
     "type": "git",

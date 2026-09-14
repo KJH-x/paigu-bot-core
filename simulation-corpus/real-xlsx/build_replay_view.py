@@ -3,8 +3,9 @@
 import json
 import os
 import re
+from pathlib import Path
 
-ROOT = r"C:\_CustomPrograms\AnAgent\workspace\paigu-bot-core-20260510"
+ROOT = Path(__file__).resolve().parents[2]
 OUT = os.path.join(ROOT, "simulation-corpus", "real-xlsx")
 VIEWER = os.path.join(ROOT, "viewer")
 SAMPLES = ["月行水上", "覆雪于冬"]
