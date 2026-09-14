@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>排谷重放步进查看器</title>
+  <link rel="stylesheet" href="display.css" />
+  <link rel="stylesheet" href="replay.css" />
+  <script>
+    window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script defer src="common.js"></script>
+  <script defer src="replay.js"></script>
+</head>
+<body>
+  <div class="page replay">
+    <div class="topbar">
+      <span class="brand">排谷重放</span>
+      <div class="title-block">
+        <span id="replay-title" class="title">重放步进查看器</span>
+        <span id="step-info" class="meta">未加载数据</span>
+      </div>
+      <span class="spacer"></span>
+      <div class="replay-controls">
+        <button id="btn-first" title="跳到首步 (Home)">⏮ 首步</button>
+        <button id="btn-prev" title="上一步 (←)">◀ 上一步</button>
+        <button id="btn-play" title="播放/暂停 (空格)">▶ 播放</button>
+        <button id="btn-next" title="下一步 (→)">下一步 ▶</button>
+        <button id="btn-last" title="跳到末步 (End)">末步 ⏭</button>
+        <select id="speed" title="播放速度">
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+        </select>
+        <label class="file-label" title="载入任意 replay_view.json">
+          载入 JSON
+          <input type="file" id="file-input" accept=".json,application/json" />
+        </label>
+      </div>
+      <span class="nav-links">
+        <a href="index.html">首页</a>
+        <a href="display.html">展示</a>
+        <a href="admin.html">管理</a>
+        <a href="sim.html">模拟器</a>
+      </span>
+      <span id="source-info" class="meta"></span>
+    </div>
+
+    <div id="check-bar" class="check-bar hidden"></div>
+
+    <div id="replay-main" class="replay-main hidden">
+      <aside class="replay-sidebar">
+        <div class="panel-head">
+          <span>消息 / 步骤</span>
+          <span class="spacer"></span>
+          <span id="step-count" class="hint"></span>
+        </div>
+        <ol id="step-list"></ol>
+      </aside>
+
+      <section class="replay-content">
+        <div class="tabs">
+          <button id="tab-table" class="active" data-view="table">表格视图</button>
+          <button id="tab-column" data-view="column">列视图</button>
+          <button id="tab-mermaid" data-view="mermaid">Mermaid 视图</button>
+        </div>
+        <div class="legend">
+          <span class="lg"><span class="sw new"></span>▲ 新增填入</span>
+          <span class="lg"><span class="sw release"></span>▼ 撤销释放</span>
+          <span class="lg"><span class="sw forward"></span>↷ 自动前移</span>
+          <span class="lg"><span class="sw tail"></span>⛓ 包尾段</span>
+          <span class="lg"><span class="sw admin"></span>✚ 管理员固定/解锁</span>
+        </div>
+        <div id="table-view"></div>
+        <div id="column-view" class="hidden"></div>
+        <div id="mermaid-view" class="hidden"></div>
+      </section>
+    </div>
+
+    <section id="who-whats-panel" class="panel hidden" style="margin-top:12px">
+      <div class="panel-head" id="ww-toggle" style="cursor:pointer">
+        <span id="ww-title">▸ Who-Whats</span>
+        <span class="spacer"></span>
+        <span id="ww-count" class="hint"></span>
+      </div>
+      <div class="panel-body flush" id="ww-body" style="max-height:32vh;overflow:auto">
+        <table class="who-whats">
+          <thead><tr><th>display</th><th>身份</th><th>明细</th></tr></thead>
+          <tbody id="who-whats-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div id="empty-hint" class="empty">
+      <p><strong>尚未加载重放数据。</strong></p>
+      <p>正在尝试读取同目录 <span class="mono">replay_view.json</span>；
+         若不存在或读取失败，会自动回退到内置占位示例。</p>
+      <p>也可以点击右上角「载入 JSON」手动选择文件。</p>
+      <p class="hint">数据源为静态 replay 文件（items/messages/steps/who_whats/expected），不从
+         <span class="mono">/api/display</span> 增量构造。</p>
+    </div>
+  </div>
+
+  <div id="paigu-toast" class="paigu-toast"></div>
+</body>
+</html>

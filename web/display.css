@@ -20,6 +20,10 @@
   --locked-border: #cbb3ef;
   --reserved: #fff3d6;
   --reserved-border: #e9c877;
+  --tail: #7c3aed;
+  --tail-soft: #ede9fe;
+  --admin: #0ea5e9;
+  --admin-soft: #e0f2fe;
   --radius: 8px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -232,6 +236,9 @@ label.field input, label.field select { width: 100%; }
 .cell.changed-new { border-color: var(--ok); box-shadow: 0 0 0 2px var(--ok-soft); }
 .cell.changed-release { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger-soft); }
 .cell.changed-forward { border-color: var(--warn); box-shadow: 0 0 0 2px var(--warn-soft); }
+.cell.changed-tail { border-color: var(--tail); box-shadow: 0 0 0 2px var(--tail-soft); }
+.cell.changed-admin { border-color: var(--admin); box-shadow: 0 0 0 2px var(--admin-soft); }
+.cell.focused { outline: 3px solid var(--accent); outline-offset: 1px; }
 
 @keyframes flash {
   0% { transform: scale(1.06); }

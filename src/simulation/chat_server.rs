@@ -166,7 +166,7 @@ impl ChatSession {
 
         match validation {
             Ok(ValidationOutcome::Ok(event)) => {
-                let detail = describe_event(&event);
+                let detail = crate::engine::replay::describe_event(&event);
                 self.events.push(event);
                 let (version, snapshot) = self.rebuild().await;
                 json!({
@@ -230,25 +230,6 @@ impl ChatSession {
             }
             Err(_) => (0, Value::Null),
         }
-    }
-}
-
-fn describe_event(event: &EventEnvelope) -> String {
-    match &event.payload {
-        crate::domain::event::DomainEvent::ClaimCreated(c) => {
-            let items: Vec<String> = c
-                .items
-                .iter()
-                .map(|l| format!("{}x{}[{}]", l.item_id.0, l.quantity, l.slot_policy.as_str()))
-                .collect();
-            format!("claim: {}", items.join(", "))
-        }
-        crate::domain::event::DomainEvent::ClaimCancelled(c) => format!(
-            "cancel: item={:?} qty={:?}",
-            c.target_item_id.as_ref().map(|i| i.0.clone()),
-            c.quantity
-        ),
-        other => format!("event: {}", other.event_type_str()),
     }
 }
 

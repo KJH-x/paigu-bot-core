@@ -165,18 +165,19 @@
     }
   }
 
-  function createBoardRenderer(host) {
+  function createBoardRenderer(host, options) {
     var changeMap = {};
+    var persistent = !!(options && options.persistent);
 
-    var REASON_CLS = {
-      NewClaimFilled: 'changed-new',
-      CancelReleased: 'changed-release',
-      AutoMovedForward: 'changed-forward',
-      TailSegmentCreated: 'changed-forward',
-      TailSegmentUpdated: 'changed-forward',
-      AdminFixed: 'changed-forward',
-      AdminUnlocked: 'changed-forward',
-      RecomputedByRuleChange: 'changed-forward'
+    var REASON_META = {
+      NewClaimFilled: { cls: 'changed-new', icon: '▲' },
+      CancelReleased: { cls: 'changed-release', icon: '▼' },
+      AutoMovedForward: { cls: 'changed-forward', icon: '↷' },
+      TailSegmentCreated: { cls: 'changed-tail', icon: '⛓' },
+      TailSegmentUpdated: { cls: 'changed-tail', icon: '⛓' },
+      AdminFixed: { cls: 'changed-admin', icon: '✚' },
+      AdminUnlocked: { cls: 'changed-admin', icon: '✚' },
+      RecomputedByRuleChange: { cls: 'changed-forward', icon: '↻' }
     };
 
     function setCellClass(node) {
@@ -195,16 +196,18 @@
     }
 
     function applyHighlight(node, info) {
-      var cls = REASON_CLS[info && info.reason] || (info && info.after ? 'changed-new' : 'changed-release');
-      node.__changedCls = cls;
+      var meta = REASON_META[info && info.reason] ||
+        (info && info.after ? REASON_META.NewClaimFilled : REASON_META.CancelReleased);
+      node.__changedCls = meta.cls;
       setCellClass(node);
       if (node.__badge) {
         node.__badge.hidden = false;
-        node.__badge.textContent = info && info.after ? '▲' : '▼';
+        node.__badge.textContent = meta.icon;
       }
       var before = info && info.before != null ? info.before : '空';
       var after = info && info.after != null ? info.after : '空';
       node.title = (info && info.reason ? info.reason + '：' : '') + before + ' → ' + after;
+      if (persistent) return;
       if (node.__hl) global.clearTimeout(node.__hl);
       node.__hl = global.setTimeout(function () { clearHighlight(node); }, 3000);
     }
@@ -302,6 +305,7 @@
           updateCell(n, c);
           var info = changeMap[k];
           if (info) applyHighlight(n, info);
+          else if (persistent) clearHighlight(n);
         }
       );
 

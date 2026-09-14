@@ -119,11 +119,11 @@ impl LlmClient for OpenAiClient {
         let status = response.status();
         let text = response.text().await?;
         if !status.is_success() {
-            anyhow::bail!("LLM HTTP {}: {}", status.as_u16(), truncate(&text, 200));
+            anyhow::bail!("LLM HTTP {}: {}", status.as_u16(), super::truncate(&text, 200));
         }
 
         let parsed: ChatResponse = serde_json::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("LLM 响应解析失败: {e}; raw={}", truncate(&text, 200)))?;
+            .map_err(|e| anyhow::anyhow!("LLM 响应解析失败: {e}; raw={}", super::truncate(&text, 200)))?;
         let content = parsed
             .choices
             .into_iter()
@@ -136,15 +136,4 @@ impl LlmClient for OpenAiClient {
         }
         Ok(content)
     }
-}
-
-fn truncate(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        return text.to_string();
-    }
-    let mut end = max;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}…", &text[..end])
 }

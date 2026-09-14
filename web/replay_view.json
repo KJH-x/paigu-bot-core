@@ -1,0 +1,66 @@
+{
+  "sample_id": "占位示例",
+  "title": "占位示例",
+  "items": [
+    {
+      "item_id": "月行水上/特典卡组-校园凭证",
+      "name": "特典卡组-校园凭证",
+      "kind": "split",
+      "section": "特典卡组-校园凭证",
+      "variants": [
+        { "variant_id": "整套", "name": "整套", "capacity": 5 }
+      ]
+    },
+    {
+      "item_id": "月行水上/通行证SP-月行水上",
+      "name": "通行证SP-月行水上",
+      "kind": "single",
+      "section": "单领",
+      "variants": []
+    },
+    {
+      "item_id": "月行水上/徽章-月行水上",
+      "name": "徽章-月行水上",
+      "kind": "split",
+      "section": "徽章-月行水上",
+      "variants": [
+        { "variant_id": "亚克力", "name": "亚克力", "capacity": 3 },
+        { "variant_id": "吧唧", "name": "吧唧", "capacity": 4 }
+      ]
+    }
+  ],
+  "messages": [
+    { "seq": 1, "display": "甲", "text": "排整套", "status": "Applied", "detail": "claim: 特典卡组-校园凭证 整套 x1" },
+    { "seq": 2, "display": "乙", "text": "排整套", "status": "Applied", "detail": "claim: 特典卡组-校园凭证 整套 x1" },
+    { "seq": 3, "display": "丙", "text": "排整套", "status": "Applied", "detail": "claim: 特典卡组-校园凭证 整套 x1" },
+    { "seq": 4, "display": "丁", "text": "排亚克力1", "status": "Applied", "detail": "claim: 徽章-月行水上 亚克力 x1" },
+    { "seq": 5, "display": "戊", "text": "排亚克力1", "status": "Applied", "detail": "claim: 徽章-月行水上 亚克力 x1" },
+    { "seq": 6, "display": "乙", "text": "撤整套1", "status": "Applied", "detail": "cancel: 特典卡组-校园凭证 整套 x1" },
+    { "seq": 7, "display": "丁", "text": "排吧唧1", "status": "Applied", "detail": "claim: 徽章-月行水上 吧唧 x1" },
+    { "seq": 8, "display": "管理员", "text": "/锁位 吧唧 3号位给甲", "status": "Applied", "detail": "admin: 包尾锁位 吧唧 slot3 -> 甲" },
+    { "seq": 9, "display": "管理员", "text": "/固定 吧唧 2号位给戊", "status": "Applied", "detail": "admin: 固定 吧唧 slot2 -> 戊" }
+  ],
+  "steps": [
+    { "index": 0, "message_seq": 1, "board": { "月行水上/特典卡组-校园凭证|整套": [{ "slot": 1, "user": "甲", "status": "filled" }] }, "changed": [{ "item_id": "月行水上/特典卡组-校园凭证", "variant_id": "整套", "slot": 1, "before": null, "after": "甲", "reason": "NewClaimFilled" }] },
+    { "index": 1, "message_seq": 2, "board": { "月行水上/特典卡组-校园凭证|整套": [{ "slot": 1, "user": "甲", "status": "filled" }, { "slot": 2, "user": "乙", "status": "filled" }] }, "changed": [{ "item_id": "月行水上/特典卡组-校园凭证", "variant_id": "整套", "slot": 2, "before": null, "after": "乙", "reason": "NewClaimFilled" }] },
+    { "index": 2, "message_seq": 3, "board": { "月行水上/特典卡组-校园凭证|整套": [{ "slot": 1, "user": "甲", "status": "filled" }, { "slot": 2, "user": "乙", "status": "filled" }, { "slot": 3, "user": "丙", "status": "filled" }] }, "changed": [{ "item_id": "月行水上/特典卡组-校园凭证", "variant_id": "整套", "slot": 3, "before": null, "after": "丙", "reason": "NewClaimFilled" }] },
+    { "index": 3, "message_seq": 4, "board": { "月行水上/徽章-月行水上|亚克力": [{ "slot": 1, "user": "丁", "status": "filled" }] }, "changed": [{ "item_id": "月行水上/徽章-月行水上", "variant_id": "亚克力", "slot": 1, "before": null, "after": "丁", "reason": "NewClaimFilled" }] },
+    { "index": 4, "message_seq": 5, "board": { "月行水上/徽章-月行水上|亚克力": [{ "slot": 1, "user": "丁", "status": "filled" }, { "slot": 2, "user": "戊", "status": "filled" }] }, "changed": [{ "item_id": "月行水上/徽章-月行水上", "variant_id": "亚克力", "slot": 2, "before": null, "after": "戊", "reason": "NewClaimFilled" }] },
+    { "index": 5, "message_seq": 6, "board": { "月行水上/特典卡组-校园凭证|整套": [{ "slot": 1, "user": "甲", "status": "filled" }, { "slot": 2, "user": "丙", "status": "filled" }] }, "changed": [{ "item_id": "月行水上/特典卡组-校园凭证", "variant_id": "整套", "slot": 2, "before": "乙", "after": "丙", "reason": "AutoMovedForward" }, { "item_id": "月行水上/特典卡组-校园凭证", "variant_id": "整套", "slot": 3, "before": "丙", "after": null, "reason": "CancelReleased" }] },
+    { "index": 6, "message_seq": 7, "board": { "月行水上/徽章-月行水上|吧唧": [{ "slot": 1, "user": "丁", "status": "filled" }] }, "changed": [{ "item_id": "月行水上/徽章-月行水上", "variant_id": "吧唧", "slot": 1, "before": null, "after": "丁", "reason": "NewClaimFilled" }] },
+    { "index": 7, "message_seq": 8, "board": { "月行水上/徽章-月行水上|吧唧": [{ "slot": 1, "user": "丁", "status": "filled" }, { "slot": 3, "user": "甲", "status": "locked" }] }, "changed": [{ "item_id": "月行水上/徽章-月行水上", "variant_id": "吧唧", "slot": 3, "before": null, "after": "甲", "reason": "TailSegmentCreated" }] },
+    { "index": 8, "message_seq": 9, "board": { "月行水上/徽章-月行水上|吧唧": [{ "slot": 1, "user": "丁", "status": "filled" }, { "slot": 2, "user": "戊", "status": "filled" }, { "slot": 3, "user": "甲", "status": "locked" }] }, "changed": [{ "item_id": "月行水上/徽章-月行水上", "variant_id": "吧唧", "slot": 2, "before": null, "after": "戊", "reason": "AdminFixed" }] }
+  ],
+  "who_whats": [
+    { "display": "甲", "identity": "甲", "items": [{ "name": "整套", "qty": 1 }, { "name": "吧唧", "qty": 1 }] },
+    { "display": "乙", "identity": "乙", "items": [{ "name": "整套", "qty": 1 }] },
+    { "display": "丙", "identity": "丙", "items": [{ "name": "整套", "qty": 1 }] },
+    { "display": "丁", "identity": "丁", "items": [{ "name": "亚克力", "qty": 1 }, { "name": "吧唧", "qty": 1 }] },
+    { "display": "戊", "identity": "戊", "items": [{ "name": "亚克力", "qty": 1 }, { "name": "吧唧", "qty": 1 }] }
+  ],
+  "expected": {
+    "月行水上/特典卡组-校园凭证|整套": ["甲", "丙"],
+    "月行水上/徽章-月行水上|亚克力": ["丁", "戊"],
+    "月行水上/徽章-月行水上|吧唧": ["丁", "戊", "甲"]
+  }
+}

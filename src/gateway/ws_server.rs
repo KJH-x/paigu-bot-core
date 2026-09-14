@@ -73,11 +73,17 @@ impl Gateway {
     }
 
     pub async fn send_action(&self, action: &str, params: Value) -> anyhow::Result<Value> {
-        if action.starts_with("send") {
-            anyhow::bail!("forbidden action: {action}");
-        }
         let cfg = self.cfg.get().await;
-        if !cfg.gateway.allowed_actions.iter().any(|a| a == action) {
+        if action.starts_with("send_") {
+            if !cfg.gateway.reply_enabled {
+                warn!(action = %action, "forbidden send action: reply_enabled=false");
+                anyhow::bail!("forbidden send action (reply_enabled=false): {action}");
+            }
+            if !cfg.gateway.allowed_actions.iter().any(|a| a == action) {
+                warn!(action = %action, "forbidden send action: not in allowed_actions");
+                anyhow::bail!("forbidden send action (not allowed): {action}");
+            }
+        } else if !cfg.gateway.allowed_actions.iter().any(|a| a == action) {
             anyhow::bail!("action not allowed: {action}");
         }
 
@@ -299,6 +305,17 @@ mod tests {
         Gateway::new(test_store(), Arc::new(NullSink))
     }
 
+    fn test_store_with(f: impl FnOnce(&mut crate::settings::AppConfig)) -> Arc<ConfigStore> {
+        let mut cfg = crate::settings::default_config();
+        f(&mut cfg);
+        let path = std::env::temp_dir().join(format!(
+            "paigu-gateway-test-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        Arc::new(ConfigStore::load(path).expect("load test config"))
+    }
+
     #[tokio::test]
     async fn send_action_rejects_send_actions() {
         let gw = test_gateway();
@@ -308,6 +325,66 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("forbidden"));
         assert!(gw.send_action("send_msg", json!({})).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn send_action_rejects_send_even_if_whitelisted_when_reply_disabled() {
+        let store = test_store_with(|cfg| {
+            cfg.gateway.reply_enabled = false;
+            cfg.gateway.allowed_actions = vec!["send_group_msg".to_string()];
+        });
+        let gw = Gateway::new(store, Arc::new(NullSink));
+        let err = gw
+            .send_action("send_group_msg", json!({ "group_id": "720675572" }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("forbidden"));
+    }
+
+    #[tokio::test]
+    async fn send_action_rejects_send_when_enabled_but_not_whitelisted() {
+        let store = test_store_with(|cfg| {
+            cfg.gateway.reply_enabled = true;
+            cfg.gateway.allowed_actions = vec!["get_group_list".to_string()];
+        });
+        let gw = Gateway::new(store, Arc::new(NullSink));
+        assert!(gw
+            .send_action("send_group_msg", json!({ "group_id": "720675572" }))
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn send_action_allows_send_when_enabled_and_whitelisted() {
+        let store = test_store_with(|cfg| {
+            cfg.gateway.reply_enabled = true;
+            cfg.gateway.allowed_actions = vec!["send_group_msg".to_string()];
+        });
+        let gw = Gateway::new(store, Arc::new(NullSink));
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
+        gw.clients.lock().unwrap().insert(1, tx);
+
+        let responder = gw.clone();
+        let task = tokio::spawn(async move {
+            if let Some(WsMessage::Text(text)) = rx.recv().await {
+                let frame: Value = serde_json::from_str(text.as_str()).unwrap();
+                let echo = frame["echo"].as_str().unwrap().to_string();
+                responder.dispatch_response(&json!({
+                    "status": "ok",
+                    "retcode": 0,
+                    "data": { "message_id": 1 },
+                    "echo": echo
+                }));
+            }
+        });
+
+        let result = gw
+            .send_action("send_group_msg", json!({ "group_id": "720675572", "message": "x" }))
+            .await;
+        assert!(result.is_ok(), "expected send allowed: {result:?}");
+        assert_eq!(result.unwrap()["retcode"], 0);
+        task.await.unwrap();
     }
 
     #[tokio::test]

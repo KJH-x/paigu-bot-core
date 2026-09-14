@@ -106,3 +106,14 @@ node tests/e2e/sim.mjs      # 端到端测试
 - **D6 归属**：`viewer/README.md`、`viewer/viewer.js` 仍含真实昵称（示例数据），合并进 `web/` 时须脱敏或删除。
 - **真实名单策略**：真实群成员名单只放 gitignored `data/members.seed.json`；入库仅 `data/members.example.json`（占位）。
 - **校验**：`git grep` 真实昵称在**跟踪文件**中应为 0 命中（`git grep -F "？？？"` 等）。
+
+## D2 · 安全红线 + 去重（2026-09-14）
+
+已完成（`src/llm/**`、`src/gateway/**`、`src/settings.rs`、`src/engine/replay.rs`）：
+- `reply_enabled` 强制：`Gateway::send_action` 对 `send_*` 仅当 `reply_enabled==true` **且** `action ∈ allowed_actions` 时放行，否则 `Err` + `tracing::warn!`（默认 `false` → 绝不发送）。
+- 删除死配置 `gateway.require_token`（`src/settings.rs` + `config.example.json`）。
+- 去重：昵称清洗 → `gateway::onebot::clean_nickname`（删 `pipeline::sanitize_identity/fullwidth_to_half`）；时段/预存 → `settings::{in_priority_window,is_priority_user}`（`simulation/verifier.rs` 复用）；重放 → `engine::replay::rebuild_allocation_snapshot`；`describe_event` → `engine::replay::describe_event`；`truncate` → `llm::truncate`。
+
+**待同步（非本 agent 范围）**：
+- **D5 文档**：`docs/DESIGN.md` §3 删除 `gateway.require_token`；`docs/FUNCTIONAL.md` §4.1/§10 的 `require_token` 行与 §10.1「reply_enabled 无发送路径」需更新（现 `send_*` 在 `reply_enabled=true` 且白名单时放行）。
+- **D4/A4 前端**：`web/admin.html`、`web/admin.js` 的 `gw-require-token` 控件已无对应配置字段（GET 不再返回；PUT 多余字段被 serde 忽略），应移除。
