@@ -12,9 +12,10 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
 use crate::bus::EventSink;
+use crate::messages::{JsonlMessageStore, MessageStore};
 use crate::settings::ConfigStore;
 
-use super::onebot::{self, RouteKind, RouteMessageEvent, RoutePolicy};
+use super::onebot::{self, RouteDecision, RouteKind, RouteMessageEvent, RoutePolicy};
 
 type ClientTx = mpsc::UnboundedSender<WsMessage>;
 
@@ -257,15 +258,31 @@ impl Gateway {
         let cfg = self.cfg.get().await;
         let policy = RoutePolicy {
             whitelist_groups: cfg.gateway.whitelist_groups.clone(),
+            whitelist_members: cfg.gateway.whitelist_members.clone(),
         };
 
         match onebot::decide_route(&ev, &policy) {
             RouteKind::Drop => {
+                let reason = match onebot::decide_route_with_reason(&ev, &policy) {
+                    RouteDecision::Drop(reason) => reason,
+                    RouteDecision::Message => "not_routable".to_string(),
+                };
                 debug!(
                     post_type = %ev.post_type,
                     group_id = %onebot::group_id_string(&ev).unwrap_or_default(),
+                    reason = %reason,
                     "gateway drop: not routable"
                 );
+                let rec = onebot::to_message_record(
+                    &ev,
+                    &format!("drop:{reason}"),
+                    "Dropped",
+                    &reason,
+                );
+                let store = JsonlMessageStore::from_env(&cfg.round.round_id);
+                if let Err(e) = store.append(&rec).await {
+                    warn!(error = %e, "failed to persist dropped message");
+                }
             }
             RouteKind::Message => {
                 let incoming = onebot::to_incoming_event(&ev);

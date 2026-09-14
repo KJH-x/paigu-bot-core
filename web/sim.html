@@ -16,12 +16,18 @@
     <div class="topbar">
       <span class="brand">排谷模拟器</span>
       <span id="conn-badge" class="status-badge"><span class="dot"></span>未连接</span>
+      <span id="ws-badge" class="status-badge"><span class="dot"></span>WS 未连接</span>
       <span id="version-badge" class="status-badge">版本 —</span>
       <span class="spacer"></span>
       <label class="row tight">
         <span class="hint">API</span>
-        <input id="api" size="26" />
+        <input id="api" size="24" />
       </label>
+      <label class="row tight">
+        <span class="hint">WS</span>
+        <input id="ws" size="24" />
+      </label>
+      <button id="ws-reconnect" class="small">重连 WS</button>
       <button id="reset" class="danger small">重置模拟会话</button>
       <span class="nav-links">
         <a href="index.html">首页</a>
@@ -37,7 +43,7 @@
         <div class="panel-head"><span>模拟发送</span><span class="spacer"></span><span id="identity-info" class="hint"></span></div>
         <div class="panel-body">
           <div class="split">
-            <label class="field"><span>身份（真实群成员子集）</span>
+            <label class="field"><span>身份（占位身份，禁止真实昵称）</span>
               <select id="identity-select"></select>
             </label>
             <label class="field"><span>群号（可选）</span>
@@ -47,8 +53,8 @@
 
           <div id="identity-custom" class="hidden">
             <div class="split">
-              <label class="field"><span>user_id</span><input id="c-user" /></label>
-              <label class="field"><span>nickname</span><input id="c-nick" /></label>
+              <label class="field"><span>user_id</span><input id="c-user" placeholder="成员06" /></label>
+              <label class="field"><span>nickname（占位名）</span><input id="c-nick" placeholder="成员06" /></label>
               <label class="field"><span>is_admin</span><input id="c-admin" type="checkbox" style="width:auto" /></label>
               <label class="field"><span>是否预存（priority）</span><input id="c-priority" type="checkbox" style="width:auto" /></label>
               <label class="field"><span>priority_level</span><input id="c-level" type="number" value="10" /></label>
@@ -70,6 +76,7 @@
             <button id="send" class="primary">发送</button>
             <span id="send-hint" class="hint"></span>
           </div>
+          <div id="ws-replies" class="hint" style="margin-top:6px"></div>
         </div>
       </section>
 

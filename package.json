@@ -8,6 +8,8 @@
   },
   "scripts": {
     "test:e2e": "node tests/e2e/sim.mjs",
+    "sim:run": "node scripts/sim-run.mjs",
+    "sim:record": "node scripts/sim-record.mjs",
     "sim:verify": "node simulation-corpus/real-samples/verify-samples.mjs simulation-corpus/real-samples",
     "web:serve": "python -m http.server --directory web 8000"
   },

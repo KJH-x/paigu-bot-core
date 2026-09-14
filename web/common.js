@@ -2,6 +2,7 @@
   'use strict';
 
   var DEFAULT_API = 'http://127.0.0.1:21081';
+  var DEFAULT_WS = 'ws://127.0.0.1:9801';
   var INLINE = (global.PAIGU_WEB && typeof global.PAIGU_WEB === 'object') ? global.PAIGU_WEB : {};
 
   function qs(name) {
@@ -53,6 +54,13 @@
     if (v) return stripSlash(v);
     if (INLINE.apiBase) return stripSlash(INLINE.apiBase);
     return DEFAULT_API;
+  }
+
+  function resolveWsBase() {
+    var v = qs('ws');
+    if (v) return String(v).trim();
+    if (INLINE.wsUrl) return String(INLINE.wsUrl).trim();
+    return DEFAULT_WS;
   }
 
   function resolveSource() {
@@ -457,6 +465,30 @@
     var mm = Math.floor(t / 60); t -= mm * 60;
     function p(n) { return (n < 10 ? '0' : '') + n; }
     return sign + p(dd) + ' ' + p(hh) + ' ' + p(mm) + ' ' + p(t);
+  }
+
+  function buildOneBotEvent(opts) {
+    opts = opts || {};
+    var offsetMs = num(opts.offsetMs != null ? opts.offsetMs : opts.offset_ms, 0) || 0;
+    var text = String(opts.text == null ? '' : opts.text);
+    var userId = opts.user_id != null ? String(opts.user_id) : '';
+    var nickname = opts.nickname != null ? String(opts.nickname) : userId;
+    var groupId = opts.group_id != null ? String(opts.group_id) : '';
+    var messageId = opts.message_id != null ? String(opts.message_id) : ('sim-' + Date.now() + '-' + Math.floor(Math.random() * 1e6));
+    var selfId = opts.self_id != null ? opts.self_id : 3000000000;
+    var role = opts.is_admin ? 'admin' : 'member';
+    return {
+      post_type: 'message',
+      message_type: 'group',
+      self_id: selfId,
+      user_id: userId,
+      group_id: groupId,
+      time: Math.floor((Date.now() + offsetMs) / 1000),
+      message_id: messageId,
+      raw_message: text,
+      message: [{ type: 'text', data: { text: text } }],
+      sender: { user_id: userId, nickname: nickname, card: nickname, role: role }
+    };
   }
 
   function buildMeta(config) {
@@ -871,6 +903,7 @@
   }
 
   global.PAIGU = {    DEFAULT_API: DEFAULT_API,
+    DEFAULT_WS: DEFAULT_WS,
     INLINE: INLINE,
     EMBEDDED_MEMBERS: EMBEDDED_MEMBERS,
     PRIORITY_USERS: PRIORITY_USERS,
@@ -883,6 +916,7 @@
     cleanNickname: cleanNickname,
     stripSlash: stripSlash,
     resolveApiBase: resolveApiBase,
+    resolveWsBase: resolveWsBase,
     resolveSource: resolveSource,
     resolveRemoteBase: resolveRemoteBase,
     request: request,
@@ -896,6 +930,7 @@
     createSmartScroll: createSmartScroll,
     parseOffset: parseOffset,
     formatOffset: formatOffset,
+    buildOneBotEvent: buildOneBotEvent,
     buildMeta: buildMeta,
     pickBoardSource: pickBoardSource,
     normalizeBoard: normalizeBoard,
