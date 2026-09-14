@@ -34,9 +34,7 @@ fn remember(version: i64, board: &Value) {
 }
 
 pub fn routes() -> Router<Arc<ApiState>> {
-    Router::new()
-        .route("/api/display", get(display))
-        .route("/api/messages", get(messages))
+    Router::new().route("/api/display", get(display))
 }
 
 #[derive(Deserialize)]
@@ -72,13 +70,6 @@ async fn display(State(state): State<Arc<ApiState>>, Query(query): Query<SinceQu
         "status": status,
         "changed": changed,
     }))
-}
-
-async fn messages(State(state): State<Arc<ApiState>>, Query(query): Query<SinceQuery>) -> Json<Value> {
-    let since = query.since.unwrap_or(0);
-    let messages = state.pipeline.messages_since(since).await;
-    let (version, _) = state.pipeline.board().await;
-    Json(json!({ "messages": messages, "version": version }))
 }
 
 fn board_cells(board: &Value) -> BTreeMap<String, String> {

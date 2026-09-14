@@ -1,5 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+#[allow(dead_code)]
+mod engine;
+#[allow(dead_code)]
+mod model;
+
+#[allow(unused_imports)]
+pub use engine::evaluate;
+#[allow(unused_imports)]
+pub use model::{
+    order_table_from_allocation, Line, OrderTable, Package, PackageGift, PackageSettlement,
+    SettlementResult, UnitPrice,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SettlementConfig {
     #[serde(default)]
@@ -68,3 +81,6 @@ pub struct GiftTier {
 pub struct ReduceAverageConfig {
     pub include_gift_price: bool,
 }
+
+#[cfg(test)]
+mod tests;

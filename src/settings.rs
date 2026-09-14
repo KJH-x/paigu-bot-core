@@ -18,6 +18,8 @@ pub struct AppConfig {
     pub round: RoundSettings,
     pub display: DisplaySettings,
     pub members: MembersSettings,
+    #[serde(default)]
+    pub settlement: crate::settlement::SettlementConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
