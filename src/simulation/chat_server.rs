@@ -8,7 +8,7 @@ use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 

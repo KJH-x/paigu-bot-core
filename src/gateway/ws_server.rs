@@ -268,7 +268,7 @@ impl Gateway {
                 );
             }
             RouteKind::Message => {
-                let incoming = onebot::to_incoming_event(&ev, val);
+                let incoming = onebot::to_incoming_event(&ev);
                 let sink = self.sink.clone();
                 tokio::spawn(async move {
                     sink.handle(incoming).await;

@@ -45,12 +45,6 @@ impl Default for PaymentStatus {
     }
 }
 
-impl UserBill {
-    pub fn negative_discount_total(&self) -> MoneyCents {
-        MoneyCents(0)
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserBillLine {
     pub item_id: ItemId,

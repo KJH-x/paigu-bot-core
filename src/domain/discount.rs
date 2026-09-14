@@ -1,14 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ids::{ItemId, UserId, RoundId};
+use crate::domain::ids::{ItemId, UserId};
 use crate::domain::money::MoneyCents;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiscountRulesSet {
-    pub round_id: RoundId,
-    pub rules: Vec<DiscountRule>,
-    pub source_text: String,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -41,17 +34,6 @@ pub enum DiscountRule {
         allocation_policy: GiftAllocationPolicy,
         value_offset_policy: DiscountAllocationPolicy,
     },
-}
-
-impl DiscountRule {
-    pub fn rule_id(&self) -> &str {
-        match self {
-            DiscountRule::ThresholdDiscount { rule_id, .. } => rule_id,
-            DiscountRule::FixedActualDiscount { rule_id, .. } => rule_id,
-            DiscountRule::ShoppingFund { rule_id, .. } => rule_id,
-            DiscountRule::GiftByThreshold { rule_id, .. } => rule_id,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

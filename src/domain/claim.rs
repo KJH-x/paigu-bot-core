@@ -11,14 +11,6 @@ pub enum ClaimType {
 }
 
 impl ClaimType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ClaimType::Split => "split",
-            ClaimType::Single => "single",
-            ClaimType::GiftClaim => "gift_claim",
-        }
-    }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "split" => Some(ClaimType::Split),
@@ -60,56 +52,6 @@ pub struct ClaimLine {
     pub slot_policy: SlotPolicy,
     pub is_proxy_card: bool,
     pub notes: Option<String>,
-}
-
-impl ClaimLine {
-    pub fn new_split(item_id: impl Into<ItemId>, quantity: u32) -> Self {
-        Self {
-            item_id: item_id.into(),
-            variant_id: None,
-            quantity,
-            claim_type: ClaimType::Split,
-            slot_policy: SlotPolicy::Normal,
-            is_proxy_card: false,
-            notes: None,
-        }
-    }
-
-    pub fn new_single(item_id: impl Into<ItemId>, quantity: u32) -> Self {
-        Self {
-            item_id: item_id.into(),
-            variant_id: None,
-            quantity,
-            claim_type: ClaimType::Single,
-            slot_policy: SlotPolicy::Normal,
-            is_proxy_card: false,
-            notes: None,
-        }
-    }
-
-    pub fn new_tail_locked(item_id: impl Into<ItemId>, quantity: u32) -> Self {
-        Self {
-            item_id: item_id.into(),
-            variant_id: None,
-            quantity,
-            claim_type: ClaimType::Split,
-            slot_policy: SlotPolicy::TailLocked,
-            is_proxy_card: false,
-            notes: Some("包尾".to_string()),
-        }
-    }
-
-    pub fn new_full_box(item_id: impl Into<ItemId>, quantity: u32) -> Self {
-        Self {
-            item_id: item_id.into(),
-            variant_id: None,
-            quantity,
-            claim_type: ClaimType::Split,
-            slot_policy: SlotPolicy::FullBox,
-            is_proxy_card: false,
-            notes: Some("包盒".to_string()),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,15 +128,6 @@ impl Eligibility {
     pub fn applies_to_item(&self, item_id: &ItemId) -> bool {
         if let Some(ref item_ids) = self.scope.item_ids {
             if !item_ids.is_empty() && !item_ids.contains(item_id) {
-                return false;
-            }
-        }
-        true
-    }
-
-    pub fn applies_to_item_kind(&self, kind: &str) -> bool {
-        if let Some(ref kinds) = self.scope.item_kinds {
-            if !kinds.is_empty() && !kinds.contains(&kind.to_string()) {
                 return false;
             }
         }

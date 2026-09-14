@@ -50,7 +50,6 @@ impl ReplayService {
                 allocation: allocation.clone(),
                 items: items.to_vec(),
                 discount_rules: s,
-                gift_valuations: vec![],
             };
             Some(self.settlement_engine.settle(&input)?)
         } else {

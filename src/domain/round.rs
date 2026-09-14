@@ -40,10 +40,6 @@ impl RoundStatus {
     pub fn allows_claims(&self) -> bool {
         matches!(self, RoundStatus::Active)
     }
-
-    pub fn allows_admin_commands(&self) -> bool {
-        matches!(self, RoundStatus::Draft | RoundStatus::Scheduled | RoundStatus::Active | RoundStatus::Settling)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,25 +56,6 @@ pub struct Round {
     pub created_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-impl Round {
-    pub fn is_active_at(&self, at: DateTime<Utc>) -> bool {
-        if self.status != RoundStatus::Active {
-            return false;
-        }
-        if let Some(start) = self.start_at {
-            if at < start {
-                return false;
-            }
-        }
-        if let Some(end) = self.end_at {
-            if at >= end {
-                return false;
-            }
-        }
-        true
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

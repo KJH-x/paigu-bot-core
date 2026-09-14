@@ -12,15 +12,4 @@ pub struct User {
     pub updated_at: DateTime<Utc>,
 }
 
-impl User {
-    pub fn new(user_id: UserId, qq_id: String, display_name: String) -> Self {
-        let now = Utc::now();
-        Self {
-            user_id,
-            qq_id,
-            display_name,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-}
+

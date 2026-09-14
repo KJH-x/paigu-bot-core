@@ -50,20 +50,6 @@ pub struct EventEnvelope {
     pub status: EventStatus,
 }
 
-impl EventEnvelope {
-    pub fn event_id(&self) -> &EventId {
-        &self.event_id
-    }
-
-    pub fn raw_message_id_str(&self) -> Option<&str> {
-        self.raw_message_id.as_deref()
-    }
-
-    pub fn occurred_at(&self) -> DateTime<Utc> {
-        self.effective_at
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EventStatus {
     Active,
@@ -177,23 +163,7 @@ pub struct ParseOverrideEvent {
     pub occurred_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EventOrderKey {
-    pub priority_level: i32,
-    pub effective_timestamp_ms: i64,
-    pub source_sequence: i64,
-    pub message_id: String,
-}
-
 pub fn compare_event_order(a: &EventEnvelope, b: &EventEnvelope) -> std::cmp::Ordering {
     a.effective_at.cmp(&b.effective_at)
         .then_with(|| a.sequence.cmp(&b.sequence))
-}
-
-pub fn compare_claim_line_order(a: &crate::domain::claim::EffectiveClaimLine,
-    b: &crate::domain::claim::EffectiveClaimLine) -> std::cmp::Ordering {
-    b.priority_level.cmp(&a.priority_level)
-        .then_with(|| a.effective_at.cmp(&b.effective_at))
-        .then_with(|| a.sequence.cmp(&b.sequence))
-        .then_with(|| a.line_index.cmp(&b.line_index))
 }

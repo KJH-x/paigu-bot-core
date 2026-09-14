@@ -1,3 +1,6 @@
+//! DEPRECATED: 旧栈（Postgres/R2/旧 WS），仅 `legacy` 路径使用，勿新增依赖。
+#![allow(dead_code)]
+
 use axum::{Router, routing::get, extract::{Path, State}, Json};
 use std::sync::Arc;
 use crate::app_state::AppState;

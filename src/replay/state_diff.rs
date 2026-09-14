@@ -194,15 +194,6 @@ impl StateDiff {
         }
     }
 
-    pub fn empty() -> Self {
-        Self {
-            slot_changes: vec![],
-            claim_changes: vec![],
-            user_total_changes: vec![],
-            item_total_changes: vec![],
-            settlement_changes: vec![],
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

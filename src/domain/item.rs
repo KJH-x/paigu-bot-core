@@ -95,10 +95,6 @@ impl Item {
         self.variants.iter().find(|v| v.variant_id == variant_id)
     }
 
-    pub fn exact_matches_item_id(&self, id: &str) -> bool {
-        self.item_id.0 == id
-    }
-
     pub fn exact_matches_name(&self, name: &str) -> bool {
         self.name == name || self.aliases.iter().any(|a| a == name)
     }

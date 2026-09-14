@@ -1,19 +1,19 @@
+//! DEPRECATED: 旧栈（Postgres/R2/旧 WS），仅 `legacy` 路径使用，勿新增依赖。
+#![allow(dead_code)]
+
 use std::sync::Arc;
 use chrono::Utc;
 
-use crate::domain::ids::{UserId, RoundId};
-use crate::domain::round::{Round, RoundStatus};
-use crate::domain::claim::Eligibility;
-use crate::domain::event::{EventEnvelope, DomainEvent, ClaimCreated, EventStatus, AdminAllocationAdjusted, AdminAllocationAction, AdminSlotLocked, DiscountRulesSet};
-use crate::domain::item::{Item, RoundContext, ItemKind};
-use crate::domain::money::MoneyCents;
-use crate::domain::snapshot::AllocationSnapshot;
+use crate::domain::ids::UserId;
+use crate::domain::round::Round;
+use crate::domain::event::{EventEnvelope, DomainEvent, EventStatus, AdminAllocationAdjusted, AdminAllocationAction, AdminSlotLocked, DiscountRulesSet};
+use crate::domain::item::RoundContext;
 use crate::inbound::qq_message::IncomingQqMessage;
 use crate::inbound::intake;
 use crate::inbound::command_router::{self, BotReply, CommandIntent};
 use crate::parser::parsed_event::MessageParser;
 use crate::parser::validation::{EventValidator, ValidationOutcome};
-use crate::repo::round_repo::{RawMessageRepo, RoundRepo, ItemRepo, EventRepo, SnapshotRepo, EligibilityRepo, RawMessageRecord};
+use crate::repo::round_repo::{RawMessageRepo, RoundRepo, ItemRepo, EligibilityRepo};
 use crate::engine::event_store::EventStore;
 use crate::engine::replay::ReplayService;
 use crate::services::round_service::RoundService;

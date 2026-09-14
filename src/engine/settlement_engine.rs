@@ -12,7 +12,6 @@ pub struct SettlementInput {
     pub allocation: AllocationSnapshot,
     pub items: Vec<Item>,
     pub discount_rules: Vec<DiscountRule>,
-    pub gift_valuations: Vec<crate::domain::gift::GiftAllocation>,
 }
 
 pub struct SettlementEngine {}

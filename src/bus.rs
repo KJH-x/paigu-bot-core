@@ -10,7 +10,6 @@ pub struct IncomingEvent {
     pub text: String,
     pub timestamp_ms: i64,
     pub is_admin: bool,
-    pub raw: serde_json::Value,
 }
 
 /// 事件消费端。Gateway 只依赖本 trait，不依赖具体 Pipeline。

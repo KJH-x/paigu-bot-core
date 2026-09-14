@@ -708,3 +708,85 @@ fn render_report(result: &VerifyResult) -> String {
 
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_item() -> Item {
+        Item {
+            item_id: ItemId("pass_sp".to_string()),
+            round_id: RoundId("round_x".to_string()),
+            name: "通行认证SP-月行水上".to_string(),
+            kind: ItemKind::Split,
+            unit_price: MoneyCents(4500),
+            box_size: Some(2),
+            max_quantity: None,
+            is_blind: false,
+            is_proxy_card: false,
+            aliases: vec!["通行证".to_string()],
+            sort_order: 0,
+            metadata: serde_json::json!({}),
+            variants: vec![],
+        }
+    }
+
+    fn record(sequence: u64, user: &str, text: &str) -> QueueMessageRecord {
+        QueueMessageRecord {
+            source_sequence: sequence,
+            group_id: "g1".to_string(),
+            user_id: user.to_string(),
+            nickname: format!("成员{sequence}"),
+            message_id: format!("m{sequence}"),
+            timestamp_ms: 1_700_000_000_000 + sequence as i64 * 1000,
+            text: text.to_string(),
+            attachments: vec![],
+            reply_to_message_id: None,
+            is_admin: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn end_to_end_parse_validate_replay_compares_slots() {
+        let path = std::env::temp_dir().join(format!(
+            "paigu-verifier-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        let records = vec![
+            record(1, "u1", "排 通行证 1"),
+            record(2, "u2", "排 通行证 1"),
+        ];
+        let body = records
+            .iter()
+            .map(|r| serde_json::to_string(r).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, body).unwrap();
+
+        let fixture = RoundFixture {
+            round_id: "round_x".to_string(),
+            title: "测试团".to_string(),
+            group_id: "g1".to_string(),
+            items: vec![sample_item()],
+            priority_users: vec![],
+            priority_window: None,
+        };
+
+        let result = verify(&path, fixture).await.expect("verify");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(result.applied_count, 2);
+        assert_eq!(result.rejected_count, 0);
+
+        let allocation = result
+            .final_snapshot
+            .item_allocations
+            .iter()
+            .find(|i| i.item_id.0 == "pass_sp")
+            .expect("pass_sp allocation");
+        assert_eq!(allocation.boxes.len(), 1);
+        let slots = &allocation.boxes[0].slots;
+        assert_eq!(slots[0].user_id_str(), Some("u1"));
+        assert_eq!(slots[1].user_id_str(), Some("u2"));
+    }
+}

@@ -1,3 +1,6 @@
+//! DEPRECATED: 旧栈（Postgres/R2/旧 WS），仅 `legacy` 路径使用，勿新增依赖。
+#![allow(dead_code)]
+
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
