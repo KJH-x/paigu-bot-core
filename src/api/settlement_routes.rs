@@ -97,9 +97,16 @@ async fn plan_order(
 ) -> Result<Json<Value>, ApiError> {
     let strategy_name = body.strategy.clone();
     let strategy = parse_strategy(&strategy_name)?;
+    let cfg_now = state.cfg.get().await;
     let config = match body.config {
         Some(config) => config,
-        None => state.cfg.get().await.settlement,
+        None => cfg_now.settlement.clone(),
+    };
+    // 标价表：请求未带则取「商品目录」（A-4 口径）
+    let prices = if body.prices.is_empty() {
+        cfg_now.round.to_unit_prices()
+    } else {
+        body.prices
     };
     let allocation = match body.allocation {
         Some(allocation) => allocation,
@@ -113,7 +120,7 @@ async fn plan_order(
         allocation,
         strategy,
         limits: body.limits.unwrap_or_default(),
-        prices: body.prices,
+        prices,
     };
     let result = planner::plan(&request);
     Ok(Json(json!({
@@ -146,7 +153,12 @@ async fn from_allocation(
         })));
     }
     let snapshot: AllocationSnapshot = serde_json::from_value(board).map_err(api_internal)?;
-    let order_table = order_table_from_allocation(&snapshot, &body.prices);
+    let prices = if body.prices.is_empty() {
+        state.cfg.get().await.round.to_unit_prices()
+    } else {
+        body.prices
+    };
+    let order_table = order_table_from_allocation(&snapshot, &prices);
     let empty = order_table.packages.is_empty();
     Ok(Json(json!({
         "order_table": order_table,
@@ -255,6 +267,7 @@ mod tests {
             threshold: 100,
             gift_name: "占位特典".to_string(),
             unit_price: 10,
+            claimed: 10,
         });
         let table = OrderTable::new(vec![
             Package::new("p1", vec![Line::new("a", 1, 50)]),

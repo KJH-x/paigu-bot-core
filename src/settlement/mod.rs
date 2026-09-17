@@ -9,8 +9,8 @@ mod model;
 pub use engine::evaluate;
 #[allow(unused_imports)]
 pub use model::{
-    order_table_from_allocation, Line, OrderTable, Package, PackageGift, PackageSettlement,
-    SettlementResult, UnitPrice,
+    order_table_from_allocation, Line, LineSettlement, OrderTable, Package, PackageGift,
+    PackageSettlement, SettlementResult, UnitPrice,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -72,9 +72,15 @@ impl Default for ScopeMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GiftTier {
     pub tier_id: String,
+    /// 展示用门槛（新口径下不参与判定，保留兼容）。
+    #[serde(default)]
     pub threshold: i64,
     pub gift_name: String,
+    /// 每份特典的指定价（用于折价 `G`）。
     pub unit_price: i64,
+    /// 排谷阶段的认购数；实际授予 = `min(claimed, 下单包数 P)`。
+    #[serde(default)]
+    pub claimed: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

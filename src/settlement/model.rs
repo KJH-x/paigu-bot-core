@@ -86,6 +86,35 @@ pub struct SettlementResult {
     pub discount_total: i64,
     pub grand_total: i64,
     pub warnings: Vec<String>,
+    /// `C` = 无折扣商品总价（各实购商品标价合计，不含特典）。
+    #[serde(default)]
+    pub list_total_cents: i64,
+    /// `B` = Σ 各下单包实付价（折后，不含特典）。
+    #[serde(default)]
+    pub paid_total_cents: i64,
+    /// 减均后逐行明细（含 `final_*`）。
+    #[serde(default)]
+    pub lines: Vec<LineSettlement>,
+}
+
+/// 单行（商品/变体）的减均明细。金额均为「分」，即 2 位小数。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineSettlement {
+    pub package_id: String,
+    pub item_id: String,
+    #[serde(default)]
+    pub variant_id: Option<String>,
+    pub qty: u32,
+    /// 标价单价（原价）。
+    pub unit_price_cents: i64,
+    /// 标价合计 = `unit_price_cents × qty`。
+    pub total_cents: i64,
+    /// 减均分摊额（该行合计）。
+    pub reduce_cents: i64,
+    /// 减均后合计 = `total_cents − reduce_cents`。
+    pub final_total_cents: i64,
+    /// 减均后单价（按行合计均分，四舍五入；逐件精确值以 `final_total_cents` 为准）。
+    pub final_unit_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

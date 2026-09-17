@@ -40,12 +40,13 @@ fn discount(kind: DiscountKind, amount: i64, threshold: Option<i64>, ratio_ppm: 
     }
 }
 
-fn tier(id: &str, threshold: i64, price: i64) -> GiftTier {
+fn tier_claimed(id: &str, price: i64, claimed: u32) -> GiftTier {
     GiftTier {
         tier_id: id.to_string(),
-        threshold,
+        threshold: 0,
         gift_name: format!("特典-{id}"),
         unit_price: price,
+        claimed,
     }
 }
 
@@ -169,92 +170,131 @@ fn discount_scope_include_vs_exclude_gift() {
 }
 
 #[test]
-fn gift_tiers_stack_per_package_without_cross_package_accumulation() {
+fn gift_granting_is_min_of_claims_and_packages() {
+    // A 档认购 3、B 档认购 2；P=2 → G=2A+2B；P=3 → G=3A+2B（成几开几）
     let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![
-        tier("t0", 0, 100),
-        tier("t300", 30_000, 300),
-        tier("t500", 50_000, 500),
-    ];
-    let t = table(vec![
-        pkg("p1", vec![line("a", 1, 50_100)]),
-        pkg("p2", vec![line("a", 1, 25_000)]),
+    cfg.gift_tiers = vec![tier_claimed("A", 100, 3), tier_claimed("B", 200, 2)];
+
+    let t2 = table(vec![
+        pkg("p1", vec![line("a", 1, 1000)]),
+        pkg("p2", vec![line("a", 1, 1000)]),
     ]);
+    let r2 = evaluate(&cfg, &t2);
+    assert_eq!(r2.gift_valuation_total, 2 * 100 + 2 * 200);
+    assert!(r2.warnings.iter().any(|w| w.contains("掉落")));
 
-    let r = evaluate(&cfg, &t);
-    assert_eq!(r.packages[0].gift_count, 3);
-    assert_eq!(r.packages[1].gift_count, 1);
-    assert_eq!(r.gift_valuation_total, 100 + 300 + 500 + 100);
-    assert_eq!(r.gift_list.len(), 4);
-}
-
-#[test]
-fn gift_501_yuan_hits_three_tiers() {
-    let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![
-        tier("tier0", 0, 10),
-        tier("tier300", 30_000, 30),
-        tier("tier500", 50_000, 50),
-    ];
-    let t = table(vec![pkg("p501", vec![line("a", 1, 50_100)])]);
-
-    let r = evaluate(&cfg, &t);
-    let ids: Vec<&str> = r.gift_list.iter().map(|g| g.tier_id.as_str()).collect();
-    assert_eq!(ids, vec!["tier0", "tier300", "tier500"]);
-    assert_eq!(r.packages[0].gift_count, 3);
-    assert_eq!(r.gift_valuation_total, 90);
-    assert!(r.gift_list.iter().all(|g| g.quantity == 1));
-}
-
-#[test]
-fn reduce_average_excludes_gift_price_by_default() {
-    let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![tier("t0", 0, 1000), tier("t300", 30_000, 3000)];
-    let t = table(vec![
-        pkg("p1", vec![line("a", 1, 30_000)]),
-        pkg("p2", vec![line("a", 1, 10_000)]),
+    let t3 = table(vec![
+        pkg("p1", vec![line("a", 1, 1000)]),
+        pkg("p2", vec![line("a", 1, 1000)]),
+        pkg("p3", vec![line("a", 1, 1000)]),
     ]);
-
-    let r = evaluate(&cfg, &t);
-    assert_eq!(r.gift_valuation_total, 5000);
-    assert_eq!(r.reduce_average_total, 5000);
-    assert_eq!(r.packages[0].reduce_average_cents, 3750);
-    assert_eq!(r.packages[1].reduce_average_cents, 1250);
+    let r3 = evaluate(&cfg, &t3);
+    assert_eq!(r3.gift_valuation_total, 3 * 100 + 2 * 200);
 }
 
 #[test]
-fn reduce_average_includes_gift_price_when_configured() {
+fn moonlit_spec_g_is_twelve_times_twelve() {
+    // 月行水上-更新：特典 12 份 × ¥12 = 144，P=12 → G=144
     let mut cfg = SettlementConfig::default();
-    cfg.reduce_average.include_gift_price = true;
-    cfg.gift_tiers = vec![tier("t0", 0, 1000), tier("t300", 30_000, 3000)];
+    cfg.gift_tiers = vec![tier_claimed("gift_card", 1200, 12)];
+    let t = table(
+        (1..=12)
+            .map(|i| pkg(&format!("p{i}"), vec![line("a", i, 1000)]))
+            .collect(),
+    );
+    let r = evaluate(&cfg, &t);
+    assert_eq!(r.gift_valuation_total, 14_400);
+    let final_sum: i64 = r.lines.iter().map(|l| l.final_total_cents).sum();
+    assert_eq!(final_sum + r.gift_valuation_total, r.paid_total_cents);
+}
+
+#[test]
+fn reduce_average_total_is_list_minus_paid_plus_gift() {
+    let mut cfg = SettlementConfig::default();
+    cfg.gift_tiers = vec![tier_claimed("t", 5000, 1)];
     let t = table(vec![
         pkg("p1", vec![line("a", 1, 30_000)]),
         pkg("p2", vec![line("a", 1, 10_000)]),
     ]);
 
     let r = evaluate(&cfg, &t);
+    assert_eq!(r.list_total_cents, 40_000);
+    assert_eq!(r.paid_total_cents, 40_000);
     assert_eq!(r.gift_valuation_total, 5000);
     assert_eq!(r.reduce_average_total, 5000);
-    assert_eq!(r.packages[0].reduce_average_cents, 3778);
-    assert_eq!(r.packages[1].reduce_average_cents, 1222);
+    // 权重 30000:10000 → 3750:1250
+    assert_eq!(r.lines[0].reduce_cents, 3750);
+    assert_eq!(r.lines[1].reduce_cents, 1250);
+    let final_sum: i64 = r.lines.iter().map(|l| l.final_total_cents).sum();
+    assert_eq!(final_sum + r.gift_valuation_total, r.paid_total_cents);
+}
+
+#[test]
+fn reduce_average_accounts_for_discount() {
+    let mut cfg = SettlementConfig::default();
+    cfg.discounts
+        .push(discount(DiscountKind::WholeOrder, 10_000, None, None, -1));
+    cfg.gift_tiers = vec![tier_claimed("t", 5000, 1)];
+    let t = table(vec![
+        pkg("p1", vec![line("a", 1, 50_000)]),
+        pkg("p2", vec![line("a", 1, 50_000)]),
+    ]);
+
+    let r = evaluate(&cfg, &t);
+    assert_eq!(r.list_total_cents, 100_000);
+    assert_eq!(r.paid_total_cents, 90_000);
+    assert_eq!(r.grand_total, 90_000);
+    // D = C − B + G = 100000 − 90000 + 5000
+    assert_eq!(r.reduce_average_total, 15_000);
+    let final_sum: i64 = r.lines.iter().map(|l| l.final_total_cents).sum();
+    assert_eq!(final_sum + r.gift_valuation_total, r.paid_total_cents);
 }
 
 #[test]
 fn reduce_average_largest_remainder_conserves_total() {
     let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![tier("t1500", 1500, 100)];
+    cfg.gift_tiers = vec![tier_claimed("t", 100, 1)];
     let t = table(vec![
         pkg("p1", vec![line("a", 1, 2000)]),
         pkg("p2", vec![line("a", 1, 1000)]),
     ]);
 
     let r = evaluate(&cfg, &t);
-    assert_eq!(r.gift_valuation_total, 100);
     assert_eq!(r.reduce_average_total, 100);
-    assert_eq!(r.packages[0].reduce_average_cents, 67);
-    assert_eq!(r.packages[1].reduce_average_cents, 33);
-    let sum: i64 = r.packages.iter().map(|p| p.reduce_average_cents).sum();
-    assert_eq!(sum, r.gift_valuation_total);
+    assert_eq!(r.lines[0].reduce_cents, 67);
+    assert_eq!(r.lines[1].reduce_cents, 33);
+    let final_sum: i64 = r.lines.iter().map(|l| l.final_total_cents).sum();
+    assert_eq!(final_sum + r.gift_valuation_total, r.paid_total_cents);
+}
+
+#[test]
+fn reduce_average_is_per_piece_and_keeps_integer_cents() {
+    let mut cfg = SettlementConfig::default();
+    cfg.gift_tiers = vec![tier_claimed("t", 1, 1)];
+    let t = table(vec![pkg("p1", vec![line("a", 2, 2500)])]);
+
+    let r = evaluate(&cfg, &t);
+    assert_eq!(r.list_total_cents, 5000);
+    assert_eq!(r.reduce_average_total, 1);
+    assert_eq!(r.lines[0].total_cents, 5000);
+    assert_eq!(r.lines[0].reduce_cents, 1);
+    assert_eq!(r.lines[0].final_total_cents, 4999);
+    let final_sum: i64 = r.lines.iter().map(|l| l.final_total_cents).sum();
+    assert_eq!(final_sum + r.gift_valuation_total, r.paid_total_cents);
+}
+
+#[test]
+fn reduce_average_zero_basis_warns_and_checks_out() {
+    let mut cfg = SettlementConfig::default();
+    cfg.gift_tiers = vec![tier_claimed("t", 500, 1)];
+    let t = table(vec![pkg("p1", vec![line("a", 1, 0)])]);
+
+    let r = evaluate(&cfg, &t);
+    assert_eq!(r.paid_total_cents, 0);
+    assert_eq!(r.reduce_average_total, 0);
+    assert!(r.warnings.iter().any(|w| w.contains("减均基数")));
+    // 基数为 0 时校验式无法成立，必须显式告警
+    assert!(r.warnings.iter().any(|w| w.contains("减均校验失败")));
 }
 
 #[test]
@@ -431,4 +471,56 @@ fn order_table_from_allocation_aggregates_by_user_and_claim() {
 fn largest_remainder_conserves_with_zero_weight() {
     let shares = super::engine::largest_remainder(7, &[(0, 0), (1, 0)]);
     assert_eq!(shares, vec![(0, 0), (1, 0)]);
+}
+
+/// 月行水上-更新（用户 2026-09-17 定稿数据）：
+/// 12 单、特典 12 份 × ¥12 = ¥144，标价合计 ¥3285（= Sheet2 参考 ¥3270 + 风尚速递SP 拼套 ¥15）。
+#[test]
+fn moonlit_spec_update_fixture_matches_reference() {
+    let path = std::path::Path::new("simulation-corpus/real-xlsx/月行水上-更新/fixture.json");
+    if !path.exists() {
+        eprintln!("跳过：夹具不存在（xlsx 为 gitignored 输入，可运行 build_fixture.py 重建）");
+        return;
+    }
+    let raw = std::fs::read_to_string(path).expect("read fixture");
+    let v: serde_json::Value = serde_json::from_str(&raw).expect("parse fixture");
+
+    let table: OrderTable =
+        serde_json::from_value(v["order_table"].clone()).expect("order_table");
+    let config: SettlementConfig =
+        serde_json::from_value(v["settlement_config"].clone()).expect("settlement_config");
+
+    let r = evaluate(&config, &table);
+
+    assert_eq!(table.packages.len(), 12, "P 应为 12 单");
+    assert_eq!(r.gift_valuation_total, 14_400, "G = 12 × ¥12");
+    assert_eq!(r.list_total_cents, 328_500, "C = ¥3285");
+    assert_eq!(r.paid_total_cents, 328_500, "无折扣：B = C");
+    assert_eq!(r.reduce_average_total, 14_400, "D = C − B + G = G");
+
+    let final_sum: i64 = r.lines.iter().map(|l| l.final_total_cents).sum();
+    assert_eq!(
+        final_sum + r.gift_valuation_total,
+        r.paid_total_cents,
+        "校验式 Σfinal + G = B"
+    );
+
+    // 与 Sheet2「单领（报盒）」参考价逐单对照（第1单另含 风尚速递SP 拼套 +¥15）
+    let per_order: Vec<i64> = v["reference"]["per_order_cents"]
+        .as_array()
+        .expect("per_order")
+        .iter()
+        .map(|x| x.as_i64().expect("cents"))
+        .collect();
+    assert_eq!(per_order.len(), 12);
+    assert_eq!(v["reference"]["total_cents"].as_i64(), Some(327_000));
+    for (i, expected) in per_order.iter().enumerate() {
+        let delta = if i == 0 { 1_500 } else { 0 };
+        assert_eq!(
+            r.packages[i].gross_cents,
+            expected + delta,
+            "第{}单 标价合计",
+            i + 1
+        );
+    }
 }
