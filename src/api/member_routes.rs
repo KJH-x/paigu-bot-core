@@ -36,7 +36,11 @@ fn load_members(path: &Path) -> Option<Vec<Value>> {
         .and_then(|raw| parse_members(&raw))
 }
 
-fn members_from_disk() -> (Vec<Value>, &'static str) {
+/// 读取顺序：**刷新缓存（真实名单）** → seed（真实名单，用户手工放置）→ example（占位）。
+fn members_from_disk(cache_path: &Path) -> (Vec<Value>, &'static str) {
+    if let Some(members) = load_members(cache_path) {
+        return (members, "cache");
+    }
     if let Some(members) = load_members(&seed_path()) {
         return (members, "seed");
     }
@@ -52,8 +56,9 @@ pub fn routes() -> Router<Arc<ApiState>> {
         .route("/api/members/refresh", post(refresh_members))
 }
 
-async fn get_members(State(_state): State<Arc<ApiState>>) -> Json<Value> {
-    let (members, source) = members_from_disk();
+async fn get_members(State(state): State<Arc<ApiState>>) -> Json<Value> {
+    let cfg = state.cfg.get().await;
+    let (members, source) = members_from_disk(Path::new(&cfg.members.cache_path));
     Json(json!({ "members": members, "source": source }))
 }
 
@@ -115,6 +120,23 @@ mod tests {
         );
         assert!(parse_members("not json").is_none());
         assert!(parse_members(r#"{"other":1}"#).is_none());
+    }
+
+    #[test]
+    fn cache_takes_priority_over_seed_and_example() {
+        let dir = std::env::temp_dir().join(format!("paigu-members-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = dir.join("members.json");
+
+        // 无缓存 → 回退 seed/example（此时不应是 cache）
+        assert_ne!(members_from_disk(&cache).1, "cache");
+
+        std::fs::write(&cache, r#"{"members":[{"user_id":"1","nickname":"n1"}]}"#).unwrap();
+        let (members, source) = members_from_disk(&cache);
+        assert_eq!(source, "cache");
+        assert_eq!(members.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
