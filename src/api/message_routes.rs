@@ -6,9 +6,8 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::messages::{next_seq, JsonlMessageStore, MessageRecord, MessageStore};
+use crate::messages::{next_seq, MessageRecord, MessageStore};
 use crate::replay::session::{self, ReplayOverrides};
-use crate::settings::AppConfig;
 
 use super::{api_bad_request, api_internal, api_not_found, api_stale_revision, ApiError, ApiState};
 
@@ -19,10 +18,6 @@ pub fn routes() -> Router<Arc<ApiState>> {
             "/api/messages/:seq",
             put(update_message).delete(delete_message),
         )
-}
-
-fn store_for(cfg: &AppConfig) -> JsonlMessageStore {
-    JsonlMessageStore::from_env(&cfg.round.round_id)
 }
 
 fn now_ms() -> i64 {
@@ -67,7 +62,7 @@ fn message_view(rec: &MessageRecord) -> Value {
 
 async fn recompute(state: &ApiState) -> anyhow::Result<Value> {
     let cfg = state.cfg.get().await;
-    let store = store_for(&cfg);
+    let store = state.messages.store_for(&cfg.round.round_id);
     let result = session::replay(&store, &cfg, ReplayOverrides::default()).await?;
     Ok(super::replay_routes::replay_result_json(&result))
 }
@@ -85,7 +80,7 @@ async fn list_messages(
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let cfg = state.cfg.get().await;
-    let mut records = store_for(&cfg).read_all().await.map_err(api_internal)?;
+    let mut records = state.messages.store_for(&cfg.round.round_id).read_all().await.map_err(api_internal)?;
     records.sort_by_key(|r| r.seq);
 
     let since = query.since.unwrap_or(0);
@@ -165,7 +160,7 @@ async fn create_message(
         detail: body.detail.unwrap_or_default(),
     };
     validate_record(&rec).map_err(api_bad_request)?;
-    store_for(&cfg).append(&rec).await.map_err(api_internal)?;
+    state.messages.store_for(&cfg.round.round_id).append(&rec).await.map_err(api_internal)?;
 
     let recomputed = body.recompute.unwrap_or(true);
     let result = if recomputed {
@@ -219,7 +214,7 @@ async fn update_message(
         }
     }
 
-    let store = store_for(&cfg);
+    let store = state.messages.store_for(&cfg.round.round_id);
     let mut records = store.read_all().await.map_err(api_internal)?;
     let target = records
         .iter_mut()
@@ -283,14 +278,14 @@ async fn delete_message(
     Query(query): Query<DeleteQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let cfg = state.cfg.get().await;
-    let store = store_for(&cfg);
-    let mut records = store.read_all().await.map_err(api_internal)?;
-    let before = records.len();
-    records.retain(|r| r.seq != seq);
-    if records.len() == before {
+    if !state
+        .messages
+        .delete(&cfg.round.round_id, seq)
+        .await
+        .map_err(api_internal)?
+    {
         return Err(api_not_found(format!("message {seq} not found")));
     }
-    store.replace_all(&records).await.map_err(api_internal)?;
 
     let recomputed = query.recompute.unwrap_or(true);
     let result = if recomputed {

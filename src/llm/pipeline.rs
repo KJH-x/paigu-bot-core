@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -16,7 +15,7 @@ use crate::domain::ids::{EligibilityId, RoundId, UserId};
 use crate::domain::item::{Item, RoundContext};
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
-use crate::messages::{JsonlMessageStore, MessageRecord as LogMessageRecord, MessageStore};
+use crate::messages::{MessageLog, MessageRecord as LogMessageRecord};
 use crate::parser::parsed_event::{ParsedClaimItem, ParsedIntent, ParsedMessage};
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidationOutcome};
@@ -33,7 +32,7 @@ pub struct Pipeline {
     cfg: Arc<ConfigStore>,
     llm: Arc<dyn LlmClient>,
     state: Mutex<State>,
-    messages_dir: Option<PathBuf>,
+    messages: Arc<MessageLog>,
 }
 
 #[derive(Default)]
@@ -58,10 +57,12 @@ struct MessageRecord {
 }
 
 impl Pipeline {
+    #[allow(dead_code)]
     pub fn new(cfg: Arc<ConfigStore>) -> Arc<Self> {
         Self::new_with_client(cfg, Arc::new(OpenAiClient::new()))
     }
 
+    #[allow(dead_code)]
     pub fn new_with_client(cfg: Arc<ConfigStore>, llm: Arc<dyn LlmClient>) -> Arc<Self> {
         Self::build(cfg, llm, None)
     }
@@ -71,26 +72,50 @@ impl Pipeline {
     pub fn new_with_client_dir(
         cfg: Arc<ConfigStore>,
         llm: Arc<dyn LlmClient>,
-        messages_dir: impl Into<PathBuf>,
+        messages_dir: impl Into<std::path::PathBuf>,
     ) -> Arc<Self> {
-        Self::build(cfg, llm, Some(messages_dir.into()))
+        let dir: std::path::PathBuf = messages_dir.into();
+        let log = MessageLog::new(dir.clone(), dir.join("events"));
+        Self::build(cfg, llm, Some(log))
+    }
+
+    /// 注入共享消息日志（T-05）。
+    pub fn new_with_messages(
+        cfg: Arc<ConfigStore>,
+        llm: Arc<dyn LlmClient>,
+        messages: Arc<MessageLog>,
+    ) -> Arc<Self> {
+        Self::build(cfg, llm, Some(messages))
     }
 
     fn build(
         cfg: Arc<ConfigStore>,
         llm: Arc<dyn LlmClient>,
-        messages_dir: Option<PathBuf>,
+        messages: Option<Arc<MessageLog>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             cfg,
             llm,
             state: Mutex::new(State::default()),
-            messages_dir,
+            messages: messages.unwrap_or_else(MessageLog::from_env),
         })
+    }
+
+    /// 共享消息日志句柄（Gateway / API 复用同一实例）。
+    #[allow(dead_code)]
+    pub fn messages(&self) -> Arc<MessageLog> {
+        self.messages.clone()
     }
 
     pub async fn process(&self, ev: IncomingEvent) -> PipelineOutcome {
         let cfg = self.cfg.get().await;
+        // C-3：保留成员原始事件（WS 路径由 Gateway 落盘；此处覆盖 API/脚本注入路径）
+        if let Some(raw) = &ev.raw {
+            let round_id = cfg.round.round_id.clone();
+            if let Err(e) = self.messages.append_raw_event(&round_id, raw).await {
+                warn!("原始事件写入失败: {e}");
+            }
+        }
         let (identity, display_raw) = crate::gateway::onebot::clean_nickname(&ev.nickname);
         let display = if display_raw.trim().is_empty() {
             ev.user_id.clone()
@@ -416,10 +441,6 @@ impl Pipeline {
     /// 持久化一条入站消息日志（`routed=message`，`status` 记处理结果）。
     async fn persist(&self, ev: &IncomingEvent, status: &str, detail: &str, routed: &str) {
         let round_id = self.cfg.get().await.round.round_id.clone();
-        let store = match &self.messages_dir {
-            Some(dir) => JsonlMessageStore::new(dir, &round_id),
-            None => JsonlMessageStore::from_env(&round_id),
-        };
         let rec = LogMessageRecord {
             seq: crate::messages::next_seq(),
             group_id: ev.group_id.clone(),
@@ -433,7 +454,7 @@ impl Pipeline {
             status: status.to_string(),
             detail: detail.to_string(),
         };
-        if let Err(e) = store.append(&rec).await {
+        if let Err(e) = self.messages.append(&round_id, &rec).await {
             warn!("消息日志写入失败: {e}");
         }
     }
@@ -481,6 +502,10 @@ impl Pipeline {
 impl EventSink for Pipeline {
     async fn handle(&self, ev: IncomingEvent) {
         self.process(ev).await;
+    }
+
+    fn messages(&self) -> Arc<MessageLog> {
+        self.messages.clone()
     }
 }
 
@@ -710,6 +735,8 @@ fn extract_json(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::{JsonlMessageStore, MessageStore};
+    use std::path::PathBuf;
     use crate::round::PhaseWindow;
     use crate::settings::{default_config, LlmSettings};
 
@@ -807,6 +834,7 @@ mod tests {
             text: text.to_string(),
             timestamp_ms,
             is_admin: false,
+            raw: None,
         }
     }
 

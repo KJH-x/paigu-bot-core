@@ -30,6 +30,8 @@ pub struct ApiState {
     pub cfg: Arc<ConfigStore>,
     pub pipeline: Arc<Pipeline>,
     pub gateway: Arc<Gateway>,
+    /// 共享消息日志（T-05）：API 与 Gateway/Pipeline 复用同一实例。
+    pub messages: Arc<crate::messages::MessageLog>,
 }
 
 pub fn web_dir() -> PathBuf {
@@ -143,10 +145,12 @@ mod tests {
         let cfg = Arc::new(ConfigStore::load(&path).expect("load config"));
         let pipeline = crate::llm::Pipeline::new(cfg.clone());
         let gateway = crate::gateway::Gateway::new(cfg.clone(), pipeline.clone());
+        let messages = pipeline.messages();
         let state = Arc::new(ApiState {
             cfg,
             pipeline,
             gateway,
+            messages,
         });
         let _router = build_router(state);
         let _ = std::fs::remove_file(&path);

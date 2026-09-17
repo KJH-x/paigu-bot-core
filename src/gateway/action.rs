@@ -41,6 +41,11 @@ mod tests {
     #[async_trait]
     impl EventSink for NullSink {
         async fn handle(&self, _ev: IncomingEvent) {}
+
+        fn messages(&self) -> Arc<crate::messages::MessageLog> {
+            let dir = std::env::temp_dir().join("paigu-null-sink");
+            crate::messages::MessageLog::new(dir.clone(), dir.join("events"))
+        }
     }
 
     fn test_gateway() -> Arc<Gateway> {

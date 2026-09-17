@@ -303,6 +303,7 @@ pub fn to_incoming_event(ev: &RouteMessageEvent) -> IncomingEvent {
         text,
         timestamp_ms,
         is_admin: id.is_admin,
+        raw: serde_json::to_value(ev).ok(),
     }
 }
 
