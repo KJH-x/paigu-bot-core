@@ -1,19 +1,16 @@
-mod config;
+// 旧栈删除后，仍有少量「保留但未接线」的公共 API（如 domain 的 Public* 视图模型、
+// parser 的部分条目、engine::event_store），待后续 Wave 接线；统一在此静音 dead_code。
+#![allow(dead_code)]
+
 mod settings;
 mod bus;
 mod error;
-mod app_state;
 mod domain;
-mod inbound;
 mod parser;
 mod engine;
-mod repo;
-mod services;
 mod api;
-mod publisher;
 mod replay;
 mod simulation;
-mod ws;
 mod gateway;
 mod llm;
 mod messages;
@@ -29,8 +26,6 @@ use anyhow::Result;
 use tracing::info;
 use tracing_subscriber;
 
-use crate::ws::ws_server::WsServer;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -42,49 +37,15 @@ async fn main() -> Result<()> {
         simulation::verifier::run_cli(&args[2..]).await?;
         return Ok(());
     }
-    if args.len() > 1 && args[1] == "serve" {
-        simulation::chat_server::run_cli(&args[2..]).await?;
-        return Ok(());
-    }
-    if args.len() <= 1 || args[1] == "run" {
+    if args.len() <= 1 || args[1] == "run" || args[1] == "serve" {
         return run_gateway_stack().await;
     }
 
     tracing::warn!(
-        "旧栈已弃用：未识别的子命令 `{}` 落入旧栈（Postgres/旧 WS），请使用 `run`/`simulate`/`serve`",
+        "未识别的子命令 `{}`：已统一到新栈（run/serve），按 `run` 启动",
         args[1]
     );
-
-    let config = config::Config::from_env()?;
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(config.database.max_connections)
-        .connect(&config.database.url)
-        .await?;
-
-    let app_state = app_state::AppState::build(config.clone(), pool).await?;
-
-    // Spawn WS reverse server on port 3001
-    if config.app.ws.enabled {
-        let ws_config = config.app.ws.clone();
-        let message_service = app_state.services.message.clone();
-        let ws_server = Arc::new(WsServer::new(ws_config, message_service));
-
-        tokio::spawn(async move {
-            info!("Starting WebSocket server...");
-            ws_server.run_forever().await;
-        });
-
-        info!("WebSocket server spawned on {}:{}", config.app.ws.host, config.app.ws.port);
-    }
-
-    // Start HTTP API on port 8080
-    let app = api::routes::build_router(app_state);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
-
-    info!("HTTP API listening on 0.0.0.0:8080");
-    axum::serve(listener, app).await?;
-
-    Ok(())
+    run_gateway_stack().await
 }
 
 async fn run_gateway_stack() -> Result<()> {

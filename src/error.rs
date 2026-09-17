@@ -2,9 +2,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
-
     #[error("LLM error: {0}")]
     Llm(#[from] LlmError),
 
@@ -16,12 +13,6 @@ pub enum AppError {
 
     #[error("Replay error: {0}")]
     Replay(#[from] ReplayError),
-
-    #[error("Export error: {0}")]
-    Export(#[from] ExportError),
-
-    #[error("Publish error: {0}")]
-    Publish(#[from] PublishError),
 
     #[error("Not found: {0}")]
     NotFound(String),
@@ -61,24 +52,6 @@ pub enum SettlementError {}
 pub enum ReplayError {
     #[error("Snapshot restore failed: step={0}, error={1}")]
     SnapshotRestoreFailed(u64, String),
-}
-
-#[derive(Debug, Error)]
-pub enum ExportError {
-    #[error("CSV write error: {0}")]
-    Csv(#[from] csv::Error),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-}
-
-#[derive(Debug, Error)]
-pub enum PublishError {
-    #[error("S3 error: {0}")]
-    S3(String),
-
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
 }
 
 pub type AppResult<T> = Result<T, AppError>;

@@ -8,8 +8,8 @@ use crate::error::AppResult;
 
 pub enum ValidationOutcome {
     Ok(EventEnvelope),
-    NeedConfirm(crate::inbound::command_router::BotReply),
-    Reject(crate::inbound::command_router::BotReply),
+    NeedConfirm(crate::parser::reply::BotReply),
+    Reject(crate::parser::reply::BotReply),
     Ignore,
 }
 
@@ -33,7 +33,7 @@ impl EventValidator {
         now: chrono::DateTime<chrono::Utc>,
         sequence: i64,
     ) -> AppResult<ValidationOutcome> {
-        use crate::inbound::command_router::BotReply;
+        use crate::parser::reply::BotReply;
 
         if parsed.intent == ParsedIntent::Unknown {
             return Ok(ValidationOutcome::Ignore);
