@@ -13,7 +13,8 @@ use crate::domain::money::MoneyCents;
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::planner::{self, PlanLimits, PlanRequest};
 use crate::settlement::{
-    evaluate, order_table_from_allocation, OrderTable, SettlementConfig, SettlementResult, UnitPrice,
+    check_completeness, evaluate, order_table_from_allocation, CompletenessReport, OrderTable,
+    SettlementConfig, SettlementResult, UnitPrice,
 };
 
 use super::{api_bad_request, api_internal, api_stale_revision, ApiError, ApiState};
@@ -25,6 +26,7 @@ pub fn routes() -> Router<Arc<ApiState>> {
             get(get_settlement_config).put(put_settlement_config),
         )
         .route("/api/settlement/evaluate", post(evaluate_order))
+        .route("/api/settlement/completeness", post(completeness_check))
         .route("/api/settlement/plan", post(plan_order))
         .route("/api/settlement/from-allocation", post(from_allocation))
 }
@@ -63,6 +65,9 @@ struct EvaluateBody {
     order_table: OrderTable,
     #[serde(default)]
     config: Option<SettlementConfig>,
+    /// 提供后即启用「排包完成」校验（未完成 → 拒绝计算）。
+    #[serde(default)]
+    allocation: Option<AllocationSnapshot>,
 }
 
 async fn evaluate_order(
@@ -73,7 +78,38 @@ async fn evaluate_order(
         Some(config) => config,
         None => state.cfg.get().await.settlement,
     };
+    if let Some(allocation) = &body.allocation {
+        let report = check_completeness(&body.order_table, allocation);
+        if !report.complete {
+            return Err(api_bad_request(format!(
+                "排包未完成，拒绝计算：{}",
+                if report.messages.is_empty() {
+                    "数量与排谷结果不一致".to_string()
+                } else {
+                    report.messages.join("；")
+                }
+            )));
+        }
+    }
     Ok(Json(evaluate(&config, &body.order_table)))
+}
+
+#[derive(Deserialize)]
+struct CompletenessBody {
+    order_table: OrderTable,
+    #[serde(default)]
+    allocation: Option<AllocationSnapshot>,
+}
+
+async fn completeness_check(
+    State(state): State<Arc<ApiState>>,
+    Json(body): Json<CompletenessBody>,
+) -> Result<Json<CompletenessReport>, ApiError> {
+    let allocation = match body.allocation {
+        Some(allocation) => allocation,
+        None => current_allocation(&state).await?,
+    };
+    Ok(Json(check_completeness(&body.order_table, &allocation)))
 }
 
 #[derive(Deserialize)]

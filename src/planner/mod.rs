@@ -109,7 +109,6 @@ struct Atom {
     is_gift: bool,
     qty: u32,
     unit_price_cents: i64,
-    owner: String,
 }
 
 pub fn plan(req: &PlanRequest) -> PlanResult {
@@ -323,23 +322,20 @@ impl<'a> Search<'a> {
             .iter()
             .enumerate()
             .map(|(idx, atom_ids)| {
-                let mut merged: BTreeMap<(String, Option<String>, bool, i64), u32> = BTreeMap::new();
+                // 合并键不含价格/购买人：同一商品（含不同人买的）只记一种（A-3）
+                let mut merged: BTreeMap<(String, Option<String>, bool), (u32, i64)> =
+                    BTreeMap::new();
                 for &ai in atom_ids {
                     let atom = &self.atoms[ai];
                     let entry = merged
-                        .entry((
-                            atom.item_id.clone(),
-                            atom.variant_id.clone(),
-                            atom.is_gift,
-                            atom.unit_price_cents,
-                        ))
-                        .or_insert(0);
-                    *entry = entry.saturating_add(atom.qty);
+                        .entry((atom.item_id.clone(), atom.variant_id.clone(), atom.is_gift))
+                        .or_insert((0, atom.unit_price_cents));
+                    entry.0 = entry.0.saturating_add(atom.qty);
                 }
                 let lines: Vec<Line> = merged
                     .into_iter()
                     .map(
-                        |((item_id, variant_id, is_gift, unit_price_cents), qty)| Line {
+                        |((item_id, variant_id, is_gift), (qty, unit_price_cents))| Line {
                             item_id,
                             variant_id,
                             qty,
@@ -427,42 +423,31 @@ fn collect_atoms(req: &PlanRequest) -> Vec<Atom> {
     for alloc in &req.allocation.item_allocations {
         let is_gift = alloc.kind == "gift";
         let variant = alloc.variant_id.clone();
+        // 标价一律取商品目录（canonical）：同一商品不因购买人/单领自带价而拆成两种（A-3）
         let base = lookup_price(&req.prices, &alloc.item_id.0, variant.as_deref());
 
         for mbox in &alloc.boxes {
             for slot in &mbox.slots {
-                if let Some(user) = &slot.user_id {
-                    let claim = slot
-                        .claim_id
-                        .as_ref()
-                        .map(|c| c.0.clone())
-                        .unwrap_or_default();
+                if slot.user_id.is_some() {
                     atoms.push(Atom {
                         item_id: alloc.item_id.0.clone(),
                         variant_id: variant.clone(),
                         is_gift,
                         qty: 1,
                         unit_price_cents: base,
-                        owner: package_key(&user.0, &claim),
                     });
                 }
             }
         }
 
         for single in &alloc.singles {
-            let price = if single.unit_price.0 != 0 {
-                single.unit_price.0
-            } else {
-                base
-            };
             for _ in 0..single.quantity {
                 atoms.push(Atom {
                     item_id: alloc.item_id.0.clone(),
                     variant_id: variant.clone(),
                     is_gift,
                     qty: 1,
-                    unit_price_cents: price,
-                    owner: package_key(&single.user_id.0, &single.claim_id.0),
+                    unit_price_cents: base,
                 });
             }
         }
@@ -473,7 +458,6 @@ fn collect_atoms(req: &PlanRequest) -> Vec<Atom> {
             .then(a.variant_id.cmp(&b.variant_id))
             .then(a.is_gift.cmp(&b.is_gift))
             .then(a.unit_price_cents.cmp(&b.unit_price_cents))
-            .then(a.owner.cmp(&b.owner))
     });
     atoms
 }
@@ -492,14 +476,6 @@ fn lookup_price(prices: &[UnitPrice], item_id: &str, variant_id: Option<&str>) -
         .find(|p| p.item_id == item_id && p.variant_id.is_none())
         .map(|p| p.unit_price_cents)
         .unwrap_or(0)
-}
-
-fn package_key(user_id: &str, claim_id: &str) -> String {
-    if claim_id.is_empty() {
-        user_id.to_string()
-    } else {
-        format!("{user_id}#{claim_id}")
-    }
 }
 
 #[cfg(test)]

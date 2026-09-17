@@ -27,6 +27,14 @@ fn single_item(item_id: &str, user: &str, claim: &str, price: i64) -> ItemAlloca
     }
 }
 
+fn price(item_id: &str, cents: i64) -> UnitPrice {
+    UnitPrice {
+        item_id: item_id.to_string(),
+        variant_id: None,
+        unit_price_cents: cents,
+    }
+}
+
 fn snapshot(items: Vec<ItemAllocation>) -> AllocationSnapshot {
     AllocationSnapshot {
         round_id: RoundId("r1".to_string()),
@@ -103,7 +111,12 @@ fn discount_max_splits_into_threshold_packages() {
         ]),
         strategy: Strategy::DiscountMax,
         limits: limits(4, 200_000),
-        prices: vec![],
+        prices: vec![
+            price("a", 6_000),
+            price("b", 6_000),
+            price("c", 6_000),
+            price("d", 6_000),
+        ],
     };
 
     let result = plan(&req);
@@ -124,7 +137,7 @@ fn best_table_packages_sorted_by_amount_desc() {
         ]),
         strategy: Strategy::DiscountMax,
         limits: limits(3, 100_000),
-        prices: vec![],
+        prices: vec![price("a", 1_000), price("b", 3_000), price("c", 2_000)],
     };
 
     let result = plan(&req);
@@ -152,7 +165,13 @@ fn no_discount_config_prunes_after_first_leaf() {
         ]),
         strategy: Strategy::DiscountMax,
         limits: limits(5, 1_000_000),
-        prices: vec![],
+        prices: vec![
+            price("a", 100),
+            price("b", 200),
+            price("c", 300),
+            price("d", 400),
+            price("e", 500),
+        ],
     };
 
     let result = plan(&req);
@@ -176,7 +195,15 @@ fn max_iters_truncates_deterministically() {
         ]),
         strategy: Strategy::GiftMax,
         limits: limits(7, 3),
-        prices: vec![],
+        prices: vec![
+            price("a", 100),
+            price("b", 200),
+            price("c", 300),
+            price("d", 400),
+            price("e", 500),
+            price("f", 600),
+            price("g", 700),
+        ],
     };
 
     let first = plan(&req);
@@ -207,7 +234,11 @@ fn both_strategies_are_reproducible() {
             ]),
             strategy,
             limits: limits(3, 200_000),
-            prices: vec![],
+            prices: vec![
+                price("a", 25_000),
+                price("b", 25_100),
+                price("c", 12_000),
+            ],
         };
 
         let first = plan(&req);
@@ -287,7 +318,7 @@ fn max_packages_is_respected() {
         ]),
         strategy: Strategy::DiscountMax,
         limits: limits(1, 100_000),
-        prices: vec![],
+        prices: vec![price("a", 1_000), price("b", 2_000), price("c", 3_000)],
     };
 
     let result = plan(&req);
