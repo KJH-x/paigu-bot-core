@@ -15,15 +15,9 @@ anyhow = "1"
 async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"] }
-csv = "1"
 reqwest = { version = "0.12", features = ["json", "stream"] }
-aws-config = "1"
-aws-sdk-s3 = "1"
 sha2 = "0.10"
-figment = { version = "0.10", features = ["env"] }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
-socket2 = "0.5"
 notify = "6"
 tower-http = { version = "0.6", features = ["fs", "cors"] }

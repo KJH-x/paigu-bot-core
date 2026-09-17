@@ -52,20 +52,3 @@ pub async fn read_jsonl_queue_file(path: &str) -> anyhow::Result<Vec<QueueMessag
 
     Ok(records)
 }
-
-impl From<QueueMessageRecord> for crate::repo::round_repo::RawMessageRecord {
-    fn from(record: QueueMessageRecord) -> Self {
-        let timestamp = chrono::DateTime::from_timestamp_millis(record.timestamp_ms)
-            .unwrap_or_else(|| chrono::Utc::now());
-        crate::repo::round_repo::RawMessageRecord {
-            raw_message_id: record.message_id.clone(),
-            group_id: record.group_id,
-            user_id: record.user_id,
-            qq_message_id: record.message_id,
-            timestamp,
-            text: Some(record.text),
-            images: serde_json::json!(record.attachments),
-            is_admin: record.is_admin,
-        }
-    }
-}
