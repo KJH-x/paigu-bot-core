@@ -74,3 +74,15 @@
 - C6：`--speed 10` 的脚本回放结果与实时一致（仅时间压缩）。
 - C7：录制→重放结果一致。
 - 阶段/结算：权限矩阵单测 + 结算可复算样例（含 501 元三档特典）。
+
+---
+
+## 六、Wave 1-4 完成状态（2026-09-17）
+
+- **Wave 1**：减均 v2（`D=C-B+G`）+ 成团/特典（`min(claims,P)`）+ 标价表入商品目录 + `月行水上-更新` 夹具（逐单对照 Sheet2 参考价一致）。
+- **Wave 1b**：planner 原子去 owner / canonical 标价；排包完成校验（未完成拒绝计算）。
+- **Wave 2**：共享 `MessageLog`（T-05）、原始事件日志（C-3）、细粒度 query/update/delete（C-5）、单一 JSON 快照（C-2）。
+- **Wave 3**：reply/admin 命令热开关（T-04/D-1）、管理员命令执行（锁定/状态/导出）、改单（D-2 自助）、`serve` 并入新栈（D-4）、admin 标价 UI（T-03）。
+- **Wave 4**：`dev` 分支删除全部旧栈（含 `sqlx/csv/aws-*/figment/socket2` 依赖），回归全绿后合并 `master`。
+
+**验收**：`cargo test` **138 passed**、`cargo build` 0 warning、e2e **11/11**、real-samples **ALL PASS**、real-xlsx **ALL PASS**、路由（含 `/api/events`、`/api/settlement/completeness`、`/api/config/{reply,admin-commands}`）全 200。

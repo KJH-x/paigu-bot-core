@@ -123,3 +123,27 @@
 - **下单包数 P = 12**（Sheet2「第1单…第12单」）。
 - **单领（报盒）部分**：Sheet2 的每单价（280/273/…/266）与总价 3270 **仅作自动结果的验算参考**，不作为计算输入。
 - **Sheet3 特典价合计 144** 佐证 G。
+
+---
+
+## F. 实施状态（2026-09-17，Wave 1-4 全部落地）
+
+| 决策 | 状态 | 落地 |
+|---|---|---|
+| A-1 减均 | ✅ 已实现 | `settlement::evaluate`（`D=C-B+G`、按件加权、残差校正、校验式） |
+| A-2 成团/特典 | ✅ 已实现 | `GiftTier.claimed` + `granted=min(claimed,P)`；月行水上-更新 G=¥144 |
+| A-3 下单包 | ✅ 已实现 | 一包=一单、无上限、包与认购解耦、特典免费不计包价 |
+| A-4 标价表 | ✅ 已实现 | 标价入 `round.items`（含 box_size/pieces），admin 页可编辑 |
+| A-5 阶段时间 | ✅ 已记录 | 写入 REQUIREMENTS §2（浮动，以管理员手动为准） |
+| B-1 reply_enabled | ✅ 已实现 | `POST /api/config/reply` 热切换；默认关闭 |
+| B-2 名单拉取 | ✅ 已实现 | NapCat `get_group_member_list` + 每日 19:00（待实机验证） |
+| B-3 群白名单 | ✅ 已实现 | 仅按群 |
+| C-1 远程展示 | ⏸ 暂不部署 | `Public*` 视图模型保留 |
+| C-2 单 JSON 快照 | ✅ 已实现 | `SnapshotFile` + `export_file/import_file` |
+| C-3 原始事件 | ✅ 已实现 | `data/events/<round>.jsonl` + `GET /api/events` |
+| C-4 删旧栈 | ✅ 已实现 | `dev` 分支删除 + 回归全绿 + 合并 `master` |
+| C-5 细粒度方法 | ✅ 已实现 | `MessageLog::{query,update,delete}` |
+| D-1 管理员命令 | ✅ 已实现 | 热开关 + `/开团 /锁位 /结团 /状态 /导出` |
+| D-2 改单 | 🟡 部分 | 自助改单已实现；**管理员改任意人**待补目标语法（T-14） |
+| D-3 LLM 模型 | ❓ 未回复 | 维持 `deepseek-flash`（如需变更请说明） |
+| D-4 子命令统一 | ✅ 已实现 | `serve` 并入新栈；`simulate` 暂留旧 verifier（T-24） |

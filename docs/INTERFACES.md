@@ -300,3 +300,59 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `/api/messages` 的 `MessageRecord` 与 `Pipeline` 内存消息模型统一 | `messages`、`llm::pipeline` | T1/T2 | Pipeline 自带私有 `MessageRecord`（`pipeline.rs:48-54`），未落盘 |
 
 > 复核：以上「现状」均来自本文件 §1–§5 的 `文件:行号` 引用；标「待确认」项需 A0/用户裁决。
+
+---
+
+## 8. Wave 1-4 新增/变更接口（2026-09-17）
+
+> 均已实现并被单测覆盖（cargo test 138 passed）。旧栈（repo/services/ws/publisher/config/app_state/inbound）已删除。
+
+### 8.1 结算（src/settlement/**）
+
+| 接口 | 说明 |
+|---|---|
+| `evaluate(&SettlementConfig, &OrderTable) -> SettlementResult` | 新减均：C=无折扣商品总价、B=Σ各包实付、G=特典价合计、D=C-B+G，按「件×标价」加权分摊；校验 Σfinal = B-G |
+| `SettlementResult.lines: Vec<LineSettlement>` | 逐行 unit_price_cents/total_cents/reduce_cents/final_total_cents/final_unit_cents |
+| `SettlementResult.{list_total_cents, paid_total_cents}` | C / B 透明化 |
+| `GiftTier{threshold, unit_price, claimed}` | claimed=排谷认购数；granted=min(claimed,P)，P=下单包数 |
+| `check_completeness(&OrderTable, &AllocationSnapshot) -> CompletenessReport` | 排包完成校验（每 (item,variant,is_gift) 数量一致） |
+| `expected_quantities` / `table_quantities` | 两侧数量统计 |
+| `POST /api/settlement/completeness` | 返回 CompletenessReport |
+| `POST /api/settlement/evaluate` | 带 allocation 时未完成排包 -> 400 拒绝计算 |
+
+### 8.2 商品目录（src/settings.rs）
+
+| 字段/接口 | 说明 |
+|---|---|
+| `ItemConfig.unit_price_cents / box_size / max_quantity` | 标价（分）、每盒件数、单领上限（添加商品时管理员手工确认） |
+| `VariantConfig.unit_price_cents / pieces` | 变体标价、件数（精一/精二=2） |
+| `RoundSettings::to_unit_prices()` | 商品目录 -> 标价表（结算/planner 取价来源） |
+| `GatewayConfig.admin_commands_enabled` | 管理员命令落地执行开关（D-1） |
+
+### 8.3 消息日志（src/messages/**）
+
+| 接口 | 说明 |
+|---|---|
+| `MessageLog`（Arc，main.rs 注入） | 共享日志：path_for / store_for / append / read_all / replace_all |
+| `MessageLog::{query, update, delete}` | 细粒度本地读写（C-5） |
+| `MessageLog::{append_raw_event, read_raw_events}` | 原始事件日志 data/events/<round>.jsonl（C-3） |
+| `EventSink::messages() -> Arc<MessageLog>` | Gateway 通过 sink 复用同一实例（T-05） |
+| `GET /api/events` | 原始事件列表 |
+
+### 8.4 快照（src/snapshot_bundle/**）
+
+| 接口 | 说明 |
+|---|---|
+| `SnapshotFile{format, computed_at, computed_by, version, ...}` | 单一 JSON 快照（C-2）：原始消息 + 计算结果缓存 + 计算版本/时间 |
+| `SnapshotBundle::{export_file, import_file}` | 单文件导出/导入（校验哈希与格式） |
+| `POST /api/snapshot/export`（format="file"） | 单文件；缺省目录式 |
+| `POST /api/snapshot/import` | path 为文件时自动走 import_file |
+
+### 8.5 配置与命令（src/api/config_routes.rs、src/llm/pipeline.rs）
+
+| 接口 | 说明 |
+|---|---|
+| `POST /api/config/reply` | 热切换 gateway.reply_enabled（B-1，默认关闭） |
+| `POST /api/config/admin-commands` | 热切换 gateway.admin_commands_enabled（D-1） |
+| `Pipeline::run_admin_command` | /开团 /锁位 /结团 /状态 /导出；锁定后拒绝排/撤/改 |
+| `ParsedIntent::Modify` | 改单：撤销本人该商品既有认购 + 重新认购（cancel_for_modify） |
