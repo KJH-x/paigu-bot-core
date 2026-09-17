@@ -229,3 +229,111 @@ fn package_key(user_id: &str, claim_id: &str) -> String {
         format!("{user_id}#{claim_id}")
     }
 }
+
+/// 商品数量键：`(item_id, variant_id, is_gift)`。
+pub type QuantityKey = (String, Option<String>, bool);
+
+/// 某类商品的「数量对不上」明细（排包未完成 / 数量超出）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuantityGap {
+    pub item_id: String,
+    #[serde(default)]
+    pub variant_id: Option<String>,
+    pub is_gift: bool,
+    pub expected: u32,
+    pub actual: u32,
+}
+
+/// 排包完成度报告。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CompletenessReport {
+    pub complete: bool,
+    pub missing: Vec<QuantityGap>,
+    pub extra: Vec<QuantityGap>,
+    pub messages: Vec<String>,
+}
+
+/// 排谷结果（分配快照）中各商品应交数量。
+pub fn expected_quantities(snapshot: &AllocationSnapshot) -> BTreeMap<QuantityKey, u32> {
+    let mut out: BTreeMap<QuantityKey, u32> = BTreeMap::new();
+    for alloc in &snapshot.item_allocations {
+        let key = (
+            alloc.item_id.0.clone(),
+            alloc.variant_id.clone(),
+            alloc.kind == "gift",
+        );
+        let mut qty = 0u32;
+        for b in &alloc.boxes {
+            for s in &b.slots {
+                if s.user_id.is_some() {
+                    qty = qty.saturating_add(1);
+                }
+            }
+        }
+        for s in &alloc.singles {
+            qty = qty.saturating_add(s.quantity);
+        }
+        *out.entry(key).or_insert(0) += qty;
+    }
+    out
+}
+
+/// 下单表中各商品数量。
+pub fn table_quantities(table: &OrderTable) -> BTreeMap<QuantityKey, u32> {
+    let mut out: BTreeMap<QuantityKey, u32> = BTreeMap::new();
+    for p in &table.packages {
+        for l in &p.lines {
+            let key = (l.item_id.clone(), l.variant_id.clone(), l.is_gift);
+            *out.entry(key).or_insert(0) += l.qty;
+        }
+    }
+    out
+}
+
+/// 校验下单表是否已「排包完成」：每类商品数量须与排谷结果一致。
+pub fn check_completeness(table: &OrderTable, snapshot: &AllocationSnapshot) -> CompletenessReport {
+    let expected = expected_quantities(snapshot);
+    let actual = table_quantities(table);
+
+    let mut missing = Vec::new();
+    for (key, exp) in &expected {
+        let act = actual.get(key).copied().unwrap_or(0);
+        if act < *exp {
+            missing.push(QuantityGap {
+                item_id: key.0.clone(),
+                variant_id: key.1.clone(),
+                is_gift: key.2,
+                expected: *exp,
+                actual: act,
+            });
+        }
+    }
+    let mut extra = Vec::new();
+    for (key, act) in &actual {
+        let exp = expected.get(key).copied().unwrap_or(0);
+        if *act > exp {
+            extra.push(QuantityGap {
+                item_id: key.0.clone(),
+                variant_id: key.1.clone(),
+                is_gift: key.2,
+                expected: exp,
+                actual: *act,
+            });
+        }
+    }
+
+    let complete = missing.is_empty() && extra.is_empty();
+    let mut messages = Vec::new();
+    if !missing.is_empty() {
+        messages.push(format!("排包未完成：{} 类商品尚未排入下单表", missing.len()));
+    }
+    if !extra.is_empty() {
+        messages.push(format!("数量超出排谷结果：{} 类商品", extra.len()));
+    }
+    CompletenessReport {
+        complete,
+        missing,
+        extra,
+        messages,
+    }
+}

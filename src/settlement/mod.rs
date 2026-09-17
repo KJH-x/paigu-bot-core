@@ -9,8 +9,9 @@ mod model;
 pub use engine::evaluate;
 #[allow(unused_imports)]
 pub use model::{
-    order_table_from_allocation, Line, LineSettlement, OrderTable, Package, PackageGift,
-    PackageSettlement, SettlementResult, UnitPrice,
+    check_completeness, expected_quantities, order_table_from_allocation, table_quantities,
+    CompletenessReport, Line, LineSettlement, OrderTable, Package, PackageGift, PackageSettlement,
+    QuantityGap, QuantityKey, SettlementResult, UnitPrice,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

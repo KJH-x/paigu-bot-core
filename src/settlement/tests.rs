@@ -473,6 +473,54 @@ fn largest_remainder_conserves_with_zero_weight() {
     assert_eq!(shares, vec![(0, 0), (1, 0)]);
 }
 
+fn alloc_snapshot(item: &str, qty: u32) -> AllocationSnapshot {
+    AllocationSnapshot {
+        round_id: RoundId("r1".to_string()),
+        version: 1,
+        generated_at: chrono::Utc::now(),
+        item_allocations: vec![ItemAllocation {
+            item_id: ItemId(item.to_string()),
+            item_name: item.to_string(),
+            kind: "split".to_string(),
+            variant_id: Some("v1".to_string()),
+            boxes: vec![],
+            singles: vec![SingleAllocation {
+                user_id: UserId("u1".to_string()),
+                claim_id: ClaimId("c1".to_string()),
+                item_id: ItemId(item.to_string()),
+                quantity: qty,
+                unit_price: MoneyCents(0),
+            }],
+            waiting: vec![],
+        }],
+        user_summaries: vec![],
+        warnings: vec![],
+    }
+}
+
+#[test]
+fn completeness_detects_missing_and_extra() {
+    let snapshot = alloc_snapshot("a", 3);
+
+    let ok = table(vec![pkg("p1", vec![line("a", 2, 100).variant("v1"), line("a", 1, 100).variant("v1")])]);
+    let report = check_completeness(&ok, &snapshot);
+    assert!(report.complete, "{report:?}");
+
+    let short = table(vec![pkg("p1", vec![line("a", 1, 100).variant("v1")])]);
+    let report = check_completeness(&short, &snapshot);
+    assert!(!report.complete);
+    assert_eq!(report.missing.len(), 1);
+    assert_eq!(report.missing[0].expected, 3);
+    assert_eq!(report.missing[0].actual, 1);
+
+    let over = table(vec![pkg("p1", vec![line("a", 5, 100).variant("v1")])]);
+    let report = check_completeness(&over, &snapshot);
+    assert!(!report.complete);
+    assert_eq!(report.extra.len(), 1);
+    assert_eq!(report.extra[0].expected, 3);
+    assert_eq!(report.extra[0].actual, 5);
+}
+
 /// 月行水上-更新（用户 2026-09-17 定稿数据）：
 /// 12 单、特典 12 份 × ¥12 = ¥144，标价合计 ¥3285（= Sheet2 参考 ¥3270 + 风尚速递SP 拼套 ¥15）。
 #[test]
