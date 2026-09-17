@@ -36,6 +36,9 @@ pub struct GatewayConfig {
     pub reply_enabled: bool,
     #[serde(default)]
     pub allowed_actions: Vec<String>,
+    /// 是否允许管理员斜杠命令**落地执行**（D-1）；关闭时仅记录。
+    #[serde(default)]
+    pub admin_commands_enabled: bool,
 }
 
 fn default_heartbeat() -> u64 {

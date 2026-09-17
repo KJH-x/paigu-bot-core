@@ -46,6 +46,8 @@ struct State {
     seq: i64,
     version: i64,
     snapshot: Option<AllocationSnapshot>,
+    /// 管理员 `/锁位` `/结团` 后为 true，不再接受排/撤/改（`/开团` 解锁）。
+    locked: bool,
 }
 
 struct MessageRecord {
@@ -178,16 +180,20 @@ impl Pipeline {
                     )
                     .await;
             }
-            return self
-                .finish(
-                    &ev,
-                    &display,
-                    seq,
-                    "Applied",
-                    "管理员命令已记录",
-                    Some("管理员命令已记录".to_string()),
-                )
-                .await;
+            let cmd = text.trim_start_matches('/').trim().to_string();
+            if !cfg.gateway.admin_commands_enabled {
+                return self
+                    .finish(
+                        &ev,
+                        &display,
+                        seq,
+                        "Applied",
+                        "管理员命令已记录（执行开关关闭）",
+                        Some("管理员命令已记录（执行开关关闭）".to_string()),
+                    )
+                    .await;
+            }
+            return self.run_admin_command(&ev, &display, seq, &cmd).await;
         }
 
         let items = cfg.round.to_items();
@@ -231,10 +237,11 @@ impl Pipeline {
                 .await;
         };
 
-        if parsed.intent == ParsedIntent::Modify {
-            return self
-                .finish(&ev, &display, seq, "Ignored", "改单功能暂未实现", None)
-                .await;
+        let is_modify = parsed.intent == ParsedIntent::Modify;
+        let mut parsed = parsed;
+        if is_modify {
+            // 改单（D-2）：按新数量重排；应用时先撤销本人该商品的既有认购
+            parsed.intent = ParsedIntent::Claim;
         }
 
         if parsed.intent == ParsedIntent::Claim
@@ -338,13 +345,47 @@ impl Pipeline {
             }
         }
 
-        let detail = describe_event(&event);
+        {
+            let st = self.state.lock().await;
+            if st.locked {
+                drop(st);
+                return self
+                    .finish(
+                        &ev,
+                        &display,
+                        seq,
+                        "Rejected",
+                        "已锁定，不再接受排/撤/改",
+                        Some("已锁定，不再接受排/撤/改".to_string()),
+                    )
+                    .await;
+            }
+        }
+
+        let mut detail = describe_event(&event);
+        if is_modify {
+            detail = format!("改单：{detail}");
+        }
         let (version, snapshot_value, reply) = {
             let mut state = self.state.lock().await;
             if is_priority && !state.eligibilities.iter().any(|e| e.user_id.0 == ev.user_id) {
                 state
                     .eligibilities
                     .push(priority_eligibility(&round_id, &ev.user_id));
+            }
+            if is_modify {
+                if let DomainEvent::ClaimCreated(created) = &event.payload {
+                    let targets: Vec<_> = created.items.iter().map(|l| l.item_id.clone()).collect();
+                    for item_id in targets {
+                        state.events.push(cancel_for_modify(
+                            &round_id,
+                            &ev,
+                            seq,
+                            now,
+                            item_id,
+                        ));
+                    }
+                }
             }
             state.events.push(event);
             let snapshot =
@@ -371,6 +412,130 @@ impl Pipeline {
             reply: Some(reply),
             version,
             snapshot: Some(snapshot_value),
+        }
+    }
+
+    /// 管理员斜杠命令**落地执行**（D-1，仅在 `gateway.admin_commands_enabled` 开启时调用）。
+    async fn run_admin_command(
+        &self,
+        ev: &IncomingEvent,
+        display: &str,
+        seq: i64,
+        cmd: &str,
+    ) -> PipelineOutcome {
+        let head = cmd.split_whitespace().next().unwrap_or("").to_string();
+        let (status, detail, reply): (&str, String, String) = match head.as_str() {
+            "开团" | "解锁" | "open" | "unlock" => {
+                let mut st = self.state.lock().await;
+                st.locked = false;
+                let v = st.version;
+                (
+                    "Applied",
+                    "已开团（解锁）".to_string(),
+                    format!("已开团（解锁），当前版本 #{v}"),
+                )
+            }
+            "锁位" | "锁定" | "结团" | "结束" | "lock" | "close" => {
+                let mut st = self.state.lock().await;
+                st.locked = true;
+                let v = st.version;
+                (
+                    "Applied",
+                    "已锁定".to_string(),
+                    format!("已锁定，当前版本 #{v}"),
+                )
+            }
+            "状态" | "status" => {
+                let st = self.state.lock().await;
+                (
+                    "Applied",
+                    "状态".to_string(),
+                    format!("版本 #{}，锁定={}", st.version, st.locked),
+                )
+            }
+            "导出" | "export" => self.export_snapshot().await,
+            other => (
+                "Rejected",
+                format!("未支持的管理员命令：{other}"),
+                format!("未支持的管理员命令：{other}"),
+            ),
+        };
+
+        self.persist(ev, status, &detail, "admin").await;
+        let (version, snapshot_value) = {
+            let mut st = self.state.lock().await;
+            st.messages.push(MessageRecord {
+                seq,
+                display: display.to_string(),
+                text: ev.text.clone(),
+                status: status.to_string(),
+                detail: detail.clone(),
+            });
+            (
+                st.version,
+                st.snapshot
+                    .as_ref()
+                    .and_then(|s| serde_json::to_value(s).ok())
+                    .unwrap_or(Value::Null),
+            )
+        };
+
+        PipelineOutcome {
+            status: status.to_string(),
+            detail,
+            reply: Some(reply),
+            version,
+            snapshot: Some(snapshot_value),
+        }
+    }
+
+    /// `/导出`：导出**单一 JSON 快照**（C-2）到 `data/snapshots/<round>.snapshot.json`。
+    async fn export_snapshot(&self) -> (&'static str, String, String) {
+        let cfg = self.cfg.get().await;
+        let round_id = cfg.round.round_id.clone();
+        let records = self.messages.read_all(&round_id).await.unwrap_or_default();
+        let events = self
+            .messages
+            .read_raw_events(&round_id)
+            .await
+            .unwrap_or_default();
+        let board = {
+            let st = self.state.lock().await;
+            st.snapshot
+                .as_ref()
+                .and_then(|s| serde_json::to_value(s).ok())
+                .unwrap_or(Value::Null)
+        };
+
+        let bundle = match crate::snapshot_bundle::SnapshotBundle::seal(
+            round_id.clone(),
+            cfg.revision,
+            chrono::Utc::now().to_rfc3339(),
+            serde_json::to_value(&cfg).unwrap_or(Value::Null),
+            serde_json::to_value(&records).unwrap_or(Value::Null),
+            serde_json::to_value(&events).unwrap_or(Value::Null),
+            board,
+            Value::Null,
+        ) {
+            Ok(bundle) => bundle,
+            Err(e) => {
+                let msg = format!("导出失败: {e}");
+                return ("Error", msg.clone(), msg);
+            }
+        };
+
+        let path = std::path::PathBuf::from("data/snapshots")
+            .join(format!("{round_id}.snapshot.json"));
+        match bundle.export_file(&path) {
+            Ok(path) => (
+                "Applied",
+                "已导出快照".to_string(),
+                format!("已导出快照：{}", path.display()),
+            ),
+            Err(e) => {
+                let msg = format!("导出失败: {e}");
+                ("Error", msg.clone(), msg)
+            }
         }
     }
 
@@ -506,6 +671,34 @@ impl EventSink for Pipeline {
 
     fn messages(&self) -> Arc<MessageLog> {
         self.messages.clone()
+    }
+}
+
+fn cancel_for_modify(
+    round_id: &RoundId,
+    ev: &IncomingEvent,
+    seq: i64,
+    now: DateTime<Utc>,
+    item_id: crate::domain::ids::ItemId,
+) -> EventEnvelope {
+    EventEnvelope {
+        event_id: crate::domain::ids::EventId(uuid::Uuid::new_v4().to_string()),
+        round_id: round_id.clone(),
+        group_id: ev.group_id.clone(),
+        user_id: UserId(ev.user_id.clone()),
+        raw_message_id: Some(ev.message_id.clone()),
+        event_type: "claim_cancelled".to_string(),
+        effective_at: now,
+        sequence: seq,
+        payload: DomainEvent::ClaimCancelled(crate::domain::event::ClaimCancelled {
+            target_claim_id: None,
+            target_item_id: Some(item_id),
+            quantity: None,
+            reason: Some("改单".to_string()),
+            parse_trace: None,
+            validation_trace: vec![],
+        }),
+        status: crate::domain::event::EventStatus::Active,
     }
 }
 
@@ -836,6 +1029,77 @@ mod tests {
             is_admin: false,
             raw: None,
         }
+    }
+
+    fn admin_event(text: &str, timestamp_ms: i64) -> IncomingEvent {
+        let mut ev = event("admin1", "管理员", text, timestamp_ms);
+        ev.is_admin = true;
+        ev
+    }
+
+    #[tokio::test]
+    async fn admin_commands_recorded_only_when_disabled() {
+        let mut cfg = base_config();
+        cfg.llm.enabled = false;
+        cfg.gateway.admin_commands_enabled = false;
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+
+        let out = pipeline.process(admin_event("/锁位", 1_000)).await;
+        assert_eq!(out.status, "Applied");
+        assert!(out.detail.contains("开关关闭"), "{}", out.detail);
+
+        // 未执行：仍可排
+        let claim = pipeline
+            .process(event("u1", "小明", "排 通行证 结城理 1", 2_000))
+            .await;
+        assert_eq!(claim.status, "Applied");
+    }
+
+    #[tokio::test]
+    async fn admin_command_lock_blocks_claims_when_enabled() {
+        let mut cfg = base_config();
+        cfg.llm.enabled = false;
+        cfg.gateway.admin_commands_enabled = true;
+        let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+
+        let lock = pipeline.process(admin_event("/锁位", 1_000)).await;
+        assert_eq!(lock.status, "Applied");
+        assert!(lock.detail.contains("已锁定"), "{}", lock.detail);
+
+        let blocked = pipeline
+            .process(event("u1", "小明", "排 通行证 结城理 1", 2_000))
+            .await;
+        assert_eq!(blocked.status, "Rejected");
+        assert!(blocked.detail.contains("已锁定"), "{}", blocked.detail);
+
+        let open = pipeline.process(admin_event("/开团", 3_000)).await;
+        assert_eq!(open.status, "Applied");
+
+        let ok = pipeline
+            .process(event("u1", "小明", "排 通行证 岳羽由加莉 1", 4_000))
+            .await;
+        assert_eq!(ok.status, "Applied");
+    }
+
+    #[tokio::test]
+    async fn modify_replaces_previous_claim_quantity() {
+        let pipeline = test_pipeline(&base_config(), MockClient::ok("{}"));
+
+        let first = pipeline
+            .process(event("u1", "小明", "排 通行证 结城理 1", 1_000))
+            .await;
+        assert_eq!(first.status, "Applied");
+
+        let modified = pipeline
+            .process(event("u1", "小明", "改 通行证 结城理 2", 2_000))
+            .await;
+        assert_eq!(modified.status, "Applied");
+        assert!(modified.detail.starts_with("改单"), "{}", modified.detail);
+
+        let who = pipeline.who_whats().await;
+        assert_eq!(who.len(), 1);
+        let qty = who[0]["items"][0]["qty"].as_i64().unwrap_or(0);
+        assert_eq!(qty, 2, "改单应替换为 2：{who:?}");
     }
 
     fn slot_user(snapshot: &Value, item_id: &str, variant_id: &str) -> Option<String> {
