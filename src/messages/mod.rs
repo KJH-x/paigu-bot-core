@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,7 @@ pub trait MessageStore: Send + Sync {
 }
 
 pub const DEFAULT_MESSAGES_DIR: &str = "data/messages";
+pub const DEFAULT_EVENTS_DIR: &str = "data/events";
 
 static NEXT_SEQ: AtomicI64 = AtomicI64::new(0);
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
@@ -51,6 +52,7 @@ pub struct JsonlMessageStore {
 }
 
 impl JsonlMessageStore {
+    #[allow(dead_code)]
     pub fn new(dir: impl AsRef<Path>, round_id: &str) -> Self {
         Self {
             path: dir.as_ref().join(format!("{round_id}.jsonl")),
@@ -58,6 +60,7 @@ impl JsonlMessageStore {
     }
 
     /// 目录可由 `PAIGU_MESSAGES_DIR` 覆盖，默认 `data/messages`。
+    #[allow(dead_code)]
     pub fn from_env(round_id: &str) -> Self {
         let dir = messages_dir_from(std::env::var("PAIGU_MESSAGES_DIR").ok());
         Self::new(dir, round_id)
@@ -79,6 +82,50 @@ impl JsonlMessageStore {
             }
         }
         Ok(())
+    }
+}
+
+/// C-5：本地数据的细粒度读写（`query` / `update` / `delete`）。
+impl JsonlMessageStore {
+    #[allow(dead_code)]
+    pub async fn query<F>(&self, pred: F) -> anyhow::Result<Vec<MessageRecord>>
+    where
+        F: Fn(&MessageRecord) -> bool + Send,
+    {
+        let all = MessageStore::read_all(self).await?;
+        Ok(all.into_iter().filter(|r| pred(r)).collect())
+    }
+
+    /// 就地修改单条（按 `seq`），返回是否命中。
+    #[allow(dead_code)]
+    pub async fn update<F>(&self, seq: i64, mut f: F) -> anyhow::Result<bool>
+    where
+        F: FnMut(&mut MessageRecord) + Send,
+    {
+        let mut recs = MessageStore::read_all(self).await?;
+        let mut hit = false;
+        for rec in recs.iter_mut() {
+            if rec.seq == seq {
+                f(rec);
+                hit = true;
+            }
+        }
+        if hit {
+            MessageStore::replace_all(self, &recs).await?;
+        }
+        Ok(hit)
+    }
+
+    /// 删除单条（按 `seq`），返回是否命中。
+    pub async fn delete(&self, seq: i64) -> anyhow::Result<bool> {
+        let recs = MessageStore::read_all(self).await?;
+        let before = recs.len();
+        let kept: Vec<MessageRecord> = recs.into_iter().filter(|r| r.seq != seq).collect();
+        let hit = kept.len() != before;
+        if hit {
+            MessageStore::replace_all(self, &kept).await?;
+        }
+        Ok(hit)
     }
 }
 
@@ -124,6 +171,132 @@ impl MessageStore for JsonlMessageStore {
         Self::ensure_parent(&self.path)?;
         std::fs::write(&self.path, buf)?;
         Ok(())
+    }
+}
+
+/// 进程级**共享**消息日志（T-05）：按 `round_id` 在调用时解析文件路径，
+/// 因此同一实例可服务热载后的不同轮次；Gateway / Pipeline / API 共用一份。
+pub struct MessageLog {
+    dir: PathBuf,
+    events_dir: PathBuf,
+}
+
+#[allow(dead_code)]
+impl MessageLog {
+    pub fn new(dir: impl Into<PathBuf>, events_dir: impl Into<PathBuf>) -> Arc<Self> {
+        Arc::new(Self {
+            dir: dir.into(),
+            events_dir: events_dir.into(),
+        })
+    }
+
+    /// 目录可由 `PAIGU_MESSAGES_DIR` / `PAIGU_EVENTS_DIR` 覆盖。
+    pub fn from_env() -> Arc<Self> {
+        let dir = messages_dir_from(std::env::var("PAIGU_MESSAGES_DIR").ok());
+        let events_dir = std::env::var("PAIGU_EVENTS_DIR")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_EVENTS_DIR));
+        Self::new(dir, events_dir)
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    pub fn events_dir(&self) -> &Path {
+        &self.events_dir
+    }
+
+    pub fn path_for(&self, round_id: &str) -> PathBuf {
+        self.dir.join(format!("{round_id}.jsonl"))
+    }
+
+    pub fn event_path_for(&self, round_id: &str) -> PathBuf {
+        self.events_dir.join(format!("{round_id}.jsonl"))
+    }
+
+    /// 便捷：按轮次构造一个路径型 store（与共享实例写同一文件）。
+    pub fn store_for(&self, round_id: &str) -> JsonlMessageStore {
+        JsonlMessageStore {
+            path: self.path_for(round_id),
+        }
+    }
+
+    pub async fn append(&self, round_id: &str, rec: &MessageRecord) -> anyhow::Result<()> {
+        self.store_for(round_id).append(rec).await
+    }
+
+    pub async fn read_all(&self, round_id: &str) -> anyhow::Result<Vec<MessageRecord>> {
+        self.store_for(round_id).read_all().await
+    }
+
+    pub async fn replace_all(
+        &self,
+        round_id: &str,
+        recs: &[MessageRecord],
+    ) -> anyhow::Result<()> {
+        self.store_for(round_id).replace_all(recs).await
+    }
+
+    pub async fn query<F>(&self, round_id: &str, pred: F) -> anyhow::Result<Vec<MessageRecord>>
+    where
+        F: Fn(&MessageRecord) -> bool + Send,
+    {
+        self.store_for(round_id).query(pred).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn update<F>(&self, round_id: &str, seq: i64, f: F) -> anyhow::Result<bool>
+    where
+        F: FnMut(&mut MessageRecord) + Send,
+    {
+        self.store_for(round_id).update(seq, f).await
+    }
+
+    pub async fn delete(&self, round_id: &str, seq: i64) -> anyhow::Result<bool> {
+        self.store_for(round_id).delete(seq).await
+    }
+
+    /// 追加一条**原始事件**（C-3：保留所有成员原始事件，供事件溯源/重放）。
+    pub async fn append_raw_event(
+        &self,
+        round_id: &str,
+        ev: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let path = self.event_path_for(round_id);
+        let line = serde_json::to_string(ev)?;
+        let _guard = JsonlMessageStore::lock();
+        JsonlMessageStore::ensure_parent(&path)?;
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        writeln!(file, "{line}")?;
+        Ok(())
+    }
+
+    pub async fn read_raw_events(
+        &self,
+        round_id: &str,
+    ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let path = self.event_path_for(round_id);
+        let _guard = JsonlMessageStore::lock();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let raw = std::fs::read_to_string(&path)?;
+        let mut out = Vec::new();
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            out.push(serde_json::from_str(trimmed)?);
+        }
+        Ok(out)
     }
 }
 

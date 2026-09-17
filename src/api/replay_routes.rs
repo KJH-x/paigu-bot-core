@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::domain::snapshot::AllocationSnapshot;
-use crate::messages::{JsonlMessageStore, MessageRecord, MessageStore};
+use crate::messages::{MessageRecord, MessageStore};
 use crate::replay::session::{self, ReplayDiff, ReplayOverrides, ReplayResult};
 use crate::settings::AppConfig;
 use crate::snapshot_bundle::SnapshotBundle;
@@ -44,7 +44,7 @@ pub(super) fn replay_result_json(result: &ReplayResult) -> Value {
 
 async fn do_replay(state: &ApiState, overrides: ReplayOverrides) -> anyhow::Result<ReplayResult> {
     let cfg = state.cfg.get().await;
-    let store = JsonlMessageStore::from_env(&cfg.round.round_id);
+    let store = state.messages.store_for(&cfg.round.round_id);
     let result = session::replay(&store, &cfg, overrides).await?;
     if let Ok(mut slot) = last_replay().lock() {
         *slot = Some(result.clone());
@@ -130,7 +130,7 @@ async fn snapshot_export(
     Json(body): Json<ExportBody>,
 ) -> Result<Json<Value>, ApiError> {
     let cfg = state.cfg.get().await;
-    let store = JsonlMessageStore::from_env(&cfg.round.round_id);
+    let store = state.messages.store_for(&cfg.round.round_id);
     let records = store.read_all().await.map_err(api_internal)?;
     let result = session::replay_messages(&cfg, &records, body.overrides)
         .await
@@ -194,7 +194,7 @@ async fn snapshot_import(
             serde_json::from_value(bundle.messages.clone()).map_err(api_bad_request)?;
         let imported_cfg: AppConfig =
             serde_json::from_value(bundle.config.clone()).map_err(api_bad_request)?;
-        let store = JsonlMessageStore::from_env(&cfg.round.round_id);
+        let store = state.messages.store_for(&cfg.round.round_id);
         store.replace_all(&records).await.map_err(api_internal)?;
         let replayed = session::replay_messages(&imported_cfg, &records, ReplayOverrides::default())
             .await

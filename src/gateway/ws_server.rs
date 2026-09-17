@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
 use crate::bus::EventSink;
-use crate::messages::{JsonlMessageStore, MessageStore};
+use crate::messages::MessageLog;
 use crate::settings::ConfigStore;
 
 use super::onebot::{self, RouteDecision, RouteKind, RouteMessageEvent, RoutePolicy};
@@ -22,6 +22,7 @@ type ClientTx = mpsc::UnboundedSender<WsMessage>;
 pub struct Gateway {
     cfg: Arc<ConfigStore>,
     sink: Arc<dyn EventSink>,
+    messages: Arc<MessageLog>,
     clients: Mutex<HashMap<u64, ClientTx>>,
     pending: Mutex<HashMap<String, oneshot::Sender<Value>>>,
     next_client_id: AtomicU64,
@@ -32,9 +33,11 @@ pub struct Gateway {
 
 impl Gateway {
     pub fn new(cfg: Arc<ConfigStore>, sink: Arc<dyn EventSink>) -> Arc<Self> {
+        let messages = sink.messages();
         Arc::new(Self {
             cfg,
             sink,
+            messages,
             clients: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
             next_client_id: AtomicU64::new(1),
@@ -279,9 +282,15 @@ impl Gateway {
                     "Dropped",
                     &reason,
                 );
-                let store = JsonlMessageStore::from_env(&cfg.round.round_id);
-                if let Err(e) = store.append(&rec).await {
+                if let Err(e) = self.messages.append(&cfg.round.round_id, &rec).await {
                     warn!(error = %e, "failed to persist dropped message");
+                }
+                // C-3：被丢弃的事件同样保留原始 JSON
+                if let Ok(raw) = serde_json::to_value(&ev) {
+                    if let Err(e) = self.messages.append_raw_event(&cfg.round.round_id, &raw).await
+                    {
+                        warn!(error = %e, "failed to persist dropped raw event");
+                    }
                 }
             }
             RouteKind::Message => {
@@ -308,6 +317,11 @@ mod tests {
     #[async_trait]
     impl EventSink for NullSink {
         async fn handle(&self, _ev: IncomingEvent) {}
+
+        fn messages(&self) -> Arc<MessageLog> {
+            let dir = std::env::temp_dir().join("paigu-null-sink");
+            MessageLog::new(dir.clone(), dir.join("events"))
+        }
     }
 
     fn test_store() -> Arc<ConfigStore> {

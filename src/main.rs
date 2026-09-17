@@ -93,7 +93,12 @@ async fn run_gateway_stack() -> Result<()> {
     store.spawn_watch();
     let cfg = store.get().await;
 
-    let pipeline = llm::Pipeline::new(store.clone());
+    let messages = messages::MessageLog::from_env();
+    let pipeline = llm::Pipeline::new_with_messages(
+        store.clone(),
+        Arc::new(llm::client::OpenAiClient::new()),
+        messages.clone(),
+    );
     let gateway = gateway::Gateway::new(store.clone(), pipeline.clone());
 
     {
@@ -119,6 +124,7 @@ async fn run_gateway_stack() -> Result<()> {
         cfg: store.clone(),
         pipeline: pipeline.clone(),
         gateway: gateway.clone(),
+        messages,
     });
     spawn_members_scheduler(state.clone());
     api::serve(state, port).await
