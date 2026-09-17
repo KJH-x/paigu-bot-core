@@ -24,6 +24,7 @@ pub fn routes() -> Router<Arc<ApiState>> {
     Router::new()
         .route("/api/replay", post(run_replay))
         .route("/api/replay/diff", get(replay_diff))
+        .route("/api/events", get(list_raw_events))
         .route("/api/snapshot/export", post(snapshot_export))
         .route("/api/snapshot/import", post(snapshot_import))
 }
@@ -91,6 +92,21 @@ async fn replay_diff(
     })))
 }
 
+/// 原始事件日志（C-3）：保留的所有入站成员原始事件 JSON。
+async fn list_raw_events(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
+    let cfg = state.cfg.get().await;
+    let events = state
+        .messages
+        .read_raw_events(&cfg.round.round_id)
+        .await
+        .map_err(api_internal)?;
+    Ok(Json(json!({
+        "round_id": cfg.round.round_id,
+        "count": events.len(),
+        "events": events,
+    })))
+}
+
 fn default_snapshot_dir(cfg: &AppConfig) -> PathBuf {
     let base = std::env::var("PAIGU_SNAPSHOT_DIR")
         .map(PathBuf::from)
@@ -123,6 +139,9 @@ struct ExportBody {
     overrides: ReplayOverrides,
     #[serde(default)]
     out_dir: Option<String>,
+    /// `"file"` = 单一 JSON 快照（C-2）；缺省 `"dir"` = 目录式。
+    #[serde(default)]
+    format: Option<String>,
 }
 
 async fn snapshot_export(
@@ -138,11 +157,21 @@ async fn snapshot_export(
 
     let bundle = build_bundle(&cfg, &records, &result, chrono::Utc::now().to_rfc3339())
         .map_err(api_internal)?;
-    let dir = body
+    let base = body
         .out_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| default_snapshot_dir(&cfg));
-    let path = bundle.export_dir(&dir).map_err(api_internal)?;
+    let single_file = body.format.as_deref() == Some("file");
+    let path = if single_file {
+        let target = if base.extension().is_some() {
+            base
+        } else {
+            base.join(format!("{}.snapshot.json", cfg.round.round_id))
+        };
+        bundle.export_file(&target).map_err(api_internal)?
+    } else {
+        bundle.export_dir(&base).map_err(api_internal)?
+    };
     let manifest = bundle.manifest_typed().map_err(api_internal)?;
 
     Ok(Json(json!({
@@ -178,7 +207,14 @@ async fn snapshot_import(
     }
 
     let bundle = match (body.path, body.bundle) {
-        (Some(path), _) => SnapshotBundle::import_dir(path).map_err(api_bad_request)?,
+        (Some(path), _) => {
+            let p = PathBuf::from(&path);
+            if p.is_file() {
+                SnapshotBundle::import_file(&p).map_err(api_bad_request)?
+            } else {
+                SnapshotBundle::import_dir(&p).map_err(api_bad_request)?
+            }
+        }
         (None, Some(bundle)) => {
             bundle.verify().map_err(api_bad_request)?;
             bundle

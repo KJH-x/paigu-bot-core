@@ -22,6 +22,28 @@ pub const EVENTS_FILE: &str = "events.json";
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
 pub const SETTLEMENT_FILE: &str = "settlement.json";
 
+/// 单一 JSON 快照的格式标识。
+pub const FILE_FORMAT: &str = "paigu-snapshot/1";
+
+/// 单一 JSON 快照（C-2）：原始消息数据 + 计算结果缓存 + 计算版本与时间。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotFile {
+    pub format: String,
+    /// 计算时间（RFC3339）。
+    pub computed_at: String,
+    /// 计算版本（程序/版本标识）。
+    pub computed_by: String,
+    /// 计算版本号（= 排位快照 version）。
+    #[serde(default)]
+    pub version: i64,
+    pub manifest: Value,
+    pub config: Value,
+    pub messages: Value,
+    pub events: Value,
+    pub snapshot: Value,
+    pub settlement: Value,
+}
+
 /// `manifest.json` 的强类型视图；`hash` 覆盖包内除 manifest 外的全部内容。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotManifest {
@@ -137,6 +159,50 @@ impl SnapshotBundle {
             events: read_json(&dir.join(EVENTS_FILE))?,
             snapshot: read_json(&dir.join(SNAPSHOT_FILE))?,
             settlement: read_json(&dir.join(SETTLEMENT_FILE))?,
+        };
+        bundle.verify()?;
+        Ok(bundle)
+    }
+
+    /// 导出为**单一 JSON 文件**（C-2）：原始消息 + 计算结果缓存 + 计算版本与时间。
+    pub fn export_file(&self, path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+        let manifest = self.manifest_typed()?;
+        let file = SnapshotFile {
+            format: FILE_FORMAT.to_string(),
+            computed_at: chrono::Utc::now().to_rfc3339(),
+            computed_by: format!("paigu-bot-core/{}", env!("CARGO_PKG_VERSION")),
+            version: manifest.version,
+            manifest: self.manifest.clone(),
+            config: self.config.clone(),
+            messages: self.messages.clone(),
+            events: self.events.clone(),
+            snapshot: self.snapshot.clone(),
+            settlement: self.settlement.clone(),
+        };
+        let path = path.as_ref().to_path_buf();
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(&file)?)?;
+        Ok(path)
+    }
+
+    /// 从单一 JSON 文件导入并校验哈希；格式或哈希不符则报错。
+    pub fn import_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let raw = std::fs::read_to_string(path.as_ref())?;
+        let file: SnapshotFile = serde_json::from_str(&raw)?;
+        if file.format != FILE_FORMAT {
+            anyhow::bail!("unsupported snapshot format: {}", file.format);
+        }
+        let bundle = Self {
+            manifest: file.manifest,
+            config: file.config,
+            messages: file.messages,
+            events: file.events,
+            snapshot: file.snapshot,
+            settlement: file.settlement,
         };
         bundle.verify()?;
         Ok(bundle)
@@ -297,5 +363,45 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&export_dir);
+    }
+
+    #[test]
+    fn single_json_snapshot_round_trips() {
+        let bundle = SnapshotBundle::seal(
+            "r1",
+            3,
+            "2026-09-17T00:00:00Z",
+            serde_json::json!({ "a": 1 }),
+            serde_json::json!([{ "seq": 1, "text": "x" }]),
+            serde_json::json!([{ "raw": true }]),
+            serde_json::json!({ "version": 7 }),
+            serde_json::json!({ "grand_total": 100 }),
+        )
+        .unwrap();
+
+        let dir = temp_dir("snapfile");
+        let path = dir.join("s.json");
+        bundle.export_file(&path).unwrap();
+
+        let back = SnapshotBundle::import_file(&path).unwrap();
+        let manifest = back.manifest_typed().unwrap();
+        assert_eq!(manifest.version, 7);
+        assert_eq!(manifest.message_count, 1);
+        assert_eq!(manifest.event_count, 1);
+        assert_eq!(back.config, bundle.config);
+        assert_eq!(back.settlement, bundle.settlement);
+        back.verify().unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_file_rejects_unknown_format() {
+        let dir = temp_dir("snapfile-bad");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.json");
+        std::fs::write(&path, r#"{"format":"nope"}"#).unwrap();
+        assert!(SnapshotBundle::import_file(&path).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
