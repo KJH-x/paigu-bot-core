@@ -15,6 +15,62 @@ pub fn routes() -> Router<Arc<ApiState>> {
     Router::new()
         .route("/api/config", get(get_config).put(put_config))
         .route("/api/config/reload", post(reload_config))
+        .route("/api/config/reply", post(set_reply))
+        .route("/api/config/admin-commands", post(set_admin_commands))
+}
+
+#[derive(Deserialize)]
+struct ToggleBody {
+    enabled: bool,
+    #[serde(default)]
+    revision: Option<u64>,
+}
+
+/// 运行时热切换 `gateway.reply_enabled`（B-1：默认关闭，需管理员显式开启）。
+async fn set_reply(
+    State(state): State<Arc<ApiState>>,
+    Json(body): Json<ToggleBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    toggle_gateway(state, body, |gw, v| gw.reply_enabled = v, "reply_enabled").await
+}
+
+/// 运行时热切换 `gateway.admin_commands_enabled`（D-1）。
+async fn set_admin_commands(
+    State(state): State<Arc<ApiState>>,
+    Json(body): Json<ToggleBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    toggle_gateway(
+        state,
+        body,
+        |gw, v| gw.admin_commands_enabled = v,
+        "admin_commands_enabled",
+    )
+    .await
+}
+
+async fn toggle_gateway(
+    state: Arc<ApiState>,
+    body: ToggleBody,
+    apply: fn(&mut crate::settings::GatewayConfig, bool),
+    key: &str,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut config = state.cfg.get().await;
+    let revision = body.revision.unwrap_or(config.revision);
+    apply(&mut config.gateway, body.enabled);
+    match state.cfg.put(config, revision).await {
+        Ok(revision) => {
+            let config = state.cfg.get().await;
+            Ok(Json(json!({
+                "ok": true,
+                "key": key,
+                "enabled": body.enabled,
+                "reply_enabled": config.gateway.reply_enabled,
+                "admin_commands_enabled": config.gateway.admin_commands_enabled,
+                "revision": revision,
+            })))
+        }
+        Err(error) => Err(config_error_response(&error)),
+    }
 }
 
 async fn get_config(State(state): State<Arc<ApiState>>) -> Json<Value> {

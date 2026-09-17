@@ -66,6 +66,7 @@
     setVal('gw-bind', gw.bind);
     setVal('gw-heartbeat', gw.heartbeat_secs);
     setChecked('gw-reply', gw.reply_enabled);
+    setChecked('gw-admincmds', gw.admin_commands_enabled);
     setVal('gw-whitelist', joinList(gw.whitelist_groups));
     setVal('gw-actions', joinList(gw.allowed_actions));
 
@@ -139,7 +140,10 @@
         ['split', 'single', 'gift'].map(function (k) {
           return '<option value="' + k + '"' + (item.kind === k ? ' selected' : '') + '>' + k + '</option>';
         }).join('') + '</select></label>' +
-      '<label class="field"><span>aliases（逗号分隔）</span><input' + inputAttr('item', i, null, 'aliases') + ' value="' + P.esc(joinList(item.aliases)) + '" /></label>';
+      '<label class="field"><span>aliases（逗号分隔）</span><input' + inputAttr('item', i, null, 'aliases') + ' value="' + P.esc(joinList(item.aliases)) + '" /></label>' +
+      '<label class="field"><span>标价 unit_price_cents（分，手工确认）</span><input' + inputAttr('item', i, null, 'unit_price_cents') + ' value="' + P.esc(item.unit_price_cents == null ? 0 : item.unit_price_cents) + '" type="number" min="0" /></label>' +
+      '<label class="field"><span>盒件数 box_size（拼团整盒判定）</span><input' + inputAttr('item', i, null, 'box_size') + ' value="' + P.esc(item.box_size == null ? '' : item.box_size) + '" type="number" min="1" /></label>' +
+      '<label class="field"><span>单领上限 max_quantity</span><input' + inputAttr('item', i, null, 'max_quantity') + ' value="' + P.esc(item.max_quantity == null ? '' : item.max_quantity) + '" type="number" min="0" /></label>';
     card.appendChild(grid);
 
     var vhead = document.createElement('div');
@@ -151,7 +155,7 @@
     addV.textContent = '添加变体';
     addV.addEventListener('click', function () {
       if (!Array.isArray(state.items[i].variants)) state.items[i].variants = [];
-      state.items[i].variants.push({ variant_id: 'v_' + Date.now(), name: '', capacity: null, aliases: [] });
+      state.items[i].variants.push({ variant_id: 'v_' + Date.now(), name: '', unit_price_cents: 0, pieces: 0, capacity: null, aliases: [] });
       renderItems();
     });
     vhead.appendChild(addV);
@@ -180,6 +184,8 @@
       '<input placeholder="variant_id"' + inputAttr('variant', i, vi, 'variant_id') + ' value="' + P.esc(v.variant_id) + '" style="flex:1" />' +
       '<input placeholder="name"' + inputAttr('variant', i, vi, 'name') + ' value="' + P.esc(v.name) + '" style="flex:1" />' +
       '<input placeholder="capacity"' + inputAttr('variant', i, vi, 'capacity') + ' value="' + P.esc(v.capacity == null ? '' : v.capacity) + '" type="number" min="0" style="width:90px" />' +
+      '<input placeholder="标价(分)"' + inputAttr('variant', i, vi, 'unit_price_cents') + ' value="' + P.esc(v.unit_price_cents == null ? 0 : v.unit_price_cents) + '" type="number" min="0" style="width:100px" />' +
+      '<input placeholder="件数"' + inputAttr('variant', i, vi, 'pieces') + ' value="' + P.esc(v.pieces == null ? '' : v.pieces) + '" type="number" min="0" style="width:80px" />' +
       '<input placeholder="aliases"' + inputAttr('variant', i, vi, 'aliases') + ' value="' + P.esc(joinList(v.aliases)) + '" style="flex:1" />';
     var del = document.createElement('button');
     del.className = 'danger small';
@@ -215,6 +221,8 @@
     if (!item) return;
     if (t.dataset.scope === 'item') {
       if (f === 'aliases') item.aliases = splitList(t.value);
+      else if (f === 'unit_price_cents') item.unit_price_cents = t.value === '' ? 0 : P.num(t.value, 0);
+      else if (f === 'box_size' || f === 'max_quantity') item[f] = t.value === '' ? null : P.num(t.value, null);
       else item[f] = t.value;
     } else if (t.dataset.scope === 'variant') {
       var vi = parseInt(t.dataset.vi, 10);
@@ -222,6 +230,8 @@
       var v = item.variants[vi];
       if (f === 'aliases') v.aliases = splitList(t.value);
       else if (f === 'capacity') v.capacity = t.value === '' ? null : P.num(t.value, null);
+      else if (f === 'unit_price_cents') v.unit_price_cents = t.value === '' ? 0 : P.num(t.value, 0);
+      else if (f === 'pieces') v.pieces = t.value === '' ? 0 : P.num(t.value, 0);
       else v[f] = t.value;
     }
   }
@@ -232,6 +242,7 @@
     cfg.gateway.bind = val('gw-bind');
     cfg.gateway.heartbeat_secs = P.num(val('gw-heartbeat'), cfg.gateway.heartbeat_secs);
     cfg.gateway.reply_enabled = checked('gw-reply');
+    cfg.gateway.admin_commands_enabled = checked('gw-admincmds');
     cfg.gateway.whitelist_groups = splitList(val('gw-whitelist'));
     cfg.gateway.allowed_actions = splitList(val('gw-actions'));
 
@@ -383,7 +394,7 @@
     $('reload').addEventListener('click', reloadDisk);
     $('save').addEventListener('click', save);
     $('item-add').addEventListener('click', function () {
-      state.items.push({ item_id: 'item_' + Date.now(), name: '', kind: 'split', aliases: [], variants: [] });
+      state.items.push({ item_id: 'item_' + Date.now(), name: '', kind: 'split', aliases: [], unit_price_cents: 0, box_size: null, max_quantity: null, variants: [] });
       renderItems();
     });
     $('items').addEventListener('input', onItemsInput);
