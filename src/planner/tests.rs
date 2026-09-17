@@ -38,12 +38,13 @@ fn snapshot(items: Vec<ItemAllocation>) -> AllocationSnapshot {
     }
 }
 
-fn tier(id: &str, threshold: i64, price: i64) -> GiftTier {
+fn tier(id: &str, price: i64, claimed: u32) -> GiftTier {
     GiftTier {
         tier_id: id.to_string(),
-        threshold,
+        threshold: 0,
         gift_name: format!("gift-{id}"),
         unit_price: price,
+        claimed,
     }
 }
 
@@ -67,13 +68,9 @@ fn limits(max_packages: u32, max_iters: u64) -> PlanLimits {
 }
 
 #[test]
-fn gift_max_merges_to_cross_three_tiers() {
+fn gift_max_prefers_more_packages_up_to_claims() {
     let mut config = SettlementConfig::default();
-    config.gift_tiers = vec![
-        tier("t0", 0, 10),
-        tier("t300", 30_000, 30),
-        tier("t500", 50_000, 50),
-    ];
+    config.gift_tiers = vec![tier("t", 1_000, 5)];
     let req = PlanRequest {
         config,
         allocation: snapshot(vec![
@@ -81,16 +78,15 @@ fn gift_max_merges_to_cross_three_tiers() {
             single_item("b", "u2", "c2", 25_100),
         ]),
         strategy: Strategy::GiftMax,
-        limits: limits(3, 100_000),
+        limits: limits(2, 100_000),
         prices: vec![],
     };
 
     let result = plan(&req);
-    assert_eq!(result.best.packages.len(), 1);
-    assert_eq!(result.best_result.gift_list.len(), 3);
-    assert_eq!(result.best_result.gift_valuation_total, 90);
-    assert_eq!(result.best_score.highest_tier_hits, 1);
-    assert_eq!(result.best_score.gift_count, 3);
+    // 认购 5 > 包数，故 G = 包数 × 1000 → 2 包更优
+    assert_eq!(result.best.packages.len(), 2);
+    assert_eq!(result.best_result.gift_valuation_total, 2_000);
+    assert_eq!(result.best_score.gift_count, 2);
 }
 
 #[test]
@@ -200,11 +196,7 @@ fn max_iters_truncates_deterministically() {
 fn both_strategies_are_reproducible() {
     for strategy in [Strategy::GiftMax, Strategy::DiscountMax] {
         let mut config = SettlementConfig::default();
-        config.gift_tiers = vec![
-            tier("t0", 0, 10),
-            tier("t300", 30_000, 30),
-            tier("t500", 50_000, 50),
-        ];
+        config.gift_tiers = vec![tier("t", 30, 3)];
         config.discounts = vec![threshold_discount(1_000, 10_000, -1)];
         let req = PlanRequest {
             config,
@@ -242,7 +234,7 @@ fn manual_evaluate_matches_settlement() {
 #[test]
 fn box_slots_use_price_table() {
     let mut config = SettlementConfig::default();
-    config.gift_tiers = vec![tier("t0", 0, 10), tier("t500", 50_000, 50)];
+    config.gift_tiers = vec![tier("t0", 10, 10), tier("t500", 50, 50)];
     let allocation = snapshot(vec![ItemAllocation {
         item_id: ItemId("box_item".to_string()),
         item_name: "盒货".to_string(),
@@ -285,7 +277,7 @@ fn box_slots_use_price_table() {
 #[test]
 fn max_packages_is_respected() {
     let mut config = SettlementConfig::default();
-    config.gift_tiers = vec![tier("t0", 0, 10)];
+    config.gift_tiers = vec![tier("t0", 10, 10)];
     let req = PlanRequest {
         config,
         allocation: snapshot(vec![

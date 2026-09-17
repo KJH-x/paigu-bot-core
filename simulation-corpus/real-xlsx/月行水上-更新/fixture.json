@@ -1,0 +1,354 @@
+{
+  "sample": "月行水上-更新",
+  "source": "月行水上-更新.xlsx",
+  "order_table": {
+    "packages": [
+      {
+        "package_id": "第1单",
+        "lines": [
+          {
+            "item_id": "通行认证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "贴纸包-月行水上",
+            "variant_id": null,
+            "qty": 2,
+            "unit_price_cents": 2000,
+            "is_gift": false
+          },
+          {
+            "item_id": "亚克力签名板-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 3500,
+            "is_gift": false
+          },
+          {
+            "item_id": "风尚速递SP-月行水上",
+            "variant_id": null,
+            "qty": 2,
+            "unit_price_cents": 1500,
+            "is_gift": false
+          },
+          {
+            "item_id": "风尚速递SP-月行水上（拼）",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 1500,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第2单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "结城理山山兔SP",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 9800,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第3单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "结城理山山兔SP",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 9800,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第4单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "结城理山山兔SP",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 9800,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第5单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "结城理山山兔SP",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 9800,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第6单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "结城理山山兔SP",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 9800,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第7单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "结城理山山兔SP",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 9800,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第8单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "厚亚克力摆件-结城理",
+            "variant_id": null,
+            "qty": 2,
+            "unit_price_cents": 4500,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第9单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "厚亚克力摆件-结城理",
+            "variant_id": null,
+            "qty": 2,
+            "unit_price_cents": 4500,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第10单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "仿相片套组-月行水上",
+            "variant_id": null,
+            "qty": 2,
+            "unit_price_cents": 4800,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第11单",
+        "lines": [
+          {
+            "item_id": "通行证SP-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 17500,
+            "is_gift": false
+          },
+          {
+            "item_id": "鼠标垫-月行水上",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 6000,
+            "is_gift": false
+          },
+          {
+            "item_id": "双闪徽章-结城理",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 2000,
+            "is_gift": false
+          },
+          {
+            "item_id": "角色徽章组-结城理",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 3000,
+            "is_gift": false
+          }
+        ]
+      },
+      {
+        "package_id": "第12单",
+        "lines": [
+          {
+            "item_id": "串串挂件-结城理A款",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 3800,
+            "is_gift": false
+          },
+          {
+            "item_id": "串串挂件-结城理B款",
+            "variant_id": null,
+            "qty": 1,
+            "unit_price_cents": 3800,
+            "is_gift": false
+          },
+          {
+            "item_id": "仿cd亚克力挂件",
+            "variant_id": null,
+            "qty": 5,
+            "unit_price_cents": 3800,
+            "is_gift": false
+          }
+        ]
+      }
+    ]
+  },
+  "settlement_config": {
+    "pricing": [],
+    "discounts": [],
+    "scope_mode": "ExcludeGift",
+    "gift_tiers": [
+      {
+        "tier_id": "gift_card",
+        "threshold": 0,
+        "gift_name": "特典卡组-校园凭证",
+        "unit_price": 1200,
+        "claimed": 12
+      }
+    ],
+    "reduce_average": {
+      "include_gift_price": false
+    }
+  },
+  "settlement": {
+    "pricing": [],
+    "discounts": [],
+    "scope_mode": "ExcludeGift",
+    "gift_tiers": [
+      {
+        "tier_id": "gift_card",
+        "threshold": 0,
+        "gift_name": "特典卡组-校园凭证",
+        "unit_price": 1200,
+        "claimed": 12
+      }
+    ],
+    "reduce_average": {
+      "include_gift_price": false
+    }
+  },
+  "reference": {
+    "per_order_cents": [
+      28000,
+      27300,
+      27300,
+      27300,
+      27300,
+      27300,
+      27300,
+      26500,
+      26500,
+      27100,
+      28500,
+      26600
+    ],
+    "total_cents": 327000,
+    "note": "Sheet2「单领（报盒）部分」为参考数据；不含特典价、不含风尚速递SP拼套(+¥15)。"
+  },
+  "expected": {
+    "P": 12,
+    "gift_claimed": 12,
+    "gift_unit_cents": 1200,
+    "G_cents": 14400,
+    "C_cents": 328500,
+    "B_cents": 328500,
+    "D_cents": 14400,
+    "check": "Σfinal + G = B"
+  },
+  "gift_sections": [
+    {
+      "name": "特典卡组-校园凭证",
+      "unit_price_cents": 1200,
+      "count": 11,
+      "section": "特典（259元）"
+    },
+    {
+      "name": "特典卡组-校园凭证",
+      "unit_price_cents": 1200,
+      "count": 1,
+      "section": "特典卡组-校园凭证"
+    }
+  ]
+}

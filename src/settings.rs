@@ -106,6 +106,15 @@ pub struct ItemConfig {
     pub class: Option<String>,
     #[serde(default)]
     pub aliases: Vec<String>,
+    /// 标价（分）。添加商品时由管理员手工确认。
+    #[serde(default)]
+    pub unit_price_cents: i64,
+    /// 每盒件数（拼团整盒判定用）。
+    #[serde(default)]
+    pub box_size: Option<u32>,
+    /// 单领上限（`kind="single"`）。
+    #[serde(default)]
+    pub max_quantity: Option<u32>,
     #[serde(default)]
     pub variants: Vec<VariantConfig>,
 }
@@ -114,6 +123,12 @@ pub struct ItemConfig {
 pub struct VariantConfig {
     pub variant_id: String,
     pub name: String,
+    /// 变体标价（分）。通行证类 = `25 × pieces`（结城理/岳羽由加莉/埃癸斯 2 件=5000、虎狼丸 1 件=2500）。
+    #[serde(default)]
+    pub unit_price_cents: i64,
+    /// 件数（精一/精二两块 = 2）。
+    #[serde(default)]
+    pub pieces: u32,
     #[serde(default)]
     pub capacity: Option<u32>,
     #[serde(default)]
@@ -147,9 +162,9 @@ impl RoundSettings {
                     "adjustment" => ItemKind::Adjustment,
                     _ => ItemKind::Split,
                 },
-                unit_price: MoneyCents::zero(),
-                box_size: None,
-                max_quantity: None,
+                unit_price: MoneyCents(it.unit_price_cents),
+                box_size: it.box_size,
+                max_quantity: it.max_quantity,
                 is_blind: false,
                 is_proxy_card: false,
                 aliases: it.aliases.clone(),
@@ -161,13 +176,33 @@ impl RoundSettings {
                     .map(|v| ItemVariant {
                         variant_id: v.variant_id.clone(),
                         name: v.name.clone(),
-                        unit_price: MoneyCents::zero(),
+                        unit_price: MoneyCents(v.unit_price_cents),
                         capacity: v.capacity,
                         aliases: v.aliases.clone(),
                     })
                     .collect(),
             })
             .collect()
+    }
+
+    /// 标价表（商品目录 → `UnitPrice`），供结算/planner 取标价（替代请求级 `prices`）。
+    pub fn to_unit_prices(&self) -> Vec<crate::settlement::UnitPrice> {
+        let mut out = Vec::new();
+        for it in &self.items {
+            out.push(crate::settlement::UnitPrice {
+                item_id: it.item_id.clone(),
+                variant_id: None,
+                unit_price_cents: it.unit_price_cents,
+            });
+            for v in &it.variants {
+                out.push(crate::settlement::UnitPrice {
+                    item_id: it.item_id.clone(),
+                    variant_id: Some(v.variant_id.clone()),
+                    unit_price_cents: v.unit_price_cents,
+                });
+            }
+        }
+        out
     }
 }
 
