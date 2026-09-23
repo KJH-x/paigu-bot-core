@@ -8,9 +8,7 @@ use crate::domain::ids::{ClaimId, ItemId, RoundId, UserId};
 use crate::domain::item::{Item, ItemKind};
 use crate::domain::money::MoneyCents;
 use crate::engine::allocation_engine::AllocationEngine;
-use crate::engine::event_store::InMemoryEventStore;
-use crate::engine::replay::ReplayService;
-use std::sync::Arc;
+use crate::engine::replay::collect_effective_claims;
 
 fn fixture_split_item(item_id: &str, name: &str, price_cents: i64, box_size: u32) -> Item {
     Item {
@@ -115,7 +113,7 @@ fn tail_line(user_id: &str, item_id: &str, quantity: u32, ts_ms: i64) -> Effecti
 }
 
 #[test]
-fn test_priority_user_before_normal_user() {
+fn priority_user_before_normal_user() {
     let item = fixture_split_item("badge", "badge", 4500, 10);
     let normal = claim_line("u1", "badge", 1, 100, 1, 0);
     let priority = claim_line("u2", "badge", 1, 101, 2, 10);
@@ -142,7 +140,7 @@ fn test_priority_user_before_normal_user() {
 }
 
 #[test]
-fn test_tail_locked_creates_new_box() {
+fn tail_locked_creates_new_box() {
     let item = fixture_split_item("bonus", "bonus", 3000, 5);
     let a = claim_line("u1", "bonus", 1, 100, 1, 0);
     let tail = tail_line("u2", "bonus", 2, 101);
@@ -163,7 +161,7 @@ fn test_tail_locked_creates_new_box() {
 }
 
 #[test]
-fn test_cancel_moves_slots_forward() {
+fn cancel_moves_slots_forward() {
     let item = fixture_split_item("item_a", "item_a", 4500, 5);
     let u1 = claim_line("u1", "item_a", 1, 100, 1, 0);
     let u2 = claim_line("u2", "item_a", 1, 101, 2, 0);
@@ -181,7 +179,7 @@ fn test_cancel_moves_slots_forward() {
 }
 
 #[test]
-fn test_discount_allocation_by_ratio() {
+fn discount_allocation_by_ratio() {
     use crate::engine::settlement_engine::allocate_discount_by_ratio;
 
     let total = MoneyCents(100);
@@ -211,7 +209,7 @@ fn test_discount_allocation_by_ratio() {
 }
 
 #[test]
-fn test_money_cents_operations() {
+fn money_cents_operations() {
     let a = MoneyCents(4500);
     let b = MoneyCents(3000);
     assert_eq!(a.checked_add(b).unwrap().0, 7500);
@@ -222,7 +220,7 @@ fn test_money_cents_operations() {
 }
 
 #[test]
-fn test_effective_claim_line_priority_sorting() {
+fn effective_claim_line_priority_sorting() {
     let mut lines = [
         claim_line("u1", "item_x", 1, 100, 1, 0),
         claim_line("u2", "item_x", 1, 101, 2, 10),
@@ -243,11 +241,8 @@ fn test_effective_claim_line_priority_sorting() {
 }
 
 #[test]
-fn test_replay_cancellation_removes_effective_claims() {
+fn replay_cancellation_removes_effective_claims() {
     use crate::domain::event::ClaimCancelled;
-
-    let store = Arc::new(InMemoryEventStore::new());
-    let service = ReplayService::new(store.clone());
 
     let events = vec![
         EventEnvelope {
@@ -299,12 +294,12 @@ fn test_replay_cancellation_removes_effective_claims() {
     ];
 
     let eligibility: Vec<Eligibility> = vec![];
-    let effective = service.collect_effective_claims(&events, &eligibility);
+    let effective = collect_effective_claims(&events, &eligibility);
     assert!(effective.is_empty());
 }
 
 #[test]
-fn test_eligibility_applies_to_item() {
+fn eligibility_applies_to_item() {
     let eligibility = Eligibility {
         eligibility_id: crate::domain::ids::EligibilityId("e1".to_string()),
         round_id: RoundId("r1".to_string()),
@@ -332,7 +327,7 @@ fn test_eligibility_applies_to_item() {
 }
 
 #[test]
-fn test_variant_allocation_isolated_per_variant() {
+fn variant_allocation_isolated_per_variant() {
     use crate::domain::item::ItemVariant;
 
     let mut split = fixture_split_item("badge", "徽章", 4500, 10);
@@ -403,7 +398,7 @@ fn test_variant_allocation_isolated_per_variant() {
 }
 
 #[test]
-fn test_item_kind_compatible_with_claim_type() {
+fn item_kind_compatible_with_claim_type() {
     let split = ItemKind::Split;
     let single = ItemKind::Single;
     let gift = ItemKind::Gift;

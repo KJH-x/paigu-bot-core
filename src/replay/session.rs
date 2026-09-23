@@ -7,7 +7,7 @@ use crate::domain::ids::{ClaimId, EligibilityId, EventId, ItemId, RoundId, UserI
 use crate::domain::item::{Item, RoundContext};
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
-use crate::messages::{MessageRecord, MessageStore};
+use crate::messages::{MessageLog, MessageRecord};
 use crate::parser::parsed_event::ParsedIntent;
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
@@ -126,11 +126,11 @@ pub struct ReplayResult {
 
 /// 从持久化消息日志重放（C2）：复用与实时同一条规则解析器 + 校验层 + 分配引擎。
 pub async fn replay(
-    store: &dyn MessageStore,
+    store: &MessageLog,
     base: &AppConfig,
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
-    let records = store.read_all().await?;
+    let records = store.read_all(&base.round.round_id).await?;
     replay_messages(base, &records, overrides).await
 }
 
@@ -499,7 +499,7 @@ fn phase_rejection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::JsonlMessageStore;
+    use crate::messages::MessageLog;
     use crate::settings::{default_config, VariantConfig};
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -677,23 +677,24 @@ mod tests {
     async fn replay_reads_store_and_supports_edit_recompute() {
         let cfg = test_config();
         let dir = temp_dir("store");
-        let store = JsonlMessageStore::new(&dir, &cfg.round.round_id);
-        store
-            .append(&record(1, "u1", "排 徽章 甲 1", 1_000))
+        let log = MessageLog::new(&dir, dir.join("events"));
+        log.append(&cfg.round.round_id, &record(1, "u1", "排 徽章 甲 1", 1_000))
             .await
             .unwrap();
 
-        let before = replay(&store, &cfg, ReplayOverrides::default())
+        let before = replay(&log, &cfg, ReplayOverrides::default())
             .await
             .unwrap();
         assert_eq!(before.version, 1);
         assert_eq!(before.board.user_summaries.len(), 1);
 
-        store
-            .replace_all(&[record(1, "u1", "今天天气不错", 1_000)])
-            .await
-            .unwrap();
-        let after = replay(&store, &cfg, ReplayOverrides::default())
+        log.replace_all(
+            &cfg.round.round_id,
+            &[record(1, "u1", "今天天气不错", 1_000)],
+        )
+        .await
+        .unwrap();
+        let after = replay(&log, &cfg, ReplayOverrides::default())
             .await
             .unwrap();
         assert_eq!(after.outcomes[0].status, "Ignored");
@@ -785,8 +786,8 @@ mod tests {
 
         let (live_version, live_board) = pipeline.board().await;
 
-        let store = JsonlMessageStore::new(&dir, &cfg.round.round_id);
-        let records = store.read_all().await.unwrap();
+        let log = MessageLog::new(&dir, dir.join("events"));
+        let records = log.read_all(&cfg.round.round_id).await.unwrap();
         assert_eq!(records.len(), 2);
 
         let replayed = replay_messages(&cfg, &records, ReplayOverrides::default())

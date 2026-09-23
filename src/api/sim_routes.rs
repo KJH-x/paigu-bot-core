@@ -9,8 +9,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::bus::IncomingEvent;
+use crate::services::display;
 
-use super::{display_routes, ApiState};
+use super::ApiState;
 
 fn identities() -> &'static Mutex<BTreeMap<String, Value>> {
     static IDENTITIES: OnceLock<Mutex<BTreeMap<String, Value>>> = OnceLock::new();
@@ -107,7 +108,7 @@ async fn sim_identity(Json(body): Json<SimIdentity>) -> Json<Value> {
 async fn sim_reset(State(state): State<Arc<ApiState>>) -> Json<Value> {
     state.pipeline.reset().await;
     clear_identities();
-    display_routes::clear_cache();
+    display::clear_cache();
     let (version, _) = state.pipeline.board().await;
     Json(json!({ "ok": true, "version": version }))
 }
