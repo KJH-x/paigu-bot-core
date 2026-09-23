@@ -14,16 +14,13 @@ use crate::settlement::{
 const MAX_CANDIDATES: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Strategy {
+    #[default]
     GiftMax,
     DiscountMax,
 }
 
-impl Default for Strategy {
-    fn default() -> Self {
-        Strategy::GiftMax
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanLimits {

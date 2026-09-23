@@ -80,7 +80,12 @@ async fn list_messages(
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let cfg = state.cfg.get().await;
-    let mut records = state.messages.store_for(&cfg.round.round_id).read_all().await.map_err(api_internal)?;
+    let mut records = state
+        .messages
+        .store_for(&cfg.round.round_id)
+        .read_all()
+        .await
+        .map_err(api_internal)?;
     records.sort_by_key(|r| r.seq);
 
     let since = query.since.unwrap_or(0);
@@ -160,7 +165,12 @@ async fn create_message(
         detail: body.detail.unwrap_or_default(),
     };
     validate_record(&rec).map_err(api_bad_request)?;
-    state.messages.store_for(&cfg.round.round_id).append(&rec).await.map_err(api_internal)?;
+    state
+        .messages
+        .store_for(&cfg.round.round_id)
+        .append(&rec)
+        .await
+        .map_err(api_internal)?;
 
     let recomputed = body.recompute.unwrap_or(true);
     let result = if recomputed {

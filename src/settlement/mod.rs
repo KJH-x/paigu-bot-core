@@ -59,16 +59,13 @@ pub enum DiscountKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ScopeMode {
     IncludeGift,
+    #[default]
     ExcludeGift,
 }
 
-impl Default for ScopeMode {
-    fn default() -> Self {
-        ScopeMode::ExcludeGift
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GiftTier {

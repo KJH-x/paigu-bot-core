@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ids::{RoundId, ItemId, UserId};
+use crate::domain::ids::{ItemId, RoundId, UserId};
 use crate::domain::money::MoneyCents;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,18 +32,15 @@ pub struct UserBill {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum PaymentStatus {
+    #[default]
     Unpaid,
     Paid,
     Partial,
     Refunded,
 }
 
-impl Default for PaymentStatus {
-    fn default() -> Self {
-        PaymentStatus::Unpaid
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserBillLine {

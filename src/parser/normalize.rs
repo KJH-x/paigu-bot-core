@@ -7,7 +7,8 @@ pub fn normalize_claim_item(item: &ParsedClaimItem) -> ParsedClaimItem {
         let ct_lower = ct.to_lowercase();
         if ct_lower.contains("single") || ct_lower.contains("单领") || ct_lower.contains("单") {
             "Single".to_string()
-        } else if ct_lower.contains("gift") || ct_lower.contains("赠") || ct_lower.contains("特典") {
+        } else if ct_lower.contains("gift") || ct_lower.contains("赠") || ct_lower.contains("特典")
+        {
             "GiftClaim".to_string()
         } else {
             "Split".to_string()
@@ -16,10 +17,17 @@ pub fn normalize_claim_item(item: &ParsedClaimItem) -> ParsedClaimItem {
 
     normalized.slot_policy = normalized.slot_policy.map(|sp| {
         let sp_lower = sp.to_lowercase();
-        if sp_lower.contains("fullbox") || sp_lower.contains("full_box") || sp_lower.contains("包盒")
-            || sp_lower.contains("整盒") || sp_lower.contains("全包") {
+        if sp_lower.contains("fullbox")
+            || sp_lower.contains("full_box")
+            || sp_lower.contains("包盒")
+            || sp_lower.contains("整盒")
+            || sp_lower.contains("全包")
+        {
             "FullBox".to_string()
-        } else if sp_lower.contains("tail") || sp_lower.contains("包尾") || sp_lower.contains("端盒") {
+        } else if sp_lower.contains("tail")
+            || sp_lower.contains("包尾")
+            || sp_lower.contains("端盒")
+        {
             "TailLocked".to_string()
         } else if sp_lower.contains("column") || sp_lower.contains("锁列") {
             "ColumnLocked".to_string()

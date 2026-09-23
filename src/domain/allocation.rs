@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ids::{ItemId, UserId, ClaimId};
-use crate::domain::money::MoneyCents;
 use crate::domain::claim::{ClaimType, SlotPolicy};
+use crate::domain::ids::{ClaimId, ItemId, UserId};
+use crate::domain::money::MoneyCents;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SlotStatus {

@@ -29,7 +29,13 @@ fn pricing(item: &str, variant: Option<&str>, mode: PricingMode, value: i64) -> 
     }
 }
 
-fn discount(kind: DiscountKind, amount: i64, threshold: Option<i64>, ratio_ppm: Option<i64>, shares: i64) -> DiscountEntry {
+fn discount(
+    kind: DiscountKind,
+    amount: i64,
+    threshold: Option<i64>,
+    ratio_ppm: Option<i64>,
+    shares: i64,
+) -> DiscountEntry {
     DiscountEntry {
         rule_id: "rule".to_string(),
         kind,
@@ -83,7 +89,10 @@ fn pricing_matches_specific_variant_only() {
         .push(pricing("a", Some("v1"), PricingMode::SetFinal, 500));
     let t = table(vec![pkg(
         "p1",
-        vec![line("a", 1, 1000).variant("v1"), line("a", 1, 1000).variant("v2")],
+        vec![
+            line("a", 1, 1000).variant("v1"),
+            line("a", 1, 1000).variant("v2"),
+        ],
     )]);
 
     let r = evaluate(&cfg, &t);
@@ -94,13 +103,8 @@ fn pricing_matches_specific_variant_only() {
 #[test]
 fn discount_shares_selects_first_n_after_sorting() {
     let mut cfg = SettlementConfig::default();
-    cfg.discounts.push(discount(
-        DiscountKind::WholeOrder,
-        100,
-        None,
-        None,
-        1,
-    ));
+    cfg.discounts
+        .push(discount(DiscountKind::WholeOrder, 100, None, None, 1));
     let t = table(vec![
         pkg("p1", vec![line("a", 1, 100)]),
         pkg("p2", vec![line("a", 1, 300)]),
@@ -117,13 +121,8 @@ fn discount_shares_selects_first_n_after_sorting() {
 #[test]
 fn discount_shares_minus_one_applies_to_all() {
     let mut cfg = SettlementConfig::default();
-    cfg.discounts.push(discount(
-        DiscountKind::WholeOrder,
-        100,
-        None,
-        None,
-        -1,
-    ));
+    cfg.discounts
+        .push(discount(DiscountKind::WholeOrder, 100, None, None, -1));
     let t = table(vec![
         pkg("p1", vec![line("a", 1, 100)]),
         pkg("p2", vec![line("a", 1, 300)]),
@@ -146,25 +145,17 @@ fn discount_scope_include_vs_exclude_gift() {
 
     let mut include = SettlementConfig::default();
     include.scope_mode = ScopeMode::IncludeGift;
-    include.discounts.push(discount(
-        DiscountKind::Threshold,
-        500,
-        Some(1200),
-        None,
-        -1,
-    ));
+    include
+        .discounts
+        .push(discount(DiscountKind::Threshold, 500, Some(1200), None, -1));
     let ri = evaluate(&include, &t);
     assert_eq!(ri.discount_total, 500);
 
     let mut exclude = SettlementConfig::default();
     exclude.scope_mode = ScopeMode::ExcludeGift;
-    exclude.discounts.push(discount(
-        DiscountKind::Threshold,
-        500,
-        Some(1200),
-        None,
-        -1,
-    ));
+    exclude
+        .discounts
+        .push(discount(DiscountKind::Threshold, 500, Some(1200), None, -1));
     let re = evaluate(&exclude, &t);
     assert_eq!(re.discount_total, 0);
 }
@@ -300,13 +291,8 @@ fn reduce_average_zero_basis_warns_and_checks_out() {
 #[test]
 fn threshold_discount_applies_per_package() {
     let mut cfg = SettlementConfig::default();
-    cfg.discounts.push(discount(
-        DiscountKind::Threshold,
-        100,
-        Some(1000),
-        None,
-        -1,
-    ));
+    cfg.discounts
+        .push(discount(DiscountKind::Threshold, 100, Some(1000), None, -1));
     let t = table(vec![
         pkg("p1", vec![line("a", 1, 1000)]),
         pkg("p2", vec![line("a", 1, 2000)]),
@@ -346,13 +332,8 @@ fn discount_uses_base_price_not_adjusted_price() {
     let mut cfg = SettlementConfig::default();
     cfg.pricing
         .push(pricing("a", None, PricingMode::SetFinal, 100));
-    cfg.discounts.push(discount(
-        DiscountKind::WholeOrder,
-        50,
-        None,
-        None,
-        -1,
-    ));
+    cfg.discounts
+        .push(discount(DiscountKind::WholeOrder, 50, None, None, -1));
     let t = table(vec![pkg("p1", vec![line("a", 1, 1000)])]);
 
     let r = evaluate(&cfg, &t);
@@ -365,13 +346,8 @@ fn discount_uses_base_price_not_adjusted_price() {
 #[test]
 fn payable_is_clamped_and_warned_when_discount_exceeds_gross() {
     let mut cfg = SettlementConfig::default();
-    cfg.discounts.push(discount(
-        DiscountKind::WholeOrder,
-        200,
-        None,
-        None,
-        -1,
-    ));
+    cfg.discounts
+        .push(discount(DiscountKind::WholeOrder, 200, None, None, -1));
     let t = table(vec![pkg("p1", vec![line("a", 1, 100)])]);
 
     let r = evaluate(&cfg, &t);
@@ -502,7 +478,13 @@ fn alloc_snapshot(item: &str, qty: u32) -> AllocationSnapshot {
 fn completeness_detects_missing_and_extra() {
     let snapshot = alloc_snapshot("a", 3);
 
-    let ok = table(vec![pkg("p1", vec![line("a", 2, 100).variant("v1"), line("a", 1, 100).variant("v1")])]);
+    let ok = table(vec![pkg(
+        "p1",
+        vec![
+            line("a", 2, 100).variant("v1"),
+            line("a", 1, 100).variant("v1"),
+        ],
+    )]);
     let report = check_completeness(&ok, &snapshot);
     assert!(report.complete, "{report:?}");
 
@@ -533,8 +515,7 @@ fn moonlit_spec_update_fixture_matches_reference() {
     let raw = std::fs::read_to_string(path).expect("read fixture");
     let v: serde_json::Value = serde_json::from_str(&raw).expect("parse fixture");
 
-    let table: OrderTable =
-        serde_json::from_value(v["order_table"].clone()).expect("order_table");
+    let table: OrderTable = serde_json::from_value(v["order_table"].clone()).expect("order_table");
     let config: SettlementConfig =
         serde_json::from_value(v["settlement_config"].clone()).expect("settlement_config");
 

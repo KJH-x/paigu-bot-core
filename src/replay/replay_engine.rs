@@ -1,15 +1,15 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ids::{RoundId, EventId, UserId};
+use crate::domain::event::{DomainEvent, EventEnvelope};
+use crate::domain::ids::{EventId, RoundId, UserId};
 use crate::domain::round::RoundConfig;
-use crate::domain::event::{EventEnvelope, DomainEvent};
-use crate::domain::snapshot::{AllocationSnapshot, DecisionTrace};
 use crate::domain::settlement::SettlementSnapshot;
+use crate::domain::snapshot::{AllocationSnapshot, DecisionTrace};
 use crate::engine::allocation_engine::AllocationEngine;
 use crate::engine::settlement_engine::SettlementEngine;
-use crate::replay::state_diff::StateDiff;
 use crate::error::ReplayError;
+use crate::replay::state_diff::StateDiff;
 
 pub struct ReplayEngine {
     pub settlement_engine: SettlementEngine,
@@ -29,7 +29,7 @@ impl ReplayEngine {
         options: ReplayOptions,
     ) -> Result<ReplayResult, ReplayError> {
         let mut sorted_events = events;
-        sorted_events.sort_by(|a, b| crate::domain::event::compare_event_order(a, b));
+        sorted_events.sort_by(crate::domain::event::compare_event_order);
 
         let mut state = ReplayRuntimeState::new(round_config);
         let mut steps = Vec::new();
@@ -45,13 +45,15 @@ impl ReplayEngine {
             let state_diff = StateDiff::from_snapshots(&before_snapshot, &after_snapshot);
 
             let settlement_snapshot = if options.include_settlement {
-                Some(self.settlement_engine.settle(
-                    &crate::engine::settlement_engine::SettlementInput {
-                        allocation: after_snapshot.clone(),
-                        items: state.items.clone(),
-                        discount_rules: state.discount_rules.clone(),
-                    }
-                ).map_err(|e| ReplayError::SnapshotRestoreFailed(0, e.to_string()))?)
+                Some(
+                    self.settlement_engine
+                        .settle(&crate::engine::settlement_engine::SettlementInput {
+                            allocation: after_snapshot.clone(),
+                            items: state.items.clone(),
+                            discount_rules: state.discount_rules.clone(),
+                        })
+                        .map_err(|e| ReplayError::SnapshotRestoreFailed(0, e.to_string()))?,
+                )
             } else {
                 None
             };
@@ -97,7 +99,11 @@ impl ReplayEngine {
                 state.add_claim(claim, event);
                 let priority = crate::domain::claim::EffectiveClaimLine::compute_priority(
                     &claim.user_id,
-                    &claim.items.first().map(|l| l.item_id.clone()).unwrap_or(crate::domain::ids::ItemId("unknown".to_string())),
+                    &claim
+                        .items
+                        .first()
+                        .map(|l| l.item_id.clone())
+                        .unwrap_or(crate::domain::ids::ItemId("unknown".to_string())),
                     event.effective_at,
                     &state.eligibility,
                 );
@@ -109,8 +115,10 @@ impl ReplayEngine {
                     explanation: format!("用户 {} 优先级 {}", claim.user_id.0, priority),
                 };
 
-                let allocation_trace: Vec<crate::domain::snapshot::AllocationTraceItem> = claim.items.iter().map(|line| {
-                    crate::domain::snapshot::AllocationTraceItem {
+                let allocation_trace: Vec<crate::domain::snapshot::AllocationTraceItem> = claim
+                    .items
+                    .iter()
+                    .map(|line| crate::domain::snapshot::AllocationTraceItem {
                         claim_id: claim.claim_id.0.clone(),
                         item_id: line.item_id.0.clone(),
                         quantity_requested: line.quantity,
@@ -118,8 +126,8 @@ impl ReplayEngine {
                         policy: line.slot_policy.as_str().to_string(),
                         final_slots: vec![],
                         explanation: format!("排入 {} x{}", line.item_id.0, line.quantity),
-                    }
-                }).collect();
+                    })
+                    .collect();
 
                 Ok(DecisionTrace {
                     parse_trace: claim.parse_trace.clone(),
@@ -186,13 +194,20 @@ impl ReplayRuntimeState {
 
     fn to_allocation_snapshot(&self) -> AllocationSnapshot {
         let engine = AllocationEngine::new();
-        let effective_lines: Vec<crate::domain::claim::EffectiveClaimLine> = self.claims.iter()
+        let effective_lines: Vec<crate::domain::claim::EffectiveClaimLine> = self
+            .claims
+            .iter()
             .filter(|c| c.status == crate::domain::claim::ClaimStatus::Active)
             .flat_map(|c| {
                 c.items.iter().enumerate().filter_map(|(i, l)| {
-                    if l.quantity == 0 { return None; }
+                    if l.quantity == 0 {
+                        return None;
+                    }
                     let priority = crate::domain::claim::EffectiveClaimLine::compute_priority(
-                        &c.user_id, &l.item_id, c.effective_at, &self.eligibility
+                        &c.user_id,
+                        &l.item_id,
+                        c.effective_at,
+                        &self.eligibility,
                     );
                     Some(crate::domain::claim::EffectiveClaimLine {
                         claim_id: c.claim_id.clone(),

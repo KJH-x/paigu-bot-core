@@ -134,10 +134,8 @@ mod tests {
 
     #[tokio::test]
     async fn build_router_registers_message_replay_and_snapshot_routes() {
-        let path = std::env::temp_dir().join(format!(
-            "paigu-api-router-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("paigu-api-router-{}.json", uuid::Uuid::new_v4()));
         let cfg = Arc::new(ConfigStore::load(&path).expect("load config"));
         let pipeline = crate::llm::Pipeline::new(cfg.clone());
         let gateway = crate::gateway::Gateway::new(cfg.clone(), pipeline.clone());

@@ -1,13 +1,15 @@
 #![cfg(test)]
 
-use crate::domain::ids::{RoundId, ItemId, UserId, ClaimId};
+use crate::domain::claim::{
+    ClaimLine, ClaimType, EffectiveClaimLine, Eligibility, EligibilityScope, SlotPolicy,
+};
+use crate::domain::event::{ClaimCreated, DomainEvent, EventEnvelope, EventStatus};
+use crate::domain::ids::{ClaimId, ItemId, RoundId, UserId};
 use crate::domain::item::{Item, ItemKind};
 use crate::domain::money::MoneyCents;
-use crate::domain::claim::{EffectiveClaimLine, ClaimType, SlotPolicy, Eligibility, EligibilityScope, ClaimLine};
-use crate::domain::event::{EventEnvelope, DomainEvent, ClaimCreated, EventStatus};
 use crate::engine::allocation_engine::AllocationEngine;
-use crate::engine::replay::ReplayService;
 use crate::engine::event_store::InMemoryEventStore;
+use crate::engine::replay::ReplayService;
 use std::sync::Arc;
 
 fn fixture_split_item(item_id: &str, name: &str, price_cents: i64, box_size: u32) -> Item {
@@ -47,10 +49,17 @@ fn fixture_single_item(item_id: &str, name: &str, price_cents: i64, max_quantity
 }
 
 fn ts(ms: i64) -> chrono::DateTime<chrono::Utc> {
-    chrono::DateTime::from_timestamp_millis(ms).unwrap_or_else(|| chrono::Utc::now())
+    chrono::DateTime::from_timestamp_millis(ms).unwrap_or_else(chrono::Utc::now)
 }
 
-fn claim_line(user_id: &str, item_id: &str, quantity: u32, ts_ms: i64, seq: i64, priority: i32) -> EffectiveClaimLine {
+fn claim_line(
+    user_id: &str,
+    item_id: &str,
+    quantity: u32,
+    ts_ms: i64,
+    seq: i64,
+    priority: i32,
+) -> EffectiveClaimLine {
     EffectiveClaimLine {
         claim_id: ClaimId(uuid::Uuid::new_v4().to_string()),
         line_index: 0,
@@ -66,7 +75,14 @@ fn claim_line(user_id: &str, item_id: &str, quantity: u32, ts_ms: i64, seq: i64,
     }
 }
 
-fn variant_line(user_id: &str, item_id: &str, variant_id: &str, quantity: u32, ts_ms: i64, seq: i64) -> EffectiveClaimLine {
+fn variant_line(
+    user_id: &str,
+    item_id: &str,
+    variant_id: &str,
+    quantity: u32,
+    ts_ms: i64,
+    seq: i64,
+) -> EffectiveClaimLine {
     EffectiveClaimLine {
         claim_id: ClaimId(uuid::Uuid::new_v4().to_string()),
         line_index: 0,
@@ -114,7 +130,8 @@ fn test_priority_user_before_normal_user() {
 
     let mut sorted_lines = lines.clone();
     sorted_lines.sort_by(|a, b| {
-        b.priority_level.cmp(&a.priority_level)
+        b.priority_level
+            .cmp(&a.priority_level)
             .then_with(|| a.effective_at.cmp(&b.effective_at))
             .then_with(|| a.sequence.cmp(&b.sequence))
             .then_with(|| a.line_index.cmp(&b.line_index))
@@ -177,8 +194,18 @@ fn test_discount_allocation_by_ratio() {
     let sum: i64 = shares.iter().map(|s| s.amount.0).sum();
     assert_eq!(sum, 100);
 
-    let u1_share = shares.iter().find(|s| s.user_id.0 == "u1").unwrap().amount.0;
-    let u2_share = shares.iter().find(|s| s.user_id.0 == "u2").unwrap().amount.0;
+    let u1_share = shares
+        .iter()
+        .find(|s| s.user_id.0 == "u1")
+        .unwrap()
+        .amount
+        .0;
+    let u2_share = shares
+        .iter()
+        .find(|s| s.user_id.0 == "u2")
+        .unwrap()
+        .amount
+        .0;
     assert_eq!(u1_share, 60);
     assert_eq!(u2_share, 40);
 }
@@ -196,14 +223,13 @@ fn test_money_cents_operations() {
 
 #[test]
 fn test_effective_claim_line_priority_sorting() {
-    let mut lines = vec![
-        claim_line("u1", "item_x", 1, 100, 1, 0),
+    let mut lines = [claim_line("u1", "item_x", 1, 100, 1, 0),
         claim_line("u2", "item_x", 1, 101, 2, 10),
-        claim_line("u3", "item_x", 1, 99, 3, 5),
-    ];
+        claim_line("u3", "item_x", 1, 99, 3, 5)];
 
     lines.sort_by(|a, b| {
-        b.priority_level.cmp(&a.priority_level)
+        b.priority_level
+            .cmp(&a.priority_level)
             .then_with(|| a.effective_at.cmp(&b.effective_at))
             .then_with(|| a.sequence.cmp(&b.sequence))
             .then_with(|| a.line_index.cmp(&b.line_index))
@@ -216,7 +242,7 @@ fn test_effective_claim_line_priority_sorting() {
 
 #[test]
 fn test_replay_cancellation_removes_effective_claims() {
-    use crate::domain::event::{ClaimCancelled};
+    use crate::domain::event::ClaimCancelled;
 
     let store = Arc::new(InMemoryEventStore::new());
     let service = ReplayService::new(store.clone());
@@ -284,7 +310,10 @@ fn test_eligibility_applies_to_item() {
         priority_type: "vip".to_string(),
         priority_level: 10,
         scope: EligibilityScope {
-            item_ids: Some(vec![ItemId("badge_rinne".to_string()), ItemId("badge_aira".to_string())]),
+            item_ids: Some(vec![
+                ItemId("badge_rinne".to_string()),
+                ItemId("badge_aira".to_string()),
+            ]),
             item_kinds: None,
             only_before_start_minutes: None,
         },

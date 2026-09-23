@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::allocation::{AllocationWarning, ItemAllocation, UserAllocationSummary};
 use crate::domain::ids::RoundId;
-use crate::domain::allocation::{ItemAllocation, UserAllocationSummary, AllocationWarning};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllocationSnapshot {
@@ -17,7 +17,9 @@ pub struct AllocationSnapshot {
 impl AllocationSnapshot {
     #[cfg(test)]
     pub fn item(&self, name: &str) -> Option<&ItemAllocation> {
-        self.item_allocations.iter().find(|i| i.item_name == name || i.item_id.0 == name)
+        self.item_allocations
+            .iter()
+            .find(|i| i.item_name == name || i.item_id.0 == name)
     }
 }
 
@@ -91,36 +93,55 @@ impl AllocationSnapshot {
             status: status.to_string(),
             version: self.version,
             updated_at: self.generated_at.to_rfc3339(),
-            items: self.item_allocations.iter().map(|ia| PublicItemView {
-                item_id: ia.item_id.0.clone(),
-                name: ia.item_name.clone(),
-                kind: ia.kind.clone(),
-                unit_price_cents: 0,
-                boxes: ia.boxes.iter().map(|b| PublicBoxView {
-                    box_index: b.box_index,
-                    slots: b.slots.iter().map(|s| PublicSlotView {
-                        slot_index: s.slot_index,
-                        status: s.status.as_str().to_string(),
-                        display_name: s.user_id.as_ref().map(|u| u.0.clone()),
-                        policy: s.slot_policy.as_str().to_string(),
-                        segment_id: s.segment_id.clone(),
-                    }).collect(),
-                }).collect(),
-                singles: ia.singles.iter().map(|s| PublicSingleView {
-                    display_name: s.user_id.0.clone(),
-                    quantity: s.quantity,
-                }).collect(),
-                waiting: ia.waiting.iter().map(|w| PublicWaitingView {
-                    display_name: w.user_id.0.clone(),
-                    quantity: w.quantity,
-                    priority_level: w.priority_level,
-                }).collect(),
-            }).collect(),
+            items: self
+                .item_allocations
+                .iter()
+                .map(|ia| PublicItemView {
+                    item_id: ia.item_id.0.clone(),
+                    name: ia.item_name.clone(),
+                    kind: ia.kind.clone(),
+                    unit_price_cents: 0,
+                    boxes: ia
+                        .boxes
+                        .iter()
+                        .map(|b| PublicBoxView {
+                            box_index: b.box_index,
+                            slots: b
+                                .slots
+                                .iter()
+                                .map(|s| PublicSlotView {
+                                    slot_index: s.slot_index,
+                                    status: s.status.as_str().to_string(),
+                                    display_name: s.user_id.as_ref().map(|u| u.0.clone()),
+                                    policy: s.slot_policy.as_str().to_string(),
+                                    segment_id: s.segment_id.clone(),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                    singles: ia
+                        .singles
+                        .iter()
+                        .map(|s| PublicSingleView {
+                            display_name: s.user_id.0.clone(),
+                            quantity: s.quantity,
+                        })
+                        .collect(),
+                    waiting: ia
+                        .waiting
+                        .iter()
+                        .map(|w| PublicWaitingView {
+                            display_name: w.user_id.0.clone(),
+                            quantity: w.quantity,
+                            priority_level: w.priority_level,
+                        })
+                        .collect(),
+                })
+                .collect(),
             user_bills: vec![],
             warnings: self.warnings.iter().map(|w| w.message.clone()).collect(),
         }
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

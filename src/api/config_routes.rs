@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn other_error_maps_to_500() {
-        let error = ConfigError::Io(std::io::Error::new(std::io::ErrorKind::Other, "boom"));
+        let error = ConfigError::Io(std::io::Error::other("boom"));
         let (status, Json(body)) = config_error_response(&error);
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(body["error"].as_str().unwrap().contains("boom"));

@@ -80,14 +80,19 @@ impl RuleParser {
 
         for seg in &segments {
             let item = &items[seg.item_idx];
-            let variant = seg.variant_id.as_ref().and_then(|vid| item.find_variant_by_id(vid));
+            let variant = seg
+                .variant_id
+                .as_ref()
+                .and_then(|vid| item.find_variant_by_id(vid));
             let policy = detect_policy(seg.text);
             let quantity = parse_quantity(seg.text, item, variant, &policy);
             let claim_type = detect_claim_type(seg.text, item);
             let is_proxy = seg.text.contains("代牌");
 
             parsed_items.push(ParsedClaimItem {
-                name: variant.map(|v| v.name.clone()).unwrap_or_else(|| item.name.clone()),
+                name: variant
+                    .map(|v| v.name.clone())
+                    .unwrap_or_else(|| item.name.clone()),
                 category_hint: None,
                 quantity,
                 claim_type: Some(claim_type),
@@ -246,7 +251,7 @@ fn find_mentions(text: &str, items: &[Item]) -> Vec<Mention> {
             let mut best_d: Option<usize> = None;
             for im in &item_mentions {
                 let ic = (im.start + im.end) / 2;
-                let d = if ic > vc { ic - vc } else { vc - ic };
+                let d = ic.abs_diff(vc);
                 if best_d.is_none() || d < best_d.unwrap() {
                     best_d = Some(d);
                     chosen = Some(im.item_idx);
@@ -310,7 +315,12 @@ fn find_mentions(text: &str, items: &[Item]) -> Vec<Mention> {
                         last.end = m.end;
                     }
                 } else if (m.end - m.start) > (last.end - last.start) {
-                    *last = Mention { item_idx: m.item_idx, variant_id: m.variant_id.clone(), start: m.start, end: m.end };
+                    *last = Mention {
+                        item_idx: m.item_idx,
+                        variant_id: m.variant_id.clone(),
+                        start: m.start,
+                        end: m.end,
+                    };
                 }
                 handled = true;
             } else if same_target(&m, last) && m.start == last.end {
@@ -362,10 +372,24 @@ fn build_segments<'a>(text: &'a str, mentions: &[Mention]) -> Vec<Segment<'a>> {
 }
 
 fn detect_policy(text: &str) -> String {
-    if contains_any(text, &["包盒", "整盒", "包一盒", "一盒全包", "全包", "包整盒", "整一盒"]) {
+    if contains_any(
+        text,
+        &[
+            "包盒",
+            "整盒",
+            "包一盒",
+            "一盒全包",
+            "全包",
+            "包整盒",
+            "整一盒",
+        ],
+    ) {
         return "FullBox".to_string();
     }
-    if contains_any(text, &["包尾", "尾巴", "包个尾", "要尾", "留尾", "端盒", "端了"]) {
+    if contains_any(
+        text,
+        &["包尾", "尾巴", "包个尾", "要尾", "留尾", "端盒", "端了"],
+    ) {
         return "TailLocked".to_string();
     }
     if contains_any(text, &["锁列", "锁一整列", "锁一列"]) {

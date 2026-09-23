@@ -198,8 +198,7 @@ async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
         let processed = process_one(cfg, rec, &items, &round_contexts, &validator).await;
 
         if let Some(event) = processed.event {
-            if processed.priority_claim
-                && !eligibilities.iter().any(|e| e.user_id.0 == rec.user_id)
+            if processed.priority_claim && !eligibilities.iter().any(|e| e.user_id.0 == rec.user_id)
             {
                 eligibilities.push(priority_eligibility(&round_id, &rec.user_id));
             }
@@ -226,8 +225,7 @@ async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
     }
 
     let mut board = rebuild_allocation_snapshot(&items, &events, &eligibilities);
-    board.generated_at =
-        DateTime::<Utc>::from_timestamp_millis(latest_ts).unwrap_or_else(Utc::now);
+    board.generated_at = DateTime::<Utc>::from_timestamp_millis(latest_ts).unwrap_or_else(Utc::now);
     let version = board.version;
 
     Computation {
@@ -305,7 +303,10 @@ async fn process_one(
     if rule.intent == ParsedIntent::Modify {
         return skipped("Ignored", "改单功能暂未实现");
     }
-    if rule.intent == ParsedIntent::Claim && rule.items.is_empty() && rule.ambiguous_parts.is_empty() {
+    if rule.intent == ParsedIntent::Claim
+        && rule.items.is_empty()
+        && rule.ambiguous_parts.is_empty()
+    {
         return skipped("Ignored", "未解析出商品");
     }
 
@@ -617,7 +618,11 @@ mod tests {
 
         assert_eq!(filtered.outcomes[0].status, "Applied");
         assert_eq!(filtered.outcomes[1].status, "Dropped");
-        assert!(filtered.board.user_summaries.iter().all(|s| s.user_id.0 == "u1"));
+        assert!(filtered
+            .board
+            .user_summaries
+            .iter()
+            .all(|s| s.user_id.0 == "u1"));
     }
 
     #[tokio::test]
@@ -625,9 +630,14 @@ mod tests {
         let cfg = test_config();
         let dir = temp_dir("store");
         let store = JsonlMessageStore::new(&dir, &cfg.round.round_id);
-        store.append(&record(1, "u1", "排 徽章 甲 1", 1_000)).await.unwrap();
+        store
+            .append(&record(1, "u1", "排 徽章 甲 1", 1_000))
+            .await
+            .unwrap();
 
-        let before = replay(&store, &cfg, ReplayOverrides::default()).await.unwrap();
+        let before = replay(&store, &cfg, ReplayOverrides::default())
+            .await
+            .unwrap();
         assert_eq!(before.version, 1);
         assert_eq!(before.board.user_summaries.len(), 1);
 
@@ -635,7 +645,9 @@ mod tests {
             .replace_all(&[record(1, "u1", "今天天气不错", 1_000)])
             .await
             .unwrap();
-        let after = replay(&store, &cfg, ReplayOverrides::default()).await.unwrap();
+        let after = replay(&store, &cfg, ReplayOverrides::default())
+            .await
+            .unwrap();
         assert_eq!(after.outcomes[0].status, "Ignored");
         assert!(after.board.user_summaries.is_empty());
 

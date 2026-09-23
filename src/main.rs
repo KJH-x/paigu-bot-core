@@ -2,29 +2,28 @@
 // parser 的部分条目、engine::event_store），待后续 Wave 接线；统一在此静音 dead_code。
 #![allow(dead_code)]
 
-mod settings;
-mod bus;
-mod error;
-mod domain;
-mod parser;
-mod engine;
 mod api;
-mod replay;
-mod simulation;
+mod bus;
+mod domain;
+mod engine;
+mod error;
 mod gateway;
 mod llm;
 mod messages;
-mod round;
-mod settlement;
+mod parser;
 mod planner;
+mod replay;
+mod round;
+mod settings;
+mod settlement;
+mod simulation;
 mod snapshot_bundle;
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
 use tracing::info;
-use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -49,7 +48,8 @@ async fn main() -> Result<()> {
 }
 
 async fn run_gateway_stack() -> Result<()> {
-    let cfg_path = std::env::var("PAIGU_CONFIG_PATH").unwrap_or_else(|_| "config/app.json".to_string());
+    let cfg_path =
+        std::env::var("PAIGU_CONFIG_PATH").unwrap_or_else(|_| "config/app.json".to_string());
     let store = Arc::new(settings::ConfigStore::load(&cfg_path)?);
     store.spawn_watch();
     let cfg = store.get().await;
@@ -119,7 +119,8 @@ fn spawn_members_scheduler(state: Arc<api::ApiState>) {
     tokio::spawn(async move {
         loop {
             let at = state.cfg.get().await.members.daily_pull_at.clone();
-            let wait_ms = (next_daily_ms(&at) - chrono::Utc::now().timestamp_millis()).max(1_000) as u64;
+            let wait_ms =
+                (next_daily_ms(&at) - chrono::Utc::now().timestamp_millis()).max(1_000) as u64;
             tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
             match api::member_routes::refresh_members_from_gateway(&state).await {
                 Ok(v) => info!(

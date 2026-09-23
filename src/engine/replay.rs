@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use crate::domain::ids::RoundId;
-use crate::domain::round::Round;
-use crate::domain::item::Item;
 use crate::domain::claim::{Claim, EffectiveClaimLine, Eligibility};
-use crate::domain::event::{EventEnvelope, DomainEvent, compare_event_order};
-use crate::domain::snapshot::AllocationSnapshot;
-use crate::domain::settlement::SettlementSnapshot;
 use crate::domain::discount::DiscountRule;
-use crate::engine::event_store::{EventStore, InMemoryEventStore};
+use crate::domain::event::{compare_event_order, DomainEvent, EventEnvelope};
+use crate::domain::ids::RoundId;
+use crate::domain::item::Item;
+use crate::domain::round::Round;
+use crate::domain::settlement::SettlementSnapshot;
+use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::allocation_engine::AllocationEngine;
+use crate::engine::event_store::{EventStore, InMemoryEventStore};
 use crate::engine::settlement_engine::SettlementEngine;
 use crate::error::AppResult;
 
@@ -20,9 +20,7 @@ pub struct ReplayService {
 }
 
 impl ReplayService {
-    pub fn new(
-        event_store: Arc<dyn EventStore>,
-    ) -> Self {
+    pub fn new(event_store: Arc<dyn EventStore>) -> Self {
         Self {
             event_store,
             allocation_engine: AllocationEngine::new(),
@@ -42,7 +40,9 @@ impl ReplayService {
         sorted_events.sort_by(compare_event_order);
 
         let effective_claims = self.collect_effective_claims(&sorted_events, eligibilities);
-        let mut allocation = self.allocation_engine.allocate(items, &effective_claims, &sorted_events)?;
+        let mut allocation =
+            self.allocation_engine
+                .allocate(items, &effective_claims, &sorted_events)?;
         allocation.version = sorted_events.len() as i64;
 
         let settlement = if let Some(s) = self.collect_discount_rules(&sorted_events) {
@@ -101,7 +101,10 @@ impl ReplayService {
                     continue;
                 }
                 let priority = EffectiveClaimLine::compute_priority(
-                    &claim.user_id, &line.item_id, claim.effective_at, eligibilities
+                    &claim.user_id,
+                    &line.item_id,
+                    claim.effective_at,
+                    eligibilities,
                 );
 
                 lines.push(EffectiveClaimLine {
@@ -121,7 +124,8 @@ impl ReplayService {
         }
 
         lines.sort_by(|a, b| {
-            b.priority_level.cmp(&a.priority_level)
+            b.priority_level
+                .cmp(&a.priority_level)
                 .then_with(|| a.effective_at.cmp(&b.effective_at))
                 .then_with(|| a.sequence.cmp(&b.sequence))
                 .then_with(|| a.line_index.cmp(&b.line_index))
@@ -130,8 +134,12 @@ impl ReplayService {
         lines
     }
 
-    fn apply_cancellation(&self, claims: &mut Vec<Claim>, user_id: &crate::domain::ids::UserId,
-        cancel: &crate::domain::event::ClaimCancelled) {
+    fn apply_cancellation(
+        &self,
+        claims: &mut Vec<Claim>,
+        user_id: &crate::domain::ids::UserId,
+        cancel: &crate::domain::event::ClaimCancelled,
+    ) {
         if let Some(ref target_id) = cancel.target_claim_id {
             for c in claims.iter_mut() {
                 if &c.claim_id == target_id && &c.user_id == user_id {
@@ -163,8 +171,11 @@ impl ReplayService {
         }
     }
 
-    fn apply_modification(&self, claims: &mut Vec<Claim>,
-        modify: &crate::domain::event::ClaimModified) {
+    fn apply_modification(
+        &self,
+        claims: &mut Vec<Claim>,
+        modify: &crate::domain::event::ClaimModified,
+    ) {
         for c in claims.iter_mut() {
             if c.claim_id == modify.target_claim_id {
                 if let Some(ref item_id) = modify.target_item_id {

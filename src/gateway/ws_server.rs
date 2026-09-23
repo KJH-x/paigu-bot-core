@@ -102,7 +102,10 @@ impl Gateway {
         self.pending.lock().unwrap().insert(echo.clone(), tx);
 
         let frame = json!({ "action": action, "params": params, "echo": echo });
-        if sender.send(WsMessage::Text(frame.to_string().into())).is_err() {
+        if sender
+            .send(WsMessage::Text(frame.to_string().into()))
+            .is_err()
+        {
             self.pending.lock().unwrap().remove(&echo);
             anyhow::bail!("client channel closed");
         }
@@ -276,18 +279,17 @@ impl Gateway {
                     reason = %reason,
                     "gateway drop: not routable"
                 );
-                let rec = onebot::to_message_record(
-                    &ev,
-                    &format!("drop:{reason}"),
-                    "Dropped",
-                    &reason,
-                );
+                let rec =
+                    onebot::to_message_record(&ev, &format!("drop:{reason}"), "Dropped", &reason);
                 if let Err(e) = self.messages.append(&cfg.round.round_id, &rec).await {
                     warn!(error = %e, "failed to persist dropped message");
                 }
                 // C-3：被丢弃的事件同样保留原始 JSON
                 if let Ok(raw) = serde_json::to_value(&ev) {
-                    if let Err(e) = self.messages.append_raw_event(&cfg.round.round_id, &raw).await
+                    if let Err(e) = self
+                        .messages
+                        .append_raw_event(&cfg.round.round_id, &raw)
+                        .await
                     {
                         warn!(error = %e, "failed to persist dropped raw event");
                     }
@@ -325,10 +327,8 @@ mod tests {
     }
 
     fn test_store() -> Arc<ConfigStore> {
-        let path = std::env::temp_dir().join(format!(
-            "paigu-gateway-test-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("paigu-gateway-test-{}.json", uuid::Uuid::new_v4()));
         Arc::new(ConfigStore::load(path).expect("load test config"))
     }
 
@@ -339,10 +339,8 @@ mod tests {
     fn test_store_with(f: impl FnOnce(&mut crate::settings::AppConfig)) -> Arc<ConfigStore> {
         let mut cfg = crate::settings::default_config();
         f(&mut cfg);
-        let path = std::env::temp_dir().join(format!(
-            "paigu-gateway-test-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("paigu-gateway-test-{}.json", uuid::Uuid::new_v4()));
         std::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
         Arc::new(ConfigStore::load(path).expect("load test config"))
     }
@@ -411,7 +409,10 @@ mod tests {
         });
 
         let result = gw
-            .send_action("send_group_msg", json!({ "group_id": "123456789", "message": "x" }))
+            .send_action(
+                "send_group_msg",
+                json!({ "group_id": "123456789", "message": "x" }),
+            )
             .await;
         assert!(result.is_ok(), "expected send allowed: {result:?}");
         assert_eq!(result.unwrap()["retcode"], 0);

@@ -1,7 +1,8 @@
 use crate::bus::IncomingEvent;
 use crate::settings::AppConfig;
 
-pub const DEFAULT_PROMPT: &str = "你是排谷消息解析器。只抽取结构化信息，不计算价格、不排序、不生成回复。";
+pub const DEFAULT_PROMPT: &str =
+    "你是排谷消息解析器。只抽取结构化信息，不计算价格、不排序、不生成回复。";
 
 pub fn build_system_prompt(cfg: &AppConfig) -> String {
     let base = if cfg.llm.prompt_template.trim().is_empty() {
@@ -37,7 +38,7 @@ pub fn build_system_prompt(cfg: &AppConfig) -> String {
             "[{}ms, {}ms) 内仅预存用户可排",
             window.start_ms, window.end_ms
         )),
-        None => out.push_str("无"),
+        None => out.push('无'),
     }
 
     out.push_str(
