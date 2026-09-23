@@ -24,6 +24,12 @@ fn identity_list() -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn clear_identities() {
+    if let Ok(mut map) = identities().lock() {
+        map.clear();
+    }
+}
+
 pub fn routes() -> Router<Arc<ApiState>> {
     Router::new()
         .route("/api/sim/message", post(sim_message))
@@ -100,6 +106,7 @@ async fn sim_identity(Json(body): Json<SimIdentity>) -> Json<Value> {
 
 async fn sim_reset(State(state): State<Arc<ApiState>>) -> Json<Value> {
     state.pipeline.reset().await;
+    clear_identities();
     display_routes::clear_cache();
     let (version, _) = state.pipeline.board().await;
     Json(json!({ "ok": true, "version": version }))

@@ -440,7 +440,7 @@ fn strip_item_tokens(text: &str, item: &Item, variant: Option<&ItemVariant>) -> 
         tokens.push(normalize_text(&v.name));
     }
     tokens.retain(|t| !t.is_empty());
-    tokens.sort_by(|a, b| b.len().cmp(&a.len()));
+    tokens.sort_by_key(|b| std::cmp::Reverse(b.len()));
 
     let mut out = text.to_string();
     for t in tokens {

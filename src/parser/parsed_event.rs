@@ -1,11 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const SYSTEM_PROMPT: &str = r#"你是排谷系统的自然语言解析器。你的任务是把用户消息解析成 JSON。
-不要判断能不能排上，不要计算价格，不要生成回复。
-只抽取意图、商品名、数量、拼团/单领、是否代牌、是否包尾/端盒/锁列、撤销对象、管理员命令。
-若不确定，填写 ambiguous_parts。
-输出必须是合法 JSON，不要包含任何解释文字。"#;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ParsedIntent {
     Claim,
@@ -129,49 +123,6 @@ impl ResolveResult {
             candidates,
             resolved: false,
             ambiguity: Some(msg),
-        }
-    }
-}
-
-pub struct MessageParser {
-    pub llm_client: Option<Box<dyn super::llm_client::LlmClient>>,
-}
-
-impl std::fmt::Debug for MessageParser {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MessageParser")
-            .field("llm_client", &self.llm_client.is_some())
-            .finish()
-    }
-}
-
-impl MessageParser {
-    pub fn new(llm_client: Option<Box<dyn super::llm_client::LlmClient>>) -> Self {
-        Self { llm_client }
-    }
-
-    pub async fn parse_member_message(
-        &self,
-        msg: &super::llm_client::ParseRequestContext,
-    ) -> Result<ParsedMessage, crate::error::ParseError> {
-        if let Some(ref client) = self.llm_client {
-            let prompt = SYSTEM_PROMPT.to_string();
-            let payload =
-                serde_json::to_value(msg).map_err(crate::error::ParseError::InvalidJson)?;
-
-            let response = client
-                .parse_message(crate::parser::llm_client::LlmParseRequest {
-                    system_prompt: prompt,
-                    user_payload: payload,
-                    temperature: 0.0,
-                    max_tokens: 2048,
-                })
-                .await
-                .map_err(|e| crate::error::ParseError::Ambiguous(e.to_string()))?;
-
-            Ok(response.parsed)
-        } else {
-            Err(crate::error::ParseError::CacheMiss)
         }
     }
 }

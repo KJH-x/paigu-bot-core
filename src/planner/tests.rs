@@ -77,8 +77,10 @@ fn limits(max_packages: u32, max_iters: u64) -> PlanLimits {
 
 #[test]
 fn gift_max_prefers_more_packages_up_to_claims() {
-    let mut config = SettlementConfig::default();
-    config.gift_tiers = vec![tier("t", 1_000, 5)];
+    let config = SettlementConfig {
+        gift_tiers: vec![tier("t", 1_000, 5)],
+        ..SettlementConfig::default()
+    };
     let req = PlanRequest {
         config,
         allocation: snapshot(vec![
@@ -99,8 +101,10 @@ fn gift_max_prefers_more_packages_up_to_claims() {
 
 #[test]
 fn discount_max_splits_into_threshold_packages() {
-    let mut config = SettlementConfig::default();
-    config.discounts = vec![threshold_discount(1_000, 10_000, -1)];
+    let config = SettlementConfig {
+        discounts: vec![threshold_discount(1_000, 10_000, -1)],
+        ..SettlementConfig::default()
+    };
     let req = PlanRequest {
         config,
         allocation: snapshot(vec![
@@ -126,8 +130,10 @@ fn discount_max_splits_into_threshold_packages() {
 
 #[test]
 fn best_table_packages_sorted_by_amount_desc() {
-    let mut config = SettlementConfig::default();
-    config.discounts = vec![threshold_discount(100, 1_000, -1)];
+    let config = SettlementConfig {
+        discounts: vec![threshold_discount(100, 1_000, -1)],
+        ..SettlementConfig::default()
+    };
     let req = PlanRequest {
         config,
         allocation: snapshot(vec![
@@ -222,9 +228,11 @@ fn max_iters_truncates_deterministically() {
 #[test]
 fn both_strategies_are_reproducible() {
     for strategy in [Strategy::GiftMax, Strategy::DiscountMax] {
-        let mut config = SettlementConfig::default();
-        config.gift_tiers = vec![tier("t", 30, 3)];
-        config.discounts = vec![threshold_discount(1_000, 10_000, -1)];
+        let config = SettlementConfig {
+            gift_tiers: vec![tier("t", 30, 3)],
+            discounts: vec![threshold_discount(1_000, 10_000, -1)],
+            ..SettlementConfig::default()
+        };
         let req = PlanRequest {
             config,
             allocation: snapshot(vec![
@@ -260,8 +268,10 @@ fn manual_evaluate_matches_settlement() {
 
 #[test]
 fn box_slots_use_price_table() {
-    let mut config = SettlementConfig::default();
-    config.gift_tiers = vec![tier("t0", 10, 10), tier("t500", 50, 50)];
+    let config = SettlementConfig {
+        gift_tiers: vec![tier("t0", 10, 10), tier("t500", 50, 50)],
+        ..SettlementConfig::default()
+    };
     let allocation = snapshot(vec![ItemAllocation {
         item_id: ItemId("box_item".to_string()),
         item_name: "盒货".to_string(),
@@ -303,8 +313,10 @@ fn box_slots_use_price_table() {
 
 #[test]
 fn max_packages_is_respected() {
-    let mut config = SettlementConfig::default();
-    config.gift_tiers = vec![tier("t0", 10, 10)];
+    let config = SettlementConfig {
+        gift_tiers: vec![tier("t0", 10, 10)],
+        ..SettlementConfig::default()
+    };
     let req = PlanRequest {
         config,
         allocation: snapshot(vec![

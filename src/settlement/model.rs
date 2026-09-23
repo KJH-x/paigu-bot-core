@@ -24,6 +24,7 @@ pub struct Package {
 }
 
 impl Package {
+    #[cfg(test)]
     pub fn new(package_id: impl Into<String>, lines: Vec<Line>) -> Self {
         Self {
             package_id: package_id.into(),
@@ -44,6 +45,7 @@ pub struct Line {
 }
 
 impl Line {
+    #[cfg(test)]
     pub fn new(item_id: impl Into<String>, qty: u32, unit_price_cents: i64) -> Self {
         Self {
             item_id: item_id.into(),
@@ -54,11 +56,13 @@ impl Line {
         }
     }
 
+    #[cfg(test)]
     pub fn variant(mut self, variant_id: impl Into<String>) -> Self {
         self.variant_id = Some(variant_id.into());
         self
     }
 
+    #[cfg(test)]
     pub fn gift(mut self) -> Self {
         self.is_gift = true;
         self

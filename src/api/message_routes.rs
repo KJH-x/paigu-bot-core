@@ -224,43 +224,56 @@ async fn update_message(
         }
     }
 
-    let store = state.messages.store_for(&cfg.round.round_id);
-    let mut records = store.read_all().await.map_err(api_internal)?;
-    let target = records
-        .iter_mut()
-        .find(|r| r.seq == seq)
-        .ok_or_else(|| api_not_found(format!("message {seq} not found")))?;
-
-    if let Some(v) = body.user_id {
-        target.user_id = v;
+    let mut updated: Option<MessageRecord> = None;
+    let mut invalid: Option<String> = None;
+    let hit = state
+        .messages
+        .update(&cfg.round.round_id, seq, |target| {
+            let mut candidate = target.clone();
+            if let Some(v) = &body.user_id {
+                candidate.user_id = v.clone();
+            }
+            if let Some(v) = &body.nickname {
+                candidate.nickname = v.clone();
+            }
+            if let Some(v) = &body.text {
+                candidate.text = v.clone();
+            }
+            if let Some(v) = &body.timestamp_ms {
+                candidate.timestamp_ms = *v;
+            }
+            if let Some(v) = &body.is_admin {
+                candidate.is_admin = *v;
+            }
+            if let Some(v) = &body.group_id {
+                candidate.group_id = v.clone();
+            }
+            if let Some(v) = &body.routed {
+                candidate.routed = v.clone();
+            }
+            if let Some(v) = &body.status {
+                candidate.status = v.clone();
+            }
+            if let Some(v) = &body.detail {
+                candidate.detail = v.clone();
+            }
+            match validate_record(&candidate) {
+                Ok(()) => {
+                    *target = candidate.clone();
+                    updated = Some(candidate);
+                }
+                Err(e) => invalid = Some(e),
+            }
+        })
+        .await
+        .map_err(api_internal)?;
+    if !hit {
+        return Err(api_not_found(format!("message {seq} not found")));
     }
-    if let Some(v) = body.nickname {
-        target.nickname = v;
+    if let Some(error) = invalid {
+        return Err(api_bad_request(error));
     }
-    if let Some(v) = body.text {
-        target.text = v;
-    }
-    if let Some(v) = body.timestamp_ms {
-        target.timestamp_ms = v;
-    }
-    if let Some(v) = body.is_admin {
-        target.is_admin = v;
-    }
-    if let Some(v) = body.group_id {
-        target.group_id = v;
-    }
-    if let Some(v) = body.routed {
-        target.routed = v;
-    }
-    if let Some(v) = body.status {
-        target.status = v;
-    }
-    if let Some(v) = body.detail {
-        target.detail = v;
-    }
-    validate_record(target).map_err(api_bad_request)?;
-    let updated = target.clone();
-    store.replace_all(&records).await.map_err(api_internal)?;
+    let updated = updated.expect("命中且校验通过的记录");
 
     let recomputed = body.recompute.unwrap_or(true);
     let result = if recomputed {

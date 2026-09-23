@@ -143,16 +143,20 @@ fn discount_scope_include_vs_exclude_gift() {
         vec![line("a", 1, 1000), line("g", 1, 500).gift()],
     )]);
 
-    let mut include = SettlementConfig::default();
-    include.scope_mode = ScopeMode::IncludeGift;
+    let mut include = SettlementConfig {
+        scope_mode: ScopeMode::IncludeGift,
+        ..SettlementConfig::default()
+    };
     include
         .discounts
         .push(discount(DiscountKind::Threshold, 500, Some(1200), None, -1));
     let ri = evaluate(&include, &t);
     assert_eq!(ri.discount_total, 500);
 
-    let mut exclude = SettlementConfig::default();
-    exclude.scope_mode = ScopeMode::ExcludeGift;
+    let mut exclude = SettlementConfig {
+        scope_mode: ScopeMode::ExcludeGift,
+        ..SettlementConfig::default()
+    };
     exclude
         .discounts
         .push(discount(DiscountKind::Threshold, 500, Some(1200), None, -1));
@@ -163,8 +167,10 @@ fn discount_scope_include_vs_exclude_gift() {
 #[test]
 fn gift_granting_is_min_of_claims_and_packages() {
     // A 档认购 3、B 档认购 2；P=2 → G=2A+2B；P=3 → G=3A+2B（成几开几）
-    let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![tier_claimed("A", 100, 3), tier_claimed("B", 200, 2)];
+    let cfg = SettlementConfig {
+        gift_tiers: vec![tier_claimed("A", 100, 3), tier_claimed("B", 200, 2)],
+        ..SettlementConfig::default()
+    };
 
     let t2 = table(vec![
         pkg("p1", vec![line("a", 1, 1000)]),
@@ -186,8 +192,10 @@ fn gift_granting_is_min_of_claims_and_packages() {
 #[test]
 fn moonlit_spec_g_is_twelve_times_twelve() {
     // 月行水上-更新：特典 12 份 × ¥12 = 144，P=12 → G=144
-    let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![tier_claimed("gift_card", 1200, 12)];
+    let cfg = SettlementConfig {
+        gift_tiers: vec![tier_claimed("gift_card", 1200, 12)],
+        ..SettlementConfig::default()
+    };
     let t = table(
         (1..=12)
             .map(|i| pkg(&format!("p{i}"), vec![line("a", i, 1000)]))
@@ -201,8 +209,10 @@ fn moonlit_spec_g_is_twelve_times_twelve() {
 
 #[test]
 fn reduce_average_total_is_list_minus_paid_plus_gift() {
-    let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![tier_claimed("t", 5000, 1)];
+    let cfg = SettlementConfig {
+        gift_tiers: vec![tier_claimed("t", 5000, 1)],
+        ..SettlementConfig::default()
+    };
     let t = table(vec![
         pkg("p1", vec![line("a", 1, 30_000)]),
         pkg("p2", vec![line("a", 1, 10_000)]),
@@ -243,8 +253,10 @@ fn reduce_average_accounts_for_discount() {
 
 #[test]
 fn reduce_average_largest_remainder_conserves_total() {
-    let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![tier_claimed("t", 100, 1)];
+    let cfg = SettlementConfig {
+        gift_tiers: vec![tier_claimed("t", 100, 1)],
+        ..SettlementConfig::default()
+    };
     let t = table(vec![
         pkg("p1", vec![line("a", 1, 2000)]),
         pkg("p2", vec![line("a", 1, 1000)]),
@@ -260,8 +272,10 @@ fn reduce_average_largest_remainder_conserves_total() {
 
 #[test]
 fn reduce_average_is_per_piece_and_keeps_integer_cents() {
-    let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![tier_claimed("t", 1, 1)];
+    let cfg = SettlementConfig {
+        gift_tiers: vec![tier_claimed("t", 1, 1)],
+        ..SettlementConfig::default()
+    };
     let t = table(vec![pkg("p1", vec![line("a", 2, 2500)])]);
 
     let r = evaluate(&cfg, &t);
@@ -276,8 +290,10 @@ fn reduce_average_is_per_piece_and_keeps_integer_cents() {
 
 #[test]
 fn reduce_average_zero_basis_warns_and_checks_out() {
-    let mut cfg = SettlementConfig::default();
-    cfg.gift_tiers = vec![tier_claimed("t", 500, 1)];
+    let cfg = SettlementConfig {
+        gift_tiers: vec![tier_claimed("t", 500, 1)],
+        ..SettlementConfig::default()
+    };
     let t = table(vec![pkg("p1", vec![line("a", 1, 0)])]);
 
     let r = evaluate(&cfg, &t);
@@ -509,7 +525,7 @@ fn completeness_detects_missing_and_extra() {
 fn moonlit_spec_update_fixture_matches_reference() {
     let path = std::path::Path::new("simulation-corpus/real-xlsx/月行水上-更新/fixture.json");
     if !path.exists() {
-        eprintln!("跳过：夹具不存在（xlsx 为 gitignored 输入，可运行 build_fixture.py 重建）");
+        eprintln!("跳过：夹具不存在（xlsx 为 gitignored 输入，可运行 build_fixtures.py 重建）");
         return;
     }
     let raw = std::fs::read_to_string(path).expect("read fixture");

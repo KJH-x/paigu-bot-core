@@ -2,12 +2,21 @@ use crate::domain::claim::ClaimLine;
 use crate::domain::event::{ClaimCancelled, ClaimCreated, DomainEvent, EventEnvelope};
 use crate::domain::ids::UserId;
 use crate::domain::item::RoundContext;
-use crate::error::AppResult;
 use crate::parser::alias_match;
 use crate::parser::parsed_event::{ParsedIntent, ParsedMessage};
 
+/// 校验所需上下文（避免 `validate` 参数过多）。
+pub struct ValidateContext<'a> {
+    pub user_id: &'a UserId,
+    pub group_id: &'a str,
+    pub raw_message_id: Option<String>,
+    pub active_rounds: &'a [RoundContext],
+    pub now: chrono::DateTime<chrono::Utc>,
+    pub sequence: i64,
+}
+
 pub enum ValidationOutcome {
-    Ok(EventEnvelope),
+    Ok(Box<EventEnvelope>),
     NeedConfirm(crate::parser::reply::BotReply),
     Reject(crate::parser::reply::BotReply),
     Ignore,
@@ -28,14 +37,18 @@ impl EventValidator {
     pub async fn validate(
         &self,
         parsed: ParsedMessage,
-        user_id: &UserId,
-        group_id: &str,
-        raw_message_id: Option<String>,
-        active_rounds: &[RoundContext],
-        now: chrono::DateTime<chrono::Utc>,
-        sequence: i64,
-    ) -> AppResult<ValidationOutcome> {
+        ctx: ValidateContext<'_>,
+    ) -> anyhow::Result<ValidationOutcome> {
         use crate::parser::reply::BotReply;
+
+        let ValidateContext {
+            user_id,
+            group_id,
+            raw_message_id,
+            active_rounds,
+            now,
+            sequence,
+        } = ctx;
 
         if parsed.intent == ParsedIntent::Unknown {
             return Ok(ValidationOutcome::Ignore);
@@ -185,7 +198,7 @@ impl EventValidator {
                     status: crate::domain::event::EventStatus::Active,
                 };
 
-                Ok(ValidationOutcome::Ok(event))
+                Ok(ValidationOutcome::Ok(Box::new(event)))
             }
 
             ParsedIntent::Cancel => {
@@ -239,7 +252,7 @@ impl EventValidator {
                     status: crate::domain::event::EventStatus::Active,
                 };
 
-                Ok(ValidationOutcome::Ok(event))
+                Ok(ValidationOutcome::Ok(Box::new(event)))
             }
 
             ParsedIntent::AdminCommand => Ok(ValidationOutcome::Reject(BotReply::Text(
@@ -285,15 +298,18 @@ mod tests {
 
     async fn validate(parsed: ParsedMessage) -> ValidationOutcome {
         let validator = EventValidator::new(0.65);
+        let user_id = UserId("u1".to_string());
         validator
             .validate(
                 parsed,
-                &UserId("u1".to_string()),
-                "g1",
-                Some("m1".to_string()),
-                &[],
-                chrono::Utc::now(),
-                1,
+                ValidateContext {
+                    user_id: &user_id,
+                    group_id: "g1",
+                    raw_message_id: Some("m1".to_string()),
+                    active_rounds: &[],
+                    now: chrono::Utc::now(),
+                    sequence: 1,
+                },
             )
             .await
             .expect("validate")

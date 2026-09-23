@@ -15,12 +15,12 @@
 
 验收：`cargo test` 通过；单测覆盖 `decide_route`（白名单/非白名单/非 message/空）；`echo` 往返可用 mock 验证。
 
-## A2 · LLM + 配置（`src/llm/**`、`src/config.rs`）
+## A2 · LLM + 配置（`src/llm/**`、`src/settings.rs`）
 
 **目标**：DeepSeek 客户端 + 排谷流水线 + 热载配置。
 
 交付：
-- `src/config.rs`：`AppConfig`（按 DESIGN §3）、`ConfigStore`（RwLock + revision）、`load/save/reload`、`notify` 监听热载、env 覆盖。
+- `src/settings.rs`：`AppConfig`（按 DESIGN §3）、`ConfigStore`（RwLock + revision）、`load/save/reload`、`notify` 监听热载、env 覆盖。
 - `src/llm/mod.rs`、`src/llm/client.rs`：OpenAI 兼容 `chat/completions`（reqwest），`base_url/model/api_key_env/timeout/max_tokens/temperature`，JSON 模式，超时/重试。
 - `src/llm/prompt.rs`：按 DESIGN §6 组装 system prompt（含商品目录/预存用户/时段/输出 schema）。
 - `src/llm/pipeline.rs`：`process(event, cfg, engine) -> PipelineOutcome`：
@@ -34,7 +34,7 @@
 **目标**：按 DESIGN §5 提供路由（端口 21081）。
 
 交付：
-- `src/api/config_routes.rs`、`board_routes.rs`、`display_routes.rs`、`sim_routes.rs`、`member_routes.rs`；更新 `src/api/routes.rs` 挂载 + 静态页服务（`web/`）+ CORS。
+- `src/api/config_routes.rs`、`board_routes.rs`、`display_routes.rs`、`sim_routes.rs`、`member_routes.rs`；更新 `src/api/mod.rs` 挂载 + 静态页服务（`web/`）+ CORS。
 - `sim_routes`：复用 A2 流水线；`offset_ms` 仅改该消息 `timestamp_ms`。
 - `display_routes`：`since` 增量（board + messages + who_whats + status + changed）。
 
@@ -66,7 +66,7 @@
 ## A0 · 主（装配与验收）
 
 - `src/main.rs`：新增 `run`（默认，跑 Gateway+API+Pipeline）子命令；保留 `simulate`/`serve`。
-- `src/app_state.rs` / `mod.rs`：接线 A1/A2/A3。
+- `src/app_state.rs` / `mod.rs`：接线 A1/A2/A3。（`app_state.rs` 已在 C-4 删除，现为 `src/main.rs` 直接装配）
 - 合并验收：`cargo test`、既有 `simulation-corpus` 回归、e2e 全绿；更新 README。
 
 ## 依赖与顺序
@@ -74,7 +74,7 @@
 - A1/A2 可并行；A3 依赖 A2 的 `ConfigStore`/pipeline 接口（先按 DESIGN §5 定契约，用 trait 解耦）。
 - A4 只依赖 A3 的 HTTP 契约。
 - A5 依赖 A3+A4 可运行。
-- 冲突文件（`main.rs`/`mod.rs`/`app_state.rs`/`Cargo.toml`）由 A0 统一改；子 agent 需要时在 `docs/TASKS.md` 追加“待 A0 处理”条目。
+- 冲突文件（`main.rs`/`mod.rs`/`Cargo.toml`）由 A0 统一改；子 agent 需要时在 `docs/TASKS.md` 追加“待 A0 处理”条目。
 
 ## 完成状态（2026-09-14）
 

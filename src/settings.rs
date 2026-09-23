@@ -295,9 +295,13 @@ impl ConfigStore {
         } else {
             let cfg = default_config();
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).ok();
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!("create config dir {} failed: {e}", parent.display());
+                }
             }
-            std::fs::write(&path, serde_json::to_string_pretty(&cfg)?).ok();
+            if let Err(e) = std::fs::write(&path, serde_json::to_string_pretty(&cfg)?) {
+                tracing::warn!("write default config {} failed: {e}", path.display());
+            }
             cfg
         };
         Ok(Self {
@@ -353,22 +357,19 @@ impl ConfigStore {
                 return;
             }
             let mut last = std::time::Instant::now();
-            loop {
-                match rx.recv() {
-                    Ok(_) => {
-                        if last.elapsed() < std::time::Duration::from_millis(300) {
-                            continue;
+            while rx.recv().is_ok() {
+                if last.elapsed() < std::time::Duration::from_millis(300) {
+                    continue;
+                }
+                last = std::time::Instant::now();
+                let rt = tokio::runtime::Handle::try_current();
+                if let Ok(rt) = rt {
+                    let store = store.clone();
+                    rt.spawn(async move {
+                        if let Err(e) = store.reload().await {
+                            tracing::warn!("config reload failed: {e}");
                         }
-                        last = std::time::Instant::now();
-                        let rt = tokio::runtime::Handle::try_current();
-                        if let Ok(rt) = rt {
-                            let store = store.clone();
-                            rt.spawn(async move {
-                                let _ = store.reload().await;
-                            });
-                        }
-                    }
-                    Err(_) => break,
+                    });
                 }
             }
         });

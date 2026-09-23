@@ -13,35 +13,6 @@ pub enum RoundStatus {
     Archived,
 }
 
-impl RoundStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            RoundStatus::Draft => "draft",
-            RoundStatus::Scheduled => "scheduled",
-            RoundStatus::Active => "active",
-            RoundStatus::Settling => "settling",
-            RoundStatus::Closed => "closed",
-            RoundStatus::Archived => "archived",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "draft" => Some(RoundStatus::Draft),
-            "scheduled" => Some(RoundStatus::Scheduled),
-            "active" => Some(RoundStatus::Active),
-            "settling" => Some(RoundStatus::Settling),
-            "closed" => Some(RoundStatus::Closed),
-            "archived" => Some(RoundStatus::Archived),
-            _ => None,
-        }
-    }
-
-    pub fn allows_claims(&self) -> bool {
-        matches!(self, RoundStatus::Active)
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Round {
     pub round_id: RoundId,

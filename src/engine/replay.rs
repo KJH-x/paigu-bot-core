@@ -11,8 +11,8 @@ use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::allocation_engine::AllocationEngine;
 use crate::engine::event_store::{EventStore, InMemoryEventStore};
 use crate::engine::settlement_engine::SettlementEngine;
-use crate::error::AppResult;
 
+#[allow(dead_code)] // 保留：测试夹具与后续重放接线；本轮保留公开字段/方法，不删除。
 pub struct ReplayService {
     pub event_store: Arc<dyn EventStore>,
     pub allocation_engine: AllocationEngine,
@@ -28,13 +28,14 @@ impl ReplayService {
         }
     }
 
+    #[allow(dead_code)] // 保留的公开 API（replay/** 接线用），本轮不删除。
     pub async fn rebuild_snapshot(
         &self,
         round_id: &RoundId,
         items: &[Item],
         eligibilities: &[Eligibility],
         _round: &Round,
-    ) -> AppResult<(AllocationSnapshot, Option<SettlementSnapshot>)> {
+    ) -> anyhow::Result<(AllocationSnapshot, Option<SettlementSnapshot>)> {
         let events = self.event_store.read_all(round_id).await?;
         let mut sorted_events = events.clone();
         sorted_events.sort_by(compare_event_order);
@@ -51,7 +52,7 @@ impl ReplayService {
                 items: items.to_vec(),
                 discount_rules: s,
             };
-            Some(self.settlement_engine.settle(&input)?)
+            Some(self.settlement_engine.settle(&input))
         } else {
             None
         };
@@ -136,7 +137,7 @@ impl ReplayService {
 
     fn apply_cancellation(
         &self,
-        claims: &mut Vec<Claim>,
+        claims: &mut [Claim],
         user_id: &crate::domain::ids::UserId,
         cancel: &crate::domain::event::ClaimCancelled,
     ) {
@@ -173,7 +174,7 @@ impl ReplayService {
 
     fn apply_modification(
         &self,
-        claims: &mut Vec<Claim>,
+        claims: &mut [Claim],
         modify: &crate::domain::event::ClaimModified,
     ) {
         for c in claims.iter_mut() {
@@ -195,6 +196,7 @@ impl ReplayService {
         }
     }
 
+    #[allow(dead_code)] // 仅由保留的 `rebuild_snapshot` 调用。
     fn collect_discount_rules(&self, events: &[EventEnvelope]) -> Option<Vec<DiscountRule>> {
         for ev in events.iter().rev() {
             if let DomainEvent::DiscountRulesSet(ref rules_set) = ev.payload {

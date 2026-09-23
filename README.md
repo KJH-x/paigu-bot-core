@@ -44,7 +44,7 @@ cargo run -- run
 node tests/e2e/sim.mjs
 ```
 
-离线验证（旧引擎，保留）：
+离线验证（确定性重放；旧 verifier 暂留以支撑语料回归，见 T-24）：
 
 ```bash
 # 确定性重放：商品表 + JSONL 消息队列 → 排结果与报告
@@ -53,31 +53,42 @@ cargo run -- simulate \
   --queue        simulation-corpus/agent-a-normal/queue.jsonl \
   --out          simulation-corpus/agent-a-normal/out
 
-# 本地聊天界面模拟（内存事件存储，实时重放）
-cargo run -- serve \
-  --round-config simulation-corpus/agent-a-normal/round_config.json \
-  --port 8090
+# 语料夹具与逐格验证（先经 simulate 生成 out/，再校验；详见对应 README）
+python simulation-corpus/real-xlsx/build_fixtures.py
+node   simulation-corpus/real-samples/verify-samples.mjs simulation-corpus/real-samples
+
+# 隐私/密钥扫描（跟踪文件命中真实昵称/密钥/内网 IP/data·config·xlsx 入库即失败）
+npm run privacy
 ```
 
-> 任何未被识别的子命令会落入**旧栈回退**（需 `DATABASE_URL`，连接 PostgreSQL，已弃用），请勿使用。
+> `run` / `serve` 均走新栈；任何未识别的子命令按 `run` 启动。旧栈与 PostgreSQL 已在 **C-4** 删除（不再有 `DATABASE_URL` 回退路径）。
 
 ## 目录结构
 
 ```text
 src/
-├── main.rs          # 入口分派：run（新栈）/ simulate / serve；其余 → 旧栈回退
+├── main.rs          # 入口分派：run / serve → 新栈；simulate → 离线重放；其余按 run
 ├── bus.rs           # 冻结接口：IncomingEvent / EventSink / PipelineOutcome
 ├── settings.rs      # AppConfig + ConfigStore（revision + 热载）
-├── app_state.rs     # 装配状态
+├── error.rs         # thiserror 错误类型（AppError + 各领域错误）
 ├── gateway/         # OneBot 反向 WS：路由(白名单/drop)、心跳、echo 动作回包、只读动作
 ├── llm/             # DeepSeek 客户端 + 排谷流水线（规则快路径 + LLM 清理/抽取 + 回退）
-├── api/             # axum 路由：config/board/display/messages/sim/members/gateway + 静态页
-├── config.rs        # 旧栈配置（仅 legacy 回退使用，已弃用）
-├── engine/ replay/ parser/ simulation/ domain/ services/ repo/ publisher/ audit/ storage/ ...
-│                    # 既有确定性引擎与重放/仿真/审计（改动需 A0 同意）
-web/                 # 静态前端：display / admin / sim / replay + common.js
-docs/                # POLICY / DESIGN / TASKS / AGENT-RULES / FUNCTIONAL / MODULES + archive/
+├── api/             # axum 路由：config/board/display/messages/replay/settlement/sim/members + 静态页
+├── domain/          # 领域模型：事件/快照/分配/结算/商品/用户
+├── engine/          # 确定性分配引擎 + 事件存储 + 重放
+├── parser/          # 规则解析 + 校验 + 归一化 + 别名匹配
+├── planner/         # 下单表 planner（GiftMax / DiscountMax）
+├── replay/          # 逐步重放引擎 + 会话 + state diff
+├── round/           # 拼团阶段模型（时间窗 + 权限矩阵）
+├── settlement/      # 结算引擎 v2（减均 / 成团 / 特典）
+├── simulation/      # 离线 simulate verifier + 队列
+├── snapshot_bundle/ # 单一 JSON 快照导出/导入
+├── messages/        # 消息日志 MessageLog（JSONL + 原始事件）
+└── tests/           # Rust 重放辅助测试
+web/                 # 静态前端：display / admin / sim / replay / settlement + common.js
+docs/                # 现行文档（入口 docs/README.md）+ archive/
 tests/e2e/           # Node .mjs Playwright 端到端测试
+scripts/             # 模拟/录制脚本 + 隐私扫描 privacy-scan.mjs
 config.example.json  # 配置模板（首次运行据此生成 config/app.json）
 data/members.example.json  # 占位成员（真实名单不入库）
 simulation-corpus/   # 回归语料（只读资产，不得修改）
@@ -98,7 +109,7 @@ simulation-corpus/   # 回归语料（只读资产，不得修改）
 - `config/app.json`、`data/**`、`*.xlsx`、`sample*.json`、`simulation-corpus/real-*/` 均被 `.gitignore` 忽略，保持忽略状态。
 - 文档与语料使用占位名（`用户A` / `成员01` 等）；语料内部原版 `*.md` 被忽略，入库为 `*.public.md` 脱敏版。
 - 密钥不入代码：LLM key 仅经 `api_key_env`（`DEEPSEEK_API_KEY`）读取。
-- 校验：`git grep` 真实昵称在跟踪文件（含 `README.md`、`docs/**`）中应为 **0 命中**。
+- 校验：`npm run privacy`（`scripts/privacy-scan.mjs`）扫描全部 `git ls-files` 跟踪文件，命中真实昵称/密钥/内网 IP，或 `data/**`、`config/**`、`*.xlsx` 被跟踪即失败；另可用 `git grep` 复核真实昵称应为 **0 命中**。
 
 ## 文档索引
 

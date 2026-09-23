@@ -31,8 +31,7 @@ pub struct UserBill {
     pub payment_status: PaymentStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum PaymentStatus {
     #[default]
     Unpaid,
@@ -40,7 +39,6 @@ pub enum PaymentStatus {
     Partial,
     Refunded,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserBillLine {

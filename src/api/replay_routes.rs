@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -6,6 +7,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tracing::warn;
 
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::messages::{MessageRecord, MessageStore};
@@ -15,9 +17,10 @@ use crate::snapshot_bundle::SnapshotBundle;
 
 use super::{api_bad_request, api_internal, api_stale_revision, ApiError, ApiState};
 
-fn last_replay() -> &'static Mutex<Option<ReplayResult>> {
-    static LAST: OnceLock<Mutex<Option<ReplayResult>>> = OnceLock::new();
-    LAST.get_or_init(|| Mutex::new(None))
+/// 最近一次重放结果，按 `round_id` 分键存储，避免跨轮次互相污染。
+fn last_replays() -> &'static Mutex<HashMap<String, ReplayResult>> {
+    static LAST: OnceLock<Mutex<HashMap<String, ReplayResult>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub fn routes() -> Router<Arc<ApiState>> {
@@ -47,8 +50,8 @@ async fn do_replay(state: &ApiState, overrides: ReplayOverrides) -> anyhow::Resu
     let cfg = state.cfg.get().await;
     let store = state.messages.store_for(&cfg.round.round_id);
     let result = session::replay(&store, &cfg, overrides).await?;
-    if let Ok(mut slot) = last_replay().lock() {
-        *slot = Some(result.clone());
+    if let Ok(mut map) = last_replays().lock() {
+        map.insert(result.round_id.clone(), result.clone());
     }
     Ok(result)
 }
@@ -70,7 +73,12 @@ async fn run_replay(
 }
 
 async fn replay_diff(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
-    let stored = last_replay().lock().ok().and_then(|guard| guard.clone());
+    let cfg = state.cfg.get().await;
+    let round_id = cfg.round.round_id.clone();
+    let stored = last_replays()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&round_id).cloned());
     let result = match stored {
         Some(result) => result,
         None => do_replay(&state, ReplayOverrides::default())
@@ -79,7 +87,13 @@ async fn replay_diff(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, 
     };
 
     let (live_version, live_board) = state.pipeline.board().await;
-    let live_snapshot: Option<AllocationSnapshot> = serde_json::from_value(live_board).ok();
+    let live_snapshot: Option<AllocationSnapshot> = match serde_json::from_value(live_board) {
+        Ok(board) => Some(board),
+        Err(e) => {
+            warn!("实时 board 反序列化失败: {e}");
+            None
+        }
+    };
     let live_diff: Option<ReplayDiff> =
         live_snapshot.map(|board| ReplayDiff::from_boards(&board, &result.board));
 

@@ -14,9 +14,10 @@
 | 5 | [FUNCTIONAL.md](./FUNCTIONAL.md) | **功能描述**（用户评审主文档）：当前实现的功能（触发→处理→结果 + JSON） | 评审/改功能时 |
 | 6 | [MODULES.md](./MODULES.md) | 模块契约与文件所有权 | ✅ 全体 |
 | 7 | [TASKS.md](./TASKS.md) | 任务拆分（A0–A5、T1–T7）与完成状态 | 领任务时 |
-| 8 | [AGENT-RULES.md](./AGENT-RULES.md) | 协作规则（边界/红线/接口/DoD） | ✅ 全体 |
-| 9 | [DECISIONS.md](./DECISIONS.md) | **待决策 + 需补充信息**（含建议默认） | 领任务时 |
-| 10 | [TODOS.md](./TODOS.md) | **工程待办**（ID/优先级/依赖/验收） | 领任务时 |
+| 8 | [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) | **差距分析**：现状 vs 需求、任务拆分、Wave 完成状态 | ✅ 全体 |
+| 9 | [AGENT-RULES.md](./AGENT-RULES.md) | 协作规则（边界/红线/接口/DoD） | ✅ 全体 |
+| 10 | [DECISIONS.md](./DECISIONS.md) | **待决策 + 需补充信息**（含建议默认） | 领任务时 |
+| 11 | [TODOS.md](./TODOS.md) | **工程待办**（ID/优先级/依赖/验收） | 领任务时 |
 
 ## 二、LLM 接手工作协议
 
@@ -44,7 +45,7 @@
 ## 四、当前状态快照
 
 - 详见 [GAP-ANALYSIS.md](./GAP-ANALYSIS.md)（完成状态）与 [TODOS.md](./TODOS.md)（待办）。
-- 快速事实：`cargo test` 129 passed · `cargo build` 0 warning · e2e 11/11 · real-samples/real-xlsx 逐格 ALL PASS · 真实昵称跟踪文件 0 命中。
+- 快速事实：`cargo test` 139 passed · `cargo build` 0 warning · e2e 11/11 · real-samples/real-xlsx 逐格 ALL PASS · `npm run privacy` OK（真实昵称跟踪文件 0 命中）。
 
 ## 五、归档 / 历史
 
@@ -56,6 +57,7 @@
 
 ## 六、仓库内其它文档
 
+- [../AGENTS.md](../AGENTS.md) - 仓库级 agent 指南（模块地图 / 常用命令 / 约定 / 红线 / 隐私扫描）
 - [../README.md](../README.md) - 仓库总览与运行方式
 - [../web/README.md](../web/README.md) - 前端（display / admin / sim / replay / settlement）
 - [../tests/e2e/README.md](../tests/e2e/README.md) - 端到端测试说明

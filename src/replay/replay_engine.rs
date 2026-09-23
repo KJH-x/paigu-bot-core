@@ -8,7 +8,6 @@ use crate::domain::settlement::SettlementSnapshot;
 use crate::domain::snapshot::{AllocationSnapshot, DecisionTrace};
 use crate::engine::allocation_engine::AllocationEngine;
 use crate::engine::settlement_engine::SettlementEngine;
-use crate::error::ReplayError;
 use crate::replay::state_diff::StateDiff;
 
 pub struct ReplayEngine {
@@ -27,7 +26,7 @@ impl ReplayEngine {
         round_config: RoundConfig,
         events: Vec<EventEnvelope>,
         options: ReplayOptions,
-    ) -> Result<ReplayResult, ReplayError> {
+    ) -> anyhow::Result<ReplayResult> {
         let mut sorted_events = events;
         sorted_events.sort_by(crate::domain::event::compare_event_order);
 
@@ -45,15 +44,13 @@ impl ReplayEngine {
             let state_diff = StateDiff::from_snapshots(&before_snapshot, &after_snapshot);
 
             let settlement_snapshot = if options.include_settlement {
-                Some(
-                    self.settlement_engine
-                        .settle(&crate::engine::settlement_engine::SettlementInput {
-                            allocation: after_snapshot.clone(),
-                            items: state.items.clone(),
-                            discount_rules: state.discount_rules.clone(),
-                        })
-                        .map_err(|e| ReplayError::SnapshotRestoreFailed(0, e.to_string()))?,
-                )
+                Some(self.settlement_engine.settle(
+                    &crate::engine::settlement_engine::SettlementInput {
+                        allocation: after_snapshot.clone(),
+                        items: state.items.clone(),
+                        discount_rules: state.discount_rules.clone(),
+                    },
+                ))
             } else {
                 None
             };
@@ -93,7 +90,7 @@ impl ReplayEngine {
         &self,
         state: &mut ReplayRuntimeState,
         event: &EventEnvelope,
-    ) -> Result<DecisionTrace, ReplayError> {
+    ) -> anyhow::Result<DecisionTrace> {
         match &event.payload {
             DomainEvent::ClaimCreated(claim) => {
                 state.add_claim(claim, event);
