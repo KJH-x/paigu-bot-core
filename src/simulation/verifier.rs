@@ -15,7 +15,7 @@ use crate::domain::settlement::SettlementSnapshot;
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::parser::parsed_event::ParsedIntent;
 use crate::parser::rule_parser::RuleParser;
-use crate::parser::validation::{EventValidator, ValidationOutcome};
+use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
 use crate::replay::replay_engine::{ReplayEngine, ReplayOptions, ReplayResult};
 use crate::simulation::queue_file::{read_jsonl_queue_file, QueueMessageRecord};
 
@@ -428,19 +428,21 @@ pub async fn verify(queue_path: &Path, fixture: RoundFixture) -> anyhow::Result<
         let validation = validator
             .validate(
                 parsed,
-                &user_id,
-                &rec.group_id,
-                Some(rec.message_id.clone()),
-                &round_contexts,
-                now,
-                (idx + 1) as i64,
+                ValidateContext {
+                    user_id: &user_id,
+                    group_id: &rec.group_id,
+                    raw_message_id: Some(rec.message_id.clone()),
+                    active_rounds: &round_contexts,
+                    now,
+                    sequence: (idx + 1) as i64,
+                },
             )
             .await?;
 
         match validation {
             ValidationOutcome::Ok(event) => {
                 outcomes.push(outcome_from_event(rec, &event));
-                events.push(event);
+                events.push(*event);
             }
             ValidationOutcome::NeedConfirm(reply) => {
                 outcomes.push(outcome(
@@ -889,8 +891,10 @@ mod tests {
     async fn end_to_end_parse_validate_replay_compares_slots() {
         let path =
             std::env::temp_dir().join(format!("paigu-verifier-{}.jsonl", uuid::Uuid::new_v4()));
-        let records = [record(1, "u1", "排 通行证 1"),
-            record(2, "u2", "排 通行证 1")];
+        let records = [
+            record(1, "u1", "排 通行证 1"),
+            record(2, "u2", "排 通行证 1"),
+        ];
         let body = records
             .iter()
             .map(|r| serde_json::to_string(r).unwrap())

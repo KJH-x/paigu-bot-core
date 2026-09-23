@@ -25,24 +25,13 @@ impl ItemKind {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "split" => Some(ItemKind::Split),
-            "single" => Some(ItemKind::Single),
-            "gift" => Some(ItemKind::Gift),
-            "shipping" => Some(ItemKind::Shipping),
-            "adjustment" => Some(ItemKind::Adjustment),
-            _ => None,
-        }
-    }
-
     pub fn compatible_with(&self, claim_type: &ClaimType) -> bool {
-        match (self, claim_type) {
-            (ItemKind::Split, ClaimType::Split) => true,
-            (ItemKind::Single, ClaimType::Single) => true,
-            (ItemKind::Gift, ClaimType::GiftClaim) => true,
-            _ => false,
-        }
+        matches!(
+            (self, claim_type),
+            (ItemKind::Split, ClaimType::Split)
+                | (ItemKind::Single, ClaimType::Single)
+                | (ItemKind::Gift, ClaimType::GiftClaim)
+        )
     }
 }
 

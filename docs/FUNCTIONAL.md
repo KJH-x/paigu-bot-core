@@ -5,6 +5,9 @@
 >
 > **事实来源**：本文所有描述均来自源码阅读（引用 `文件:行号`）与本机运行 `target/debug/paigu-bot-core.exe run`（端口 32181，`llm.enabled=false`）的实测响应（2026-09-14）。JSON 示例为实测输出或按序列化契约裁剪；不确定处标注「待确认」。**本文不修改任何代码或其它文件。**
 
+> ⚠️ **快照说明（2026-09-14）**：本文多数细节对应 **Wave 1–4 之前**的栈（旧栈 `repo/services/ws/publisher/config/app_state/inbound` 与旧 `api` 路由当时仍存在，已在 **C-4** 删除）。
+> 现役实现以 [INTERFACES.md](./INTERFACES.md) §8 与源码为准；本文中「旧栈 / `legacy` / publisher」相关段落仅作历史记录，**不再是现行行为**。
+
 ---
 
 ## 1. 概述与定位
@@ -78,10 +81,10 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 |---|---|---|
 | `run`（默认，新栈） | `cargo run` 或 `cargo run -- run` | Gateway(`gateway.bind`, 默认 `0.0.0.0:9801`) + Pipeline + API(`127.0.0.1:21081`) + 每日 19:00 成员调度（`src/main.rs:46-48,82-117`） |
 | `simulate`（离线重放验证，旧引擎） | `cargo run -- simulate --round-config <json> --queue <jsonl> [--out <dir>]` | 逐条解析/校验/重放语料，输出 `out/report.md`、`out/result.json`、`out/outcomes.jsonl`（`src/main.rs:38-41`；`src/simulation/verifier.rs:62-93`） |
-| `serve`（本地聊天服务器，旧引擎） | `cargo run -- serve --round-config <json> [--port 8090]` | 内存会话聊天页 + 实时排结果，无 PostgreSQL（`src/main.rs:42-45`；`src/simulation/chat_server.rs:302-323`） |
-| `legacy`（旧栈，弃用） | `cargo run -- <任意未识别子命令>` | **无 `legacy` 字面分支**；任何非 `simulate/serve/run` 的子命令落入旧栈：读取 `DATABASE_URL` 等环境变量、连接 PostgreSQL、WS 服务 `3001`、HTTP API `8080`（`src/main.rs:50-79`；`src/config.rs:52-108`）。需数据库，已弃用 |
+| `serve`（已并入新栈） | `cargo run -- serve`（等价 `run`） | 按 `run` 启动 Gateway + Pipeline + API；旧 `src/simulation/chat_server.rs` 与旧聊天服务器**已在 C-4 删除** |
+| `legacy`（旧栈，已删除） | `cargo run -- <任意未识别子命令>` | 未识别子命令现按 `run` 启动；旧栈（`DATABASE_URL`/PostgreSQL/`src/config.rs`）**已在 C-4 删除**，无回退路径 |
 
-> 说明：`cargo run -- legacy` 并不被专门识别，而是走「未识别子命令 → 旧栈」路径（`src/main.rs:50` 起）。旧栈使用 `src/api/routes.rs` 的路由（`/webhook`、`/admin`、`/public`、`/api/replays`、`/api/simulations`），与新栈 `src/api/mod.rs` 不同。
+> 说明：`cargo run -- legacy` 不再被专门识别，而是按 `run` 启动。旧栈路由（`src/api/routes.rs` 的 `/webhook`、`/admin`、`/public`、`/api/replays`、`/api/simulations`）**已在 C-4 删除**；现役路由为 `src/api/*_routes.rs`。（历史记录，见上方快照说明）
 
 ---
 
@@ -141,7 +144,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 | `PAIGU_WEB_DIR` | 静态页目录，默认 `web` | `src/api/mod.rs:32-36` |
 | `DEEPSEEK_API_KEY` | LLM key（由 `llm.api_key_env` 指定名） | `src/llm/client.rs:84-85`；`config.example.json:20` |
 | `RUST_LOG` | tracing 过滤 | `src/main.rs:33-35` |
-| 旧栈专用 | `DATABASE_URL`、`DATABASE_MAX_CONNECTIONS`、`R2_*`、`LLM_*`、`HOST/PORT/WS_*` | `src/config.rs:52-108` |
+| 旧栈专用（已删除） | `DATABASE_URL`、`DATABASE_MAX_CONNECTIONS`、`R2_*`、`LLM_*`、`HOST/PORT/WS_*` | 旧 `src/config.rs` 已在 **C-4 删除** |
 
 ### 4.3 `config/app.json` 生成与热载机制
 
@@ -597,21 +600,19 @@ node tests/e2e/sim.mjs
 
 ### 9.2 将来 Cloudflare（R2 快照 + Pages 静态展示）——**未接线**
 
-- **接口已定义**：`SnapshotPublisher` trait，`publish_current(round_id, snapshot)` / `publish_versioned(round_id, version, snapshot)`（`src/publisher/r2_publisher.rs:7-11`）。
-  - `R2Publisher`：对象键 `rounds/{round_id}/current.json`、`rounds/{round_id}/snapshots/{version}.json`；但 `client: None`（`src/publisher/r2_publisher.rs:13-25,29-63`）→ 无 S3 客户端时直接返回 `Ok(())` 不写入。
-  - `LocalPublisher`：写本地 `rounds/{round_id}/current.json` 与 `rounds/{round_id}/snapshots/{version}.json`（`src/publisher/local_publisher.rs:20-42`）。
+- **发布器代码**：旧栈的 `SnapshotPublisher` trait、`R2Publisher`、`LocalPublisher`（`src/publisher/**`）**已在 C-4 删除**，当前无发布实现；远程展示接线时需重新实现。
 - **前端远程适配器**：`web/common.js:841-847` 依次尝试 `<remote_base>/rounds/<round_id>/current`、`<remote_base>/current`（**无 `.json` 后缀**）；`display.data_source=remote` 时启用（`web/display.js:265-287`）。
-- **未接线点**：`run_gateway_stack` 不构造任何 publisher，也不在快照变更后调用发布（`src/main.rs:82-117`）；`R2Publisher` 无凭据注入；`PublicSnapshot.to_public` 未被调用。远程数据契约与本地 `/api/display` 的 `AllocationSnapshot` **未统一**（remote 预期 `PublicSnapshot`/`items`，local 为 `item_allocations`，前端 `normalizeBoard` 两者兼容，但 `messages`/`who_whats`/`changed` 远程缺失，`web/display.js:226-254`）。
+- **未接线点**：`run_gateway_stack` 不做任何远程发布（发布器已删除）；`PublicSnapshot.to_public` 未被调用。远程数据契约与本地 `/api/display` 的 `AllocationSnapshot` **未统一**（remote 预期 `PublicSnapshot`/`items`，local 为 `item_allocations`，前端 `normalizeBoard` 两者兼容，但 `messages`/`who_whats`/`changed` 远程缺失，`web/display.js:226-254`）。
 
 ---
 
 ## 10. 已知限制与未实现
 
 1. **`reply_enabled` 已强制，但新栈未接发送路径**：`Gateway::send_action` 对 `send_*` 仅当 `reply_enabled=true` **且** `action ∈ allowed_actions` 时放行，否则 `Err` + `warn!`（默认 `false` → 拒绝，`src/gateway/ws_server.rs:75-88`）。但 `Pipeline` 产出的 `reply` 只回给 HTTP 调用方，新栈**没有调用 `send_*` 的代码路径**；即使置 `true` 也不会自动发消息。
-2. **R2 发布未接线**：`R2Publisher.client=None` 且无调用；`LocalPublisher` 亦未在 `run` 中构造（见 §9.2）。
-3. **管理员命令仅记录不执行**：斜杠命令（管理员）返回 `Applied`「管理员命令已记录」，无实际动作（`src/llm/pipeline.rs:135-144`）；LLM 解析出的 `AdminCommand` 被校验层拒绝并提示用斜杠格式（`src/parser/validation.rs:207-209`）。
-4. **`Modify`（改单）未实现**：`ParsedIntent::Modify` 被置为 `Ignored`「改单功能暂未实现」（`src/llm/pipeline.rs:188-192`）。
-5. **`/api/replay` 501**：`GET /api/replay` 与 `/api/replay/*` 恒 `501 not_implemented`（`src/api/mod.rs:50-55,70-71`）。
+2. **远程发布未接线**：旧 `src/publisher/**` 已在 **C-4 删除**，当前无发布实现（见 §9.2）；远程展示待后续接线。
+3. ~~管理员命令仅记录不执行~~（**Wave 3 已实现**）：`Pipeline::run_admin_command` 执行 `/开团 /锁位 /结团 /状态 /导出`，由 `gateway.admin_commands_enabled` 热开关控制；锁定后拒绝排/撤/改。
+4. ~~`Modify`（改单）未实现~~（**Wave 3 已实现**）：`ParsedIntent::Modify` 支持自助改单（撤销本人该商品既有认购 + 重新认购）；管理员改任意指定人待 T-14。
+5. ~~`/api/replay` 501~~（**Wave 1–4 已实现**）：`/api/replay`、`/api/replay/*` 已接线逐步重放，契约见 [INTERFACES.md](./INTERFACES.md) §8。
 6. **远程数据源契约待统一**：local 返回 `AllocationSnapshot`（`item_allocations`），remote 预期 `PublicSnapshot`（`items`）；`messages`/`who_whats`/`changed` 远程无对应（`src/domain/snapshot.rs:24-95`；`web/common.js:537-661`）。
 7. **枚举序列化大小写不一致**：`status`/`slot_policy`/`claim_type` 输出 PascalCase（实测 `"Filled"`/`"Normal"`/`"Split"`），前端部分样式判定用小写（`web/common.js:228-235`），导致锁定/预留样式不生效。
 8. **重复消息 `seq` 复用**：`Duplicate` 记录使用当前 `state.seq`（不自增，`src/llm/pipeline.rs:87-96`），与上一条消息同 `seq`；前端消息 key 为 `s<seq>`，可能复用/覆盖节点（`web/common.js:669-670`）。

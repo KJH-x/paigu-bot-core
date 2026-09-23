@@ -23,6 +23,8 @@ impl AllocationSnapshot {
     }
 }
 
+// C-1 保留：对外展示用的 Public* 视图模型（含 `to_public`），待展示/导出接线，本轮不删除。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicSnapshot {
     pub round_id: String,
@@ -35,6 +37,7 @@ pub struct PublicSnapshot {
     pub warnings: Vec<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicItemView {
     pub item_id: String,
@@ -46,12 +49,14 @@ pub struct PublicItemView {
     pub waiting: Vec<PublicWaitingView>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicBoxView {
     pub box_index: u32,
     pub slots: Vec<PublicSlotView>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicSlotView {
     pub slot_index: u32,
@@ -61,12 +66,14 @@ pub struct PublicSlotView {
     pub segment_id: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicSingleView {
     pub display_name: String,
     pub quantity: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicWaitingView {
     pub display_name: String,
@@ -74,6 +81,7 @@ pub struct PublicWaitingView {
     pub priority_level: i32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicUserBill {
     pub user_id: String,
@@ -86,6 +94,7 @@ pub struct PublicUserBill {
 }
 
 impl AllocationSnapshot {
+    #[allow(dead_code)] // C-1 保留：Public* 视图构造入口，待展示/导出接线。
     pub fn to_public(&self, title: &str, status: &str) -> PublicSnapshot {
         PublicSnapshot {
             round_id: self.round_id.0.clone(),

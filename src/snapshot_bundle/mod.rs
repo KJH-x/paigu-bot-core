@@ -329,9 +329,13 @@ mod tests {
             detail: String::new(),
         };
 
-        let result = replay_messages(&cfg, &[record.clone()], ReplayOverrides::default())
-            .await
-            .unwrap();
+        let result = replay_messages(
+            &cfg,
+            std::slice::from_ref(&record),
+            ReplayOverrides::default(),
+        )
+        .await
+        .unwrap();
 
         let bundle = SnapshotBundle::seal(
             cfg.round.round_id.clone(),

@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
+use tracing::warn;
 
 use super::ApiState;
 
@@ -85,7 +86,9 @@ pub async fn refresh_members_from_gateway(state: &ApiState) -> anyhow::Result<Va
     let path = Path::new(&cfg.members.cache_path);
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            let _ = std::fs::create_dir_all(parent);
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                warn!("成员缓存目录创建失败 {}: {e}", parent.display());
+            }
         }
     }
     let serialized = serde_json::to_string_pretty(&data).unwrap_or_else(|_| "[]".to_string());

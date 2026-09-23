@@ -29,7 +29,7 @@
 
 | 路径 | 内容 | 归属 |
 |---|---|---|
-| `src/main.rs`、`src/app_state.rs`、各 `mod.rs`、`Cargo.toml` | 装配与接线 | **A0（主）** |
+| `src/main.rs`、各 `mod.rs`、`src/error.rs`、`Cargo.toml` | 装配与接线 | **A0（主）** |
 | `src/bus.rs`、`src/settings.rs` | 冻结接口与配置存储 | **A0** 冻结 / **A2** 维护 |
 | `src/gateway/**` | OneBot 协议、路由、反向 WS、动作回包 | **A1** |
 | `src/llm/**` | OpenAI 兼容客户端、排谷流水线 | **A2** |
@@ -62,9 +62,9 @@
 
 - `mod.rs`：`ApiState { cfg, pipeline, gateway }`、`web_dir()`（`PAIGU_WEB_DIR`，默认 `web`）、`cors_layer()`、`build_router(state)`、`serve(state, port)`（`127.0.0.1:port`）。
   - 路由：`/api/config`、`/api/board`、`/api/display`、`/api/messages`、`/api/sim/*`、`/api/members(/refresh)`、`/api/gateway/status`；静态页 `/`、`/admin`、`/sim`、`/replay`；`/web/*` 与 `fallback_service` 回退到 `web/`。
-  - `/api/replay`、`/api/replay/*`：**恒返回 `501 {"error":"not_implemented"}`**（桩，未接线）。
-- `config_routes.rs` / `board_routes.rs` / `display_routes.rs` / `sim_routes.rs` / `member_routes.rs`：见 DESIGN §5 契约。
-- 注意：`src/api/routes.rs`、`admin_routes.rs`、`public_routes.rs`、`webhook_routes.rs` 属**旧栈**路由，不在新栈装配内。
+  - `/api/replay`、`/api/replay/*`：逐步重放（Wave 1–4 已实现；契约见 [INTERFACES.md](./INTERFACES.md) §8）。
+- `config_routes.rs` / `board_routes.rs` / `display_routes.rs` / `message_routes.rs` / `replay_routes.rs` / `settlement_routes.rs` / `sim_routes.rs` / `member_routes.rs`：见 DESIGN §5 契约。
+- 注意：`src/api/routes.rs`、`admin_routes.rs`、`public_routes.rs`、`webhook_routes.rs` 属**旧栈路由，已在 C-4 删除**，不在新栈装配内。
 
 ## 5. 前端（`web/**`，A4）
 
@@ -78,16 +78,22 @@
 - `sim.mjs`：脚本自带 `cargo build` + 临时配置（`bind=127.0.0.1:0`、`reply_enabled=false`、`llm.enabled=false`、固定优先窗口）拉起 `run`，用 Chromium 驱动 `/sim` 并断言；全程只打本地 API/页面。
 - `run.ps1`：一键运行；`README.md`：运行方式与用例说明。
 
-## 7. 旧栈弃用清单（不属新栈，勿在其上新增功能）
+## 7. 旧栈弃用清单（已在 C-4 删除）
 
-| 路径 | 说明 |
+> 旧栈（PostgreSQL/sqlx + `repo`/`services`/`ws`/`publisher`/`inbound`/旧 `api` 路由/`config`/`app_state`）
+> 已在 Wave 4（C-4）从 `dev` 分支删除并合并 `master`；相关 `sqlx/csv/aws-*/figment/socket2` 依赖同步移除。
+> 新栈一律使用 `src/gateway/**`（接入）、`src/api/*_routes.rs`（路由）、`src/settings.rs`（配置）。
+
+| 路径（已删除） | 原用途 |
 |---|---|
-| `src/config.rs` | 旧栈 `Config::from_env()`（`DATABASE_URL` 等），仅 `main.rs` 的**未识别子命令回退**使用，已弃用 |
+| `src/config.rs`、`src/app_state.rs` | 旧栈配置（`DATABASE_URL` 等）与应用状态装配 |
 | `src/inbound/**`、`src/ws/**` | 旧栈入站/WS 服务器（新栈用 `src/gateway/**`） |
-| `src/services/**`、`src/repo/**` | 旧栈服务与 PostgreSQL 数据访问层 |
-| `src/api/routes.rs` + `admin/public/webhook_routes.rs` | 旧栈路由（新栈用 `src/api/mod.rs`） |
-| `src/publisher/**` | `R2Publisher` / `LocalPublisher` 已实现但 `run` 栈未构造、未调用 |
+| `src/services/**`、`src/repo/**` | 旧栈服务层与 PostgreSQL 数据访问层 |
+| `src/api/{routes,admin_routes,public_routes,webhook_routes}.rs` | 旧栈路由（新栈用 `src/api/mod.rs`） |
+| `src/publisher/**` | `R2Publisher` / `LocalPublisher`（远程发布待后续重新接线） |
 | `migrations/**` | 旧栈数据库迁移（新栈不需要 PostgreSQL） |
-| `viewer/`（空目录） | 旧重放步进查看器，已合并进 `web/replay`；`src/simulation/**` 保留（`simulate`/`serve` 使用） |
+| `src/simulation/chat_server.rs` | 旧 `serve` 聊天服务器（已并入新栈） |
+
+> `viewer/` 为旧重放步进查看器目录（已合并进 `web/replay`）；`src/simulation/**` 保留（`simulate` 使用）。
 
 > 新增依赖须在 [TASKS.md](./TASKS.md) 说明并由 A0 加入 `Cargo.toml`。

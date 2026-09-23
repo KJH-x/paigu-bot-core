@@ -1,12 +1,10 @@
-// 旧栈删除后，仍有少量「保留但未接线」的公共 API（如 domain 的 Public* 视图模型、
-// parser 的部分条目、engine::event_store），待后续 Wave 接线；统一在此静音 dead_code。
-#![allow(dead_code)]
+// 新栈（gateway + llm pipeline + api + planner/settlement）已完整接线；
+// 为后续 Wave 保留的少量公共 API 在各自条目上按需加**精确** `#[allow(dead_code)]`。
 
 mod api;
 mod bus;
 mod domain;
 mod engine;
-mod error;
 mod gateway;
 mod llm;
 mod messages;

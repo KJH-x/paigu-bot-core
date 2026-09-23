@@ -7,7 +7,7 @@
 
 - 仓库根：`C:\_CustomPrograms\Pages\paigu-bot-core`。所有改动只在此目录内。
 - **只改自己名下的文件**（DESIGN §2）。不得改 `src/engine/**`、`src/replay/**`、`src/parser/**`、`src/simulation/**` 的既有逻辑（需要时在 `docs/TASKS.md` 追加“待 A0 处理”）。
-- 不得改 `main.rs`、`app_state.rs`、`Cargo.toml`、各 `mod.rs`（A0 专属）。
+- 不得改 `main.rs`、`Cargo.toml`、各 `mod.rs`（A0 专属）。
 - 不得删除既有文件；不得动 `simulation-corpus/**`（既有回归资产）。
 
 ## 2. 安全红线（最高优先）
@@ -16,6 +16,7 @@
 - NapCat 已接入真实群 `123456789`：只接收、只读拉取成员；测试一律走**本地模拟器/离线夹具**，不触发真实动作。
 - 不得把密钥写入代码或提交：LLM key 只经 `api_key_env`（`DEEPSEEK_API_KEY`）读取。
 - 隐私数据不入库：`config/app.json`、`data/**`、`*.xlsx`、`sample*.json`、`simulation-corpus/real-*/` 已被 `.gitignore` 忽略，保持忽略状态。
+- 提交前运行 `npm run privacy`（`scripts/privacy-scan.mjs`）：命中真实昵称/密钥/内网 IP 或 `data/**`·`config/**`·`*.xlsx` 被跟踪即失败。
 
 ## 3. 编码约束
 

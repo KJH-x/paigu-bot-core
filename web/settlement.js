@@ -121,15 +121,24 @@
       }) : [],
       scope_mode: c.scope_mode === 'IncludeGift' ? 'IncludeGift' : 'ExcludeGift',
       gift_tiers: Array.isArray(c.gift_tiers) ? c.gift_tiers.map(function (t) {
-        return {
+        var entry = {
           tier_id: t.tier_id || '',
           threshold: intOf(t.threshold, 0),
           gift_name: t.gift_name || '',
-          unit_price: intOf(t.unit_price, 0)
+          unit_price: intOf(t.unit_price, 0),
+          claimed: intOf(t.claimed, 0)
         };
+        if (t.claimed == null) entry.__claimedMissing = true;
+        return entry;
       }) : [],
       reduce_average: { include_gift_price: !!(c.reduce_average && c.reduce_average.include_gift_price) }
     };
+  }
+
+  function requestConfig() {
+    var c = P.deepClone(state.config);
+    (c.gift_tiers || []).forEach(function (t) { delete t.__claimedMissing; });
+    return c;
   }
 
   function renderConfig() {
@@ -198,6 +207,30 @@
     });
   }
 
+  function missingClaimedTiers() {
+    return (state.config.gift_tiers || []).filter(function (t) { return t.__claimedMissing; });
+  }
+
+  function refreshClaimedWarn() {
+    var host = $('tier-list');
+    var warn = host.querySelector('.tier-claimed-warn');
+    var missing = missingClaimedTiers();
+    if (!warn && missing.length) {
+      warn = el('div', 'banner tier-claimed-warn');
+      host.insertBefore(warn, host.firstChild);
+    }
+    if (!warn) return;
+    if (missing.length) {
+      warn.className = 'banner show tier-claimed-warn';
+      warn.textContent = '注意：以下特典档位缺少 claimed（认购数），已按 0 处理，将不授予特典：'
+        + missing.map(function (t) { return t.tier_id || '(未命名)'; }).join('、')
+        + '。请补填认购数后保存或试算。';
+    } else {
+      warn.className = 'banner tier-claimed-warn';
+      warn.textContent = '';
+    }
+  }
+
   function renderTiers() {
     var host = $('tier-list');
     host.innerHTML = '';
@@ -217,11 +250,21 @@
       row.appendChild(inputEl('number', entry.unit_price ? entry.unit_price / 100 : '', '特典价(元)', function (v) {
         entry.unit_price = toCents(v); scheduleEval();
       }));
+      var claimedInput = inputEl('number', entry.claimed, '认购数 claimed', function (v) {
+        entry.claimed = Math.max(0, intOf(v, 0));
+        delete entry.__claimedMissing;
+        refreshClaimedWarn();
+        scheduleEval();
+      });
+      claimedInput.min = '0';
+      claimedInput.step = '1';
+      row.appendChild(claimedInput);
       row.appendChild(buttonEl('删除', 'small danger', function () {
         state.config.gift_tiers.splice(i, 1); renderConfig(); scheduleEval();
       }));
       host.appendChild(row);
     });
+    refreshClaimedWarn();
   }
 
   function totalText(line) {
@@ -365,7 +408,7 @@
         state.result = null; renderResult(); return;
       }
       setConn('busy', '试算中…');
-      P.post('/api/settlement/evaluate', { order_table: state.table, config: state.config })
+      P.post('/api/settlement/evaluate', { order_table: state.table, config: requestConfig() })
         .then(function (res) {
           state.result = res;
           setConn('ok', '已试算');
@@ -394,8 +437,10 @@
     totals.innerHTML = '';
     totals.appendChild(stat('折前总额', money(sum(r.packages, 'gross_cents'))));
     totals.appendChild(stat('折扣合计', money(r.discount_total)));
-    totals.appendChild(stat('特典折价', money(r.gift_valuation_total)));
-    totals.appendChild(stat('减均合计', money(r.reduce_average_total)));
+    totals.appendChild(stat('C 无折扣商品总价', money(r.list_total_cents)));
+    totals.appendChild(stat('B 实付价合计', money(r.paid_total_cents)));
+    totals.appendChild(stat('G 已授予特典价', money(r.gift_valuation_total)));
+    totals.appendChild(stat('D 总优惠额', money(r.reduce_average_total)));
     var grand = stat('应付总额', money(r.grand_total));
     grand.classList.add('ok');
     totals.appendChild(grand);
@@ -442,14 +487,67 @@
       gifts.appendChild(tbl);
     }
 
+    renderLineSettlement(r.lines);
+
+    var checks = validateResult(r);
+    var messages = (r.warnings || []).slice().concat(checks);
     var warn = $('warnings');
-    if (r.warnings && r.warnings.length) {
+    if (checks.length) {
+      warn.className = 'banner show bad';
+      warn.textContent = '校验未通过：' + messages.join('；');
+    } else if (messages.length) {
       warn.className = 'banner show';
-      warn.textContent = '提示：' + r.warnings.join('；');
+      warn.textContent = '提示：' + messages.join('；');
     } else {
-      warn.className = 'banner';
-      warn.textContent = '';
+      warn.className = 'banner show';
+      warn.textContent = '校验通过：Σ 减均后商品总价 + G = B，且 D = C − B + G。';
     }
+  }
+
+  function validateResult(r) {
+    var checks = [];
+    if (r.list_total_cents != null && r.paid_total_cents != null) {
+      var dExpected = r.list_total_cents - r.paid_total_cents + (r.gift_valuation_total || 0);
+      if (dExpected !== (r.reduce_average_total || 0)) {
+        checks.push('D 校验失败：C−B+G=' + money(dExpected) + ' ≠ 减均合计 ' + money(r.reduce_average_total || 0));
+      }
+    }
+    var lines = r.lines || [];
+    if (lines.length) {
+      var lineSum = lines.reduce(function (acc, l) { return acc + (l.final_total_cents || 0); }, 0);
+      if (lineSum + (r.gift_valuation_total || 0) !== (r.paid_total_cents || 0)) {
+        checks.push('减均校验失败：Σ减均后商品总价(' + money(lineSum) + ')+G(' + money(r.gift_valuation_total || 0) + ') ≠ B(' + money(r.paid_total_cents || 0) + ')');
+      }
+    }
+    return checks;
+  }
+
+  function renderLineSettlement(lines) {
+    var host = $('line-list');
+    if (!host) return;
+    host.innerHTML = '';
+    lines = lines || [];
+    if (!lines.length) { host.appendChild(el('div', 'empty', '无逐行明细')); return; }
+    var tbl = document.createElement('table');
+    tbl.className = 'gift-list-table';
+    tbl.innerHTML = '<thead><tr><th>下单包</th><th>item_id</th><th>variant</th><th>数量</th><th>标价(元)</th><th>标价合计(元)</th><th>减均(元)</th><th>减均后合计(元)</th><th>减均后单价(元)</th></tr></thead>';
+    var tbody = document.createElement('tbody');
+    lines.forEach(function (l) {
+      var tr = document.createElement('tr');
+      [
+        l.package_id, l.item_id, l.variant_id || '—', String(l.qty),
+        money(l.unit_price_cents), money(l.total_cents), money(l.reduce_cents),
+        money(l.final_total_cents), money(l.final_unit_cents)
+      ].forEach(function (v, idx) {
+        var td = document.createElement('td');
+        td.textContent = v;
+        if (idx >= 3) td.className = 'mono';
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    host.appendChild(tbl);
   }
 
   function stat(k, v) {
@@ -476,7 +574,7 @@
     ['gift_max', 'discount_max'].forEach(function (s) {
       state.plans[s] = { loading: true };
       renderPlan(s);
-      P.post('/api/settlement/plan', { strategy: s, order_table: state.table, config: state.config })
+      P.post('/api/settlement/plan', { strategy: s, order_table: state.table, config: requestConfig() })
         .then(function (res) {
           state.plans[s] = { data: res };
           renderPlan(s);
@@ -533,9 +631,9 @@
       discounts: [{ rule_id: 'd_whole', kind: 'WholeOrder', amount: 0, threshold: null, ratio_ppm: 100000, shares: -1 }],
       scope_mode: 'ExcludeGift',
       gift_tiers: [
-        { tier_id: 't0', threshold: 0, gift_name: '特典-基础', unit_price: 1000 },
-        { tier_id: 't300', threshold: 30000, gift_name: '特典-满300', unit_price: 3000 },
-        { tier_id: 't500', threshold: 50000, gift_name: '特典-满500', unit_price: 5000 }
+        { tier_id: 't0', threshold: 0, gift_name: '特典-基础', unit_price: 1000, claimed: 3 },
+        { tier_id: 't300', threshold: 30000, gift_name: '特典-满300', unit_price: 3000, claimed: 2 },
+        { tier_id: 't500', threshold: 50000, gift_name: '特典-满500', unit_price: 5000, claimed: 1 }
       ],
       reduce_average: { include_gift_price: false }
     });
@@ -610,7 +708,7 @@
       showBanner('尚未载入配置，无法保存。', true);
       return;
     }
-    P.put('/api/settlement/config', { config: state.config, revision: state.revision }).then(function (res) {
+    P.put('/api/settlement/config', { config: requestConfig(), revision: state.revision }).then(function (res) {
       state.revision = res.revision;
       state.config = normalizeConfig(res.config);
       renderConfig();
@@ -659,7 +757,7 @@
     $('tier-add').addEventListener('click', function () {
       state.config.gift_tiers.push({
         tier_id: 'tier_' + (state.config.gift_tiers.length + 1),
-        threshold: 0, gift_name: '', unit_price: 0
+        threshold: 0, gift_name: '', unit_price: 0, claimed: 0
       });
       renderConfig();
     });

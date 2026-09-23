@@ -18,7 +18,7 @@ use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
 use crate::messages::{MessageLog, MessageRecord as LogMessageRecord};
 use crate::parser::parsed_event::{ParsedClaimItem, ParsedIntent, ParsedMessage};
 use crate::parser::rule_parser::RuleParser;
-use crate::parser::validation::{EventValidator, ValidationOutcome};
+use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
 use crate::round::{can_cancel, can_claim, phase_at, RoundPhase};
 use crate::settings::{AppConfig, ConfigStore};
 
@@ -266,16 +266,18 @@ impl Pipeline {
         let event = match validator
             .validate(
                 parsed,
-                &user_id,
-                &ev.group_id,
-                Some(ev.message_id.clone()),
-                &round_contexts,
-                now,
-                seq,
+                ValidateContext {
+                    user_id: &user_id,
+                    group_id: &ev.group_id,
+                    raw_message_id: Some(ev.message_id.clone()),
+                    active_rounds: &round_contexts,
+                    now,
+                    sequence: seq,
+                },
             )
             .await
         {
-            Ok(ValidationOutcome::Ok(event)) => event,
+            Ok(ValidationOutcome::Ok(event)) => *event,
             Ok(ValidationOutcome::NeedConfirm(reply)) => {
                 let reply = reply.text_content().map(str::to_string);
                 return self
@@ -544,6 +546,7 @@ impl Pipeline {
     }
 
     pub async fn reset(&self) {
+        crate::messages::reset_seq();
         let mut state = self.state.lock().await;
         *state = State::default();
     }

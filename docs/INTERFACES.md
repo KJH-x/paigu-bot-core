@@ -6,6 +6,14 @@
 
 ---
 
+> # ⚠️ 快照告示（务必先读）
+>
+> **以下 §1–§6 为 Wave 1–4 之前的快照**（T7 产物，2026-09-14），其中大量「尚未实现 / 待 Tn / 不存在 / 501」结论**已过时**。
+> 旧栈（`repo/services/ws/publisher/config/app_state/inbound`、旧 `api` 路由、`migrations/**`）**已在 C-4 删除**。
+> **现以实现与 [§8 Wave 1-4 新增/变更接口](#8-wave-1-4-新增变更接口2026-09-17) 为准**；阅读 §1–§6 时请以本节告示为准、勿据其旧结论判断现状。
+
+---
+
 ## 1. 模块清单
 
 | 模块 | 一句话职责 | 文件路径 |
@@ -16,13 +24,13 @@
 | `engine::replay` | 内存事件重放服务：排序事件 → 收集生效 claim → 分配；同步重放唯一入口。 | `src/engine/replay.rs` |
 | `replay::replay_engine` | 逐步重放引擎：对每条事件产出 `ReplayStep`（含 diff、决策轨迹）。 | `src/replay/replay_engine.rs` |
 | `replay::state_diff` | 前后 `AllocationSnapshot` 的结构化差异（槽/认领/用户/商品/结算）。 | `src/replay/state_diff.rs` |
-| `settlement` | 结算配置契约占位（调价/折扣/范围/特典档位/减均），待 T4 实现引擎。 | `src/settlement/mod.rs` |
-| `messages` | 消息记录契约与持久化 store trait（JSONL 追加/读取/替换），待 T1 实现。 | `src/messages/mod.rs` |
+| `settlement` | 结算引擎 v2（调价/折扣/范围/特典档位/减均），**已实现**（Wave 1–4）。 | `src/settlement/{mod,engine,model}.rs` |
+| `messages` | 消息日志 `MessageLog`（JSONL 追加/读取/替换 + 细粒度 query/update/delete + 原始事件），**已实现**。 | `src/messages/mod.rs` |
 | `round` | 拼团阶段模型：时间窗判定 + 阶段权限矩阵（可排/可撤）。 | `src/round/mod.rs` |
-| `snapshot_bundle` | 结构化快照包（manifest+config+messages+events+snapshot+settlement），待 T2 导出/导入。 | `src/snapshot_bundle/mod.rs` |
-| `api` | axum HTTP 路由 + 静态页服务（config/board/display/sim/members/gateway）。 | `src/api/{mod.rs,config_routes.rs,board_routes.rs,display_routes.rs,sim_routes.rs,member_routes.rs}` |
+| `snapshot_bundle` | 单一 JSON 快照 `SnapshotFile` + 导出/导入，**已实现**（Wave 2/C-2）。 | `src/snapshot_bundle/mod.rs` |
+| `api` | axum HTTP 路由 + 静态页服务（config/board/display/messages/replay/settlement/sim/members）。 | `src/api/{mod.rs,*_routes.rs}` |
 | `web` | vanilla JS 静态前端（display/admin/sim/replay），只经 HTTP API 取数。 | `web/**` |
-| `scripts` | 脚本化模拟/录制重放（`--speed` 倍率、`record.jsonl`），**尚未创建**，待 T3。 | `scripts/**`（不存在） |
+| `scripts` | 脚本化模拟/录制重放（`--speed` 倍率、`record.jsonl`）。 | `scripts/{sim-lib,sim-run,sim-record}.mjs`（**已创建**，Wave 1–4；另含 `privacy-scan.mjs`） |
 | `tests` | Node Playwright e2e + Rust 重放辅助测试。 | `tests/e2e/sim.mjs`、`src/tests/replay_helpers.rs` |
 
 > 配套（非本表但被引用）：`src/bus.rs`（冻结 DTO/trait）、`src/settings.rs`（`AppConfig`+`ConfigStore`）、`src/parser/**`（规则/校验）、`src/domain/**`（事件/快照/结算类型）、`src/engine/settlement_engine.rs`（既有结算引擎）、`src/engine/event_store.rs`（`EventStore`）。
@@ -69,11 +77,11 @@
 | `engine::event_store` | `EventStore::{append,read_all}` / `InMemoryEventStore::new` | `async fn append(&self,&EventEnvelope)->AppResult<EventEnvelope>`；`async fn read_all(&self,&RoundId)->AppResult<Vec<EventEnvelope>>` | 事件/轮次 | 事件 | `AppResult` | `ReplayService` |
 | `engine::settlement_engine` | `SettlementEngine::settle` | `fn settle(&self, input:&SettlementInput) -> Result<SettlementSnapshot, SettlementError>` | `SettlementInput{allocation,items,discount_rules}` | `SettlementSnapshot` | `SettlementError`（空枚举） | `ReplayService`、`ReplayEngine` |
 | `engine::settlement_engine` | `allocate_discount_by_ratio` / `by_quantity` / `equal` | `pub fn ...`（`settlement_engine.rs:306-391`） | 折扣额/基准 | `Vec<DiscountShare>` | — | 结算引擎内部/测试 |
-| `replay::replay_engine` | `ReplayEngine::new` / `replay` | `fn new()->Self`；`async fn replay(&self, round_config:RoundConfig, events:Vec<EventEnvelope>, options:ReplayOptions) -> Result<ReplayResult, ReplayError>` | `RoundConfig`、事件、`ReplayOptions` | `ReplayResult` | `ReplayError::SnapshotRestoreFailed` | 重放步进（当前无生产调用方，`/api/replay` 仍 501） |
+| `replay::replay_engine` | `ReplayEngine::new` / `replay` | `fn new()->Self`；`async fn replay(&self, round_config:RoundConfig, events:Vec<EventEnvelope>, options:ReplayOptions) -> Result<ReplayResult, ReplayError>` | `RoundConfig`、事件、`ReplayOptions` | `ReplayResult` | `ReplayError::SnapshotRestoreFailed` | 重放步进（**已接线 `/api/replay`**，Wave 1–4；见 §8） |
 | `replay::state_diff` | `StateDiff::from_snapshots` | `fn from_snapshots(before:&AllocationSnapshot, after:&AllocationSnapshot) -> StateDiff` | 前后快照 | `StateDiff` | — | `ReplayEngine::replay` |
-| `round` | `phase_at` | `fn phase_at(windows:&[PhaseWindow], timestamp_ms:i64) -> Option<RoundPhase>` | 时间窗、时间戳 | 阶段 | — | **待 T1 接入 Pipeline**（当前无调用方） |
-| `round` | `can_claim` / `can_cancel` | `fn(phase:RoundPhase, class:ItemClass, is_priority:bool) -> bool` | 阶段/类别/优先 | bool | — | **待 T1 接入** |
-| `messages` | `MessageStore::{append,read_all,replace_all}` | `async fn append(&self,&MessageRecord)->anyhow::Result<()>` 等 | `MessageRecord` | `()`/`Vec<MessageRecord>` | `anyhow` | **无实现**，待 T1 |
+| `round` | `phase_at` | `fn phase_at(windows:&[PhaseWindow], timestamp_ms:i64) -> Option<RoundPhase>` | 时间窗、时间戳 | 阶段 | — | 已接入实时 Pipeline 与重放（T-13） |
+| `round` | `can_claim` / `can_cancel` | `fn(phase:RoundPhase, class:ItemClass, is_priority:bool) -> bool` | 阶段/类别/优先 | bool | — | 已接入（T-13） |
+| `messages` | `MessageLog::{append,read_all,replace_all,query,update,delete}` | `MessageLog`（Arc，JSONL 持久化） | `MessageRecord` | `()`/`Vec<MessageRecord>` | `anyhow` | **已实现**（Wave 2/C-5，见 §8.3） |
 | `settings` | `ConfigStore::{load,get,put,reload,spawn_watch}` | `load(path)->Result<Self>`；`get()->AppConfig`；`put(cfg,expected)->Result<u64,ConfigError>`；`reload()->Result<u64>`；`spawn_watch()` | `AppConfig` | revision/配置 | `ConfigError::StaleRevision` | `main.rs`、api、pipeline、gateway |
 | `settings` | `default_config` / `in_priority_window` / `is_priority_user` | `fn()->AppConfig`；`fn(Option<(i64,i64)>,i64)->bool`；`fn(&[String],&[&str])->bool` | — | 配置/布尔 | — | pipeline、单测 |
 | `parser` | `RuleParser::parse` | `fn parse(raw:&str, items:&[Item], _is_admin:bool) -> ParsedMessage` | 文本/商品 | `ParsedMessage` | — | `Pipeline::process`（`pipeline.rs:142`） |
@@ -91,12 +99,12 @@
 | POST | `/api/config/reload` | `{}` | `{config,revision}` | `500 {error}` | admin | `config_routes.rs:17,45` |
 | GET | `/api/display?since=<version>` | query `since` | `{version,board,messages,who_whats,status,changed}` | — | display | `display_routes.rs:38,48` |
 | GET | `/api/messages?since=<seq>` | query `since` | `{messages,version}` | — | sim/display | `display_routes.rs:39,77` |
-| POST | `/api/sim/message` | `{user_id,nickname,text,offset_ms?,group_id?,is_admin?}` | `{outcome,board,version}` | —（业务态在 `outcome.status`） | `web/sim.js:239`（**当前旁路，待 T3 改 WS**） | `sim_routes.rs:29,47` |
+| POST | `/api/sim/message` | `{user_id,nickname,text,offset_ms?,group_id?,is_admin?}` | `{outcome,board,version}` | —（业务态在 `outcome.status`） | `web/sim.js`（sim 页已改 **WS 客户端**；此 HTTP 路由保留给脚本/测试） | `sim_routes.rs:29,47` |
 | POST | `/api/sim/identity` | `{user_id,nickname,is_admin?,priority?}` | `{ok,identity,identities}` | — | `web/sim.js:209` | `sim_routes.rs:30,84` |
 | POST | `/api/sim/reset` | `{}` | `{ok,version}` | — | `web/sim.js:257` | `sim_routes.rs:31,97` |
 | GET | `/api/members` | — | `{members,source:"seed"\|"example"\|"empty"}` | — | admin/sim | `member_routes.rs:51,55` |
 | POST | `/api/members/refresh` | `{}` | `{members,source:"gateway"}` | `502 {error}` | admin | `member_routes.rs:52,91` |
-| GET | `/api/replay`、`/api/replay/*` | — | — | `501 {error:"not_implemented"}`（桩） | replay（当前不依赖） | `api/mod.rs:70-71` |
+| GET | `/api/replay`、`/api/replay/*` | 见 §8 | `ReplayResult` / diff | — | replay 页 | `src/api/replay_routes.rs`（**已实现**，Wave 1–4） |
 | GET | `/` `/admin` `/sim` `/replay` | — | 静态 HTML | 404 | 浏览器 | `api/mod.rs:72-75` |
 | GET | `/web/*` + fallback | — | 静态文件 | 404 | 浏览器 | `api/mod.rs:76-77` |
 
@@ -109,7 +117,7 @@
 | `web/common.js` | `createBoardRenderer(host,{persistent})` | keyed diff 渲染器，复用 DOM、3s 高亮（replay 页 `persistent`） | `web/common.js`（`web/README.md:70`） |
 | `web/display.js` | 轮询循环 | `GET /api/config` → 每 `refresh_ms` `GET /api/display?since=<version>` | `web/display.js:290,337` |
 | `web/admin.js` | 配置读写 | `GET/PUT /api/config`、`POST /api/config/reload`、`GET /api/members`、`POST /api/members/refresh` | `web/admin.js:279-371` |
-| `web/sim.js` | 模拟器 | `GET /api/members`、`POST /api/sim/identity`、`POST /api/sim/message`、`POST /api/sim/reset` | `web/sim.js:209,239,257` |
+| `web/sim.js` | 模拟器（**真 WS 客户端**，连同一 Gateway 发 OneBot 事件；Wave 1–4） | `GET /api/members` + WS `ws://…:9801`（HTTP `/api/sim/*` 保留） | `web/sim.js` |
 | `web/replay.js` | 重放步进 | **静态文件** `fetch('replay_view.json')`（不读 `/api/display`） | `web/replay.js:1-60`、`web/README.md:69` |
 
 ---
@@ -128,6 +136,7 @@
 | `text` | `String` | 规范化纯文本 | 是 |
 | `timestamp_ms` | `i64` | 毫秒时间戳（阶段/权限判定基准） | 是 |
 | `is_admin` | `bool` | 群主/管理员 | 是 |
+| `raw` | `Option<serde_json::Value>` | 原始 OneBot 事件 JSON（C-3 事件溯源/审计） | 否（`Option`） |
 
 ### 3.2 `MessageRecord`（`src/messages/mod.rs:4-16`）+ `MessageStore`
 | 字段 | 类型 | 含义 | 必填 |
@@ -144,8 +153,7 @@
 | `status` | `String` | 处理状态（同 `PipelineOutcome.status`） | 是 |
 | `detail` | `String` | 详情/摘要 | 是 |
 
-`trait MessageStore`（`:19-23`）：`append(&MessageRecord)`、`read_all()`、`replace_all(&[MessageRecord])`。
-> ⚠️ 与 GAP-ANALYSIS §四 计划的 `append/read_all/query/update/delete` 不一致（实际冻结为 `replace_all`）——**待确认 / 待 T1 补齐 query/update/delete**。
+`MessageLog`（**Wave 2 已实现**，取代旧 `MessageStore` trait）：`append` / `read_all` / `replace_all` + 细粒度 `query` / `update` / `delete`，另有 `append_raw_event` / `read_raw_events`（详见 §8.3）。
 
 ### 3.3 阶段模型 `RoundPhase / PhaseWindow / ItemClass`（`src/round/mod.rs`）
 | 类型 | 取值/字段 | 含义 |
@@ -156,7 +164,7 @@
 
 权限矩阵（`can_claim`，`:33-44`，`can_cancel` 同）：Phase0 全禁；PhaseI 仅 B；PhaseII B 全部、A 仅优先；PhaseIII/Settling 全部；Locked 全禁。
 
-### 3.4 `SettlementConfig` 及子类型（`src/settlement/mod.rs`，**占位，待 T4 实现**）
+### 3.4 `SettlementConfig` 及子类型（`src/settlement/mod.rs`，**Wave 1–4 已实现**）
 | 字段 | 类型 | 含义 | 必填 |
 |---|---|---|---|
 | `pricing` | `Vec<PricingEntry>` | 调价条目 | 否（default） |
@@ -196,7 +204,7 @@
 | `final_total` | `MoneyCents` | 最终总额 | 是 |
 | `warnings` | `Vec<SettlementWarning>` | 告警 | 是 |
 
-### 3.7 `SnapshotBundle`（`src/snapshot_bundle/mod.rs:4-11`，**占位，待 T2**）
+### 3.7 `SnapshotBundle`（`src/snapshot_bundle/mod.rs`，**Wave 2 已实现：单一 JSON `SnapshotFile`**）
 | 字段 | 类型 | 含义 | 必填 |
 |---|---|---|---|
 | `manifest` | `serde_json::Value` | 包元信息 | 是 |
@@ -228,15 +236,15 @@
 
 | 需求 | 落点模块 | 关键接口 / 路由 | 关键文件 | 当前状态 |
 |---|---|---|---|---|
-| **C1** 实时+记录监听白名单成员 | `gateway`、`messages`、`api`、`web` | `decide_route`、`to_incoming_event`、`MessageStore::append`、`GET /api/messages`、`GET /api/display` | `src/gateway/onebot.rs:218,237`、`src/gateway/ws_server.rs:262-276`、`src/messages/mod.rs:19`、`src/api/display_routes.rs:77`、`web/display.js` | 群白名单✅；**成员白名单 + JSONL 持久化 + Drop 落痕 待 T1** |
-| **C2** 重放 + 可改附加条件 | `llm::pipeline`、`engine::replay`、`replay::{replay_engine,state_diff}` | `rebuild_allocation_snapshot`、`ReplayEngine::replay`、`StateDiff::from_snapshots`、`replay(messages,overrides)`（待建） | `src/engine/replay.rs:199`、`src/replay/replay_engine.rs:25`、`src/replay/state_diff.rs:18` | 事件重放✅；**`replay(messages,overrides)`+diff 待 T2**（`src/replay/session.rs` 不存在） |
+| **C1** 实时+记录监听白名单成员 | `gateway`、`messages`、`api`、`web` | `decide_route`、`to_incoming_event`、`MessageStore::append`、`GET /api/messages`、`GET /api/display` | `src/gateway/onebot.rs:218,237`、`src/gateway/ws_server.rs:262-276`、`src/messages/mod.rs:19`、`src/api/display_routes.rs:77`、`web/display.js` | 群/成员白名单 ✅；JSONL 持久化 + Drop 落痕 ✅（Wave 1–2；见 §8.3） |
+| **C2** 重放 + 可改附加条件 | `llm::pipeline`、`engine::replay`、`replay::{replay_engine,state_diff}` | `rebuild_allocation_snapshot`、`ReplayEngine::replay`、`StateDiff::from_snapshots`、`replay(messages,overrides)`（待建） | `src/engine/replay.rs:199`、`src/replay/replay_engine.rs:25`、`src/replay/state_diff.rs:18` | 事件重放 ✅；`replay(messages,overrides)` + diff ✅（Wave，`src/replay/session.rs` 已建；见 §8） |
 | **C3** 解耦 + 接口映射表 | 全部 | 本文档 | `docs/INTERFACES.md` | ✅（本文件） |
-| **C4** 管理改数据 + 快照 | `api`、`snapshot_bundle`、`web` | `/api/messages` 增改删（待建）、`SnapshotBundle` 导出/导入（待建）、`PUT /api/config` | `src/api/display_routes.rs`、`src/snapshot_bundle/mod.rs:4`、`src/api/config_routes.rs:32`、`web/admin.js` | config 编辑✅；**消息编辑 + 快照包 待 T2** |
-| **C5** 全真模拟 WS client | `web`、`gateway` | `web/sim.js` 应连同一反向 WS（OneBot 事件），共用 `Gateway→Pipeline` | `web/sim.js:239`（当前 `POST /api/sim/message` 旁路）、`src/gateway/ws_server.rs:262` | ❌ **待 T3 改 WS 客户端** |
-| **C6** 脚本倍率模拟 | `scripts` | `scripts/sim-run.mjs --speed` 经 WS 回放 | `scripts/**`（不存在） | ❌ **待 T3** |
-| **C7** 录制 + 自动重放 | `scripts`、`replay` | `record.jsonl` + `--replay` 自动重放 | `scripts/**`、`src/replay/**` | ❌ **待 T3** |
-| 阶段权限（REQ §2） | `round`、`llm::pipeline` | `phase_at`、`can_claim`/`can_cancel` | `src/round/mod.rs:26-48` | 契约✅；**未接入 Pipeline，待 T1** |
-| 结算/下单表（REQ §3） | `settlement`、`engine::settlement_engine`、`planner`(T5) | `SettlementConfig`、`SettlementEngine::settle`、`OrderTable`(待建) | `src/settlement/mod.rs:3`、`src/engine/settlement_engine.rs:24` | 旧结算引擎✅；**新配置/调价/减均/下单表 待 T4/T5** |
+| **C4** 管理改数据 + 快照 | `api`、`snapshot_bundle`、`web` | `/api/messages` 增改删（待建）、`SnapshotBundle` 导出/导入（待建）、`PUT /api/config` | `src/api/display_routes.rs`、`src/snapshot_bundle/mod.rs:4`、`src/api/config_routes.rs:32`、`web/admin.js` | config 编辑 ✅；消息编辑 + 快照包 ✅（Wave 2/C-2；见 §8.4） |
+| **C5** 全真模拟 WS client | `web`、`gateway` | `web/sim.js` 连同一反向 WS（OneBot 事件），共用 `Gateway→Pipeline` | `web/sim.js`（Wave 已改 **WS 客户端**）、`src/gateway/ws_server.rs` | ✅ **Wave 已实现** |
+| **C6** 脚本倍率模拟 | `scripts` | `scripts/sim-run.mjs --speed` 经 WS 回放 | `scripts/sim-run.mjs`（**已创建**） | ✅ **Wave 已实现** |
+| **C7** 录制 + 自动重放 | `scripts`、`replay` | `record.jsonl` + `--replay` 自动重放 | `scripts/sim-record.mjs`、`src/replay/**` | ✅ **Wave 已实现** |
+| 阶段权限（REQ §2） | `round`、`llm::pipeline` | `phase_at`、`can_claim`/`can_cancel` | `src/round/mod.rs` | 契约✅；已接入实时+重放（T-13，按 `phase_at` 拒绝越权） |
+| 结算/下单表（REQ §3） | `settlement`、`engine::settlement_engine`、`planner` | `SettlementConfig`、`evaluate`、`OrderTable` | `src/settlement/**`、`src/planner/**` | 结算 v2 + planner 下单表 ✅（Wave 1；见 §8.1） |
 
 ---
 
@@ -262,7 +270,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 - 跨层直读内部状态（UI/HTTP 不得直接读 `Pipeline.state` 或引擎内部；必须经公开方法/HTTP DTO）。
 - `web/**` 不得改 `src/**`、`simulation-corpus/**`（`web/README.md:78`）。
 
-**DEPRECATED（不参与新链路，勿在其上新增功能）**：
+**已在 C-4 删除（Wave 4；下表中的路径均不再存在）**：
 
 | 路径 | 说明 |
 |---|---|
@@ -279,27 +287,29 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 ---
 
-## 6. 待办（尚未实现 / 待 T2/T3/T4/T5/T6 补齐的接口）
+## 6. 快照期「待办」清单（§1–§6 快照；多数已在 Wave 1–4 实现）
 
-| 接口/能力 | 目标模块 | 计划任务 | 现状 |
-|---|---|---|---|
-| `MessageStore` 具体实现（JSONL `data/messages/<round>.jsonl`，追加/读取/查询） | `messages` | T1 | 仅 trait，无实现（`src/messages/mod.rs:19`） |
-| `MessageStore::query/update/delete`（管理编辑消息） | `messages` | T1/T2 | 冻结仅 `append/read_all/replace_all`，**待确认** |
-| 成员白名单（群×成员）与 Drop 落日志 | `gateway`、`settings` | T1 | 未实现（现仅群白名单，`onebot.rs:228`） |
-| `round::{phase_at,can_claim,can_cancel}` 接入 Pipeline + `settings.phases` | `round`、`llm::pipeline`、`settings` | T1 | 契约已有，无调用方 |
-| `replay(messages, overrides)` + 结果 diff | `replay`（新建 `src/replay/session.rs`） | T2 | 未实现；`src/replay/session.rs` 不存在 |
-| `SnapshotBundle` 导出/导入（zip/目录） | `snapshot_bundle` | T2 | 仅结构占位 |
-| `/api/messages` 增改删（管理员）+ `/api/replay/*` 实现 | `api` | T2 | `/api/replay` 恒 501（`src/api/mod.rs:50-55`） |
-| `SettlementConfig` 引擎：调价两模式、折扣份数/首 n 包/A-B 范围、特典多档/单包/叠加、折价→减均（最大余数） | `settlement`、`engine::settlement_engine` | T4 | 新配置未接入；旧引擎仅单档 `GiftByThreshold` |
-| `OrderTable` 模型 + DFS/回溯（特典最多化 / 折扣最大化） | `planner`（新建 `src/planner/**`） | T5 | 未实现；`src/planner` 不存在 |
-| 结算/下单表 UI（配置表单、试算、拖拽 item→包、两策略对比） | `web/settlement*` + `api` | T6 | 未实现 |
-| `web/sim` 改 **WS 客户端**（连同一 Gateway，发 OneBot 事件） | `web/sim*` | T3 | 现走 `POST /api/sim/message`（`web/sim.js:239`） |
-| `scripts/sim-run.mjs`（`--speed` 倍率经 WS 回放） | `scripts` | T3 | `scripts/` 不存在 |
-| 录制 `record.jsonl` + `--replay` 自动重放 | `scripts` | T3 | 未实现 |
-| e2e 更新（C5/C6/C7 用例） | `tests` | T3 | 现有 8 用例基于 HTTP 旁路（`tests/e2e/sim.mjs`） |
-| `/api/messages` 的 `MessageRecord` 与 `Pipeline` 内存消息模型统一 | `messages`、`llm::pipeline` | T1/T2 | Pipeline 自带私有 `MessageRecord`（`pipeline.rs:48-54`），未落盘 |
+> 本表为 2026-09-14 快照。下列能力**多数已实现**，现以实现与 [§8](#8-wave-1-4-新增变更接口2026-09-17) 为准。
 
-> 复核：以上「现状」均来自本文件 §1–§5 的 `文件:行号` 引用；标「待确认」项需 A0/用户裁决。
+| 接口/能力 | 目标模块 | 现状（Wave 1–4 后） |
+|---|---|---|
+| `MessageLog` JSONL 实现（`data/messages/<round>.jsonl`，追加/读取/查询） | `messages` | ✅ 已实现（Wave 2） |
+| `MessageLog::query/update/delete`（管理编辑消息） | `messages` | ✅ 已实现（C-5） |
+| 成员白名单（群×成员）与 Drop 落日志 | `gateway`、`settings` | ✅ 已实现 + Drop 落日志 |
+| `round::{phase_at,can_claim,can_cancel}` 接入 Pipeline + `settings.phases` | `round`、`llm::pipeline`、`settings` | ✅ 已接入实时+重放（T-13） |
+| `replay(messages, overrides)` + 结果 diff | `replay`（`src/replay/session.rs`） | ✅ 已实现 |
+| `SnapshotBundle` 导出/导入 | `snapshot_bundle` | ✅ 单一 JSON（C-2）；zip 未做 |
+| `/api/messages` 增改删 + `/api/replay/*` | `api` | ✅ 已实现 |
+| `SettlementConfig` 引擎（调价/折扣/范围/特典/减均） | `settlement` | ✅ 结算 v2（Wave 1） |
+| `OrderTable` + DFS/回溯（两策略） | `planner` | ✅ `src/planner/**` 已实现 |
+| 结算/下单表 UI | `web/settlement*` + `api` | ✅ 已实现 |
+| `web/sim` 改 WS 客户端 | `web/sim*` | ✅ 已改真 WS 客户端 |
+| `scripts/sim-run.mjs`（`--speed`） | `scripts` | ✅ 已实现 |
+| 录制 `record.jsonl` + `--replay` | `scripts` | ✅ `scripts/sim-record.mjs` |
+| e2e（C5/C6/C7 用例） | `tests` | ✅ 11/11（`node tests/e2e/sim.mjs`） |
+| `MessageRecord` 与 Pipeline 消息模型统一 | `messages`、`llm::pipeline` | ✅ 共享 `MessageLog`（T-05） |
+
+> 复核：本文件 §1–§6 为 Wave 1–4 前快照；现状以 §8 与源码为准。
 
 ---
 

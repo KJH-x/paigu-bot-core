@@ -10,7 +10,6 @@ use crate::domain::ids::{ItemId, UserId};
 use crate::domain::item::Item;
 use crate::domain::money::MoneyCents;
 use crate::domain::snapshot::AllocationSnapshot;
-use crate::error::AppResult;
 
 pub struct AllocationEngine {}
 
@@ -24,7 +23,7 @@ impl AllocationEngine {
         items: &[Item],
         claim_lines: &[EffectiveClaimLine],
         events: &[EventEnvelope],
-    ) -> AppResult<AllocationSnapshot> {
+    ) -> anyhow::Result<AllocationSnapshot> {
         let now = chrono::Utc::now();
         let round_id = items
             .first()

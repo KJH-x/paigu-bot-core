@@ -16,7 +16,7 @@
                               │                         ▲
                               │                         │ Hot Config (config/app.json, revision)
                               ▼
-        Engine/Replay(既有) → Snapshot → Publisher(R2/Local)
+        Engine/Replay(既有) → Snapshot → HTTP/展示（发布器已随旧栈删除，R2/Pages 待接线）
                               │
         axum HTTP API :21081 ─┼─ /api/config /api/board /api/display /api/messages
                               ├─ /api/sim/*  (模拟器，仅本地)
@@ -27,7 +27,7 @@
 ```
 
 **运行模式**：本地一个进程同时跑 Gateway + HTTP API + Pipeline；`cargo run -- run`（默认）。
-保留既有 `simulate`（离线重放验证）与 `serve`（旧聊天服务器）子命令，但新界面统一走 HTTP API。
+保留既有 `simulate`（离线重放验证；旧 verifier 暂留以支撑语料回归，见 T-24）与 `serve`（已并入新栈，等价 `run`）子命令；展示统一走 HTTP API。
 
 ## 2. 目录与文件所有权
 
@@ -40,9 +40,9 @@
 | `src/api/` | axum 路由：config/board/display/messages/sim/members/gateway + 静态页 | **A3** |
 | `web/` | 静态页 display/admin/sim/replay（vanilla，可部署；`viewer/` 已合并至此） | **A4** |
 | `tests/e2e/` | Node `.mjs` Playwright e2e | **A5** |
-| `src/main.rs`、`src/app_state.rs`、各 `mod.rs` | 装配与接线 | **A0(主)** |
+| `src/main.rs`、各 `mod.rs`、`src/error.rs` | 装配与接线 | **A0(主)** |
 | `src/engine/**`、`src/replay/**`、`src/parser/**`、`src/simulation/**` | 既有引擎（改动需 A0 同意） | 主 |
-| `src/config.rs`、`src/inbound/**`、`src/ws/**`、`src/services/**`、`src/repo/**`、`src/api/routes.rs` | **旧栈（已弃用）**：仅 `main.rs` 未识别子命令回退使用 | 主 |
+| ~~`src/config.rs`、`src/inbound/**`、`src/ws/**`、`src/services/**`、`src/repo/**`、`src/publisher/**`、`src/api/routes.rs`~~ | **旧栈：已在 C-4 删除**（`dev`→`master` 合并）；现役为 `src/gateway/**` 与 `src/api/*_routes.rs` | — |
 
 > 子 agent **不得**改他人归属文件；需要跨模块改动时在 `docs/TASKS.md` 记录并等 A0 处理。
 
@@ -117,7 +117,7 @@
 | GET | `/api/members` | 成员列表（`data/members.seed.json` → `data/members.example.json` → 空） |
 | POST | `/api/members/refresh` | 经 Gateway 拉取 `get_group_member_list` |
 | GET | `/api/gateway/status` | WS 连接状态 |
-| GET | `/api/replay`、`/api/replay/*` | 桩，恒 `501 {"error":"not_implemented"}` |
+| GET | `/api/replay`、`/api/replay/*` | 逐步重放（Wave 1–4 已实现；路由/返回值见 [INTERFACES.md](./INTERFACES.md) §8） |
 | GET | `/` `/admin` `/sim` `/replay` | 静态页（display / admin / sim / replay） |
 | GET | `/web/*` | 静态文件；未命中时 `fallback_service` 回退到目录 `web/` |
 
@@ -139,7 +139,7 @@ CORS：本地开发允许 `http://127.0.0.1:*`；远程展示页读 R2，不经�
 - 入队时分配单调 `sequence`（全局 `AtomicI64`），保证并发消息重放确定性。
 - LLM 在独立 worker（并发上限可配）；超时回退规则。
 - 展示 5s 增量轮询；`version` 单调；前端 keyed diff。
-- 发布：每次快照变更后异步发布 R2（失败不阻塞业务）。
+- 发布：R2/Pages 远程发布**未接线**（`src/publisher/**` 已随旧栈在 C-4 删除；`domain::snapshot::Public*` 视图模型保留）。
 
 ## 8. 成员名单（占位示例）
 
@@ -162,4 +162,4 @@ CORS：本地开发允许 `http://127.0.0.1:*`；远程展示页读 R2，不经�
 
 - Rust：路由(白名单/drop)、配置 revision/热载、流水线(规则/LLM mock)、权限时段。
 - Node `.mjs` Playwright：驱动 `/sim` 页面 → 选身份/设偏移/发消息 → 断言排位与状态；覆盖时段拒绝与预存优先。
-- 回归：既有 `cargo test`（52）与 `simulation-corpus` 脚本必须保持通过。
+- 回归：既有 `cargo test`（139）与 `simulation-corpus` 脚本必须保持通过。

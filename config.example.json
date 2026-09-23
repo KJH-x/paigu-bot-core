@@ -6,6 +6,7 @@
     "whitelist_members": [],
     "heartbeat_secs": 15,
     "reply_enabled": false,
+    "admin_commands_enabled": false,
     "allowed_actions": [
       "get_group_member_list",
       "get_group_info",
@@ -38,11 +39,13 @@
         "kind": "split",
         "class": "A",
         "aliases": ["通行证", "通行认证SP", "通行认证"],
+        "unit_price_cents": 5000,
+        "box_size": 8,
         "variants": [
-          { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
-          { "variant_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
-          { "variant_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
-          { "variant_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] }
+          { "variant_id": "v_jcl", "name": "结城理", "unit_price_cents": 5000, "pieces": 2, "capacity": null, "aliases": [] },
+          { "variant_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 5000, "pieces": 2, "capacity": null, "aliases": [] },
+          { "variant_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 5000, "pieces": 2, "capacity": null, "aliases": [] },
+          { "variant_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 2500, "pieces": 1, "capacity": null, "aliases": [] }
         ]
       },
       {
@@ -77,16 +80,31 @@
         "kind": "split",
         "class": "B",
         "aliases": ["特典卡组", "特典", "校园凭证"],
+        "unit_price_cents": 1200,
+        "box_size": 5,
         "variants": [
-          { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
-          { "variant_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] },
-          { "variant_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
-          { "variant_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
-          { "variant_id": "v_zt", "name": "整套", "capacity": null, "aliases": ["一套"] }
+          { "variant_id": "v_jcl", "name": "结城理", "unit_price_cents": 1200, "pieces": 1, "capacity": null, "aliases": [] },
+          { "variant_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 1200, "pieces": 1, "capacity": null, "aliases": [] },
+          { "variant_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 1200, "pieces": 1, "capacity": null, "aliases": [] },
+          { "variant_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 1200, "pieces": 1, "capacity": null, "aliases": [] },
+          { "variant_id": "v_zt", "name": "整套", "unit_price_cents": 4800, "pieces": 4, "capacity": null, "aliases": ["一套"] }
         ]
       }
     ]
   },
   "display": { "refresh_ms": 5000, "data_source": "local", "remote_base_url": "" },
-  "members": { "group_id": "123456789", "cache_path": "data/members.json", "daily_pull_at": "19:00" }
+  "members": { "group_id": "123456789", "cache_path": "data/members.json", "daily_pull_at": "19:00" },
+  "settlement": {
+    "pricing": [
+      { "item_id": "pass_sp", "variant_id": "v_hlw", "mode": "SetFinal", "value": 2500 }
+    ],
+    "discounts": [
+      { "rule_id": "满300减10", "kind": "Threshold", "amount": 1000, "threshold": 30000, "ratio_ppm": null, "shares": -1 }
+    ],
+    "scope_mode": "ExcludeGift",
+    "gift_tiers": [
+      { "tier_id": "gift_card", "threshold": 0, "gift_name": "特典卡组-校园凭证", "unit_price": 1200, "claimed": 12 }
+    ],
+    "reduce_average": { "include_gift_price": true }
+  }
 }

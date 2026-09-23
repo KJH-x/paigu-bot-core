@@ -223,9 +223,11 @@ fn test_money_cents_operations() {
 
 #[test]
 fn test_effective_claim_line_priority_sorting() {
-    let mut lines = [claim_line("u1", "item_x", 1, 100, 1, 0),
+    let mut lines = [
+        claim_line("u1", "item_x", 1, 100, 1, 0),
         claim_line("u2", "item_x", 1, 101, 2, 10),
-        claim_line("u3", "item_x", 1, 99, 3, 5)];
+        claim_line("u3", "item_x", 1, 99, 3, 5),
+    ];
 
     lines.sort_by(|a, b| {
         b.priority_level

@@ -54,11 +54,14 @@ async fn display(
     let status = state.gateway.status().await;
 
     let changed = {
-        let prev = board_cache()
-            .lock()
-            .ok()
-            .and_then(|cache| cache.get(&since).cloned());
-        match prev {
+        let previous = board_cache().lock().ok().and_then(|cache| {
+            cache
+                .iter()
+                .filter(|(cached, _)| **cached < version)
+                .max_by_key(|(cached, _)| **cached)
+                .map(|(_, value)| value.clone())
+        });
+        match previous {
             Some(previous) => diff_board(&previous, &board),
             None => Vec::new(),
         }

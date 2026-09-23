@@ -5,10 +5,14 @@
 
   function $(id) { return document.getElementById(id); }
 
+  var PHASE_OPTIONS = ['Phase0', 'PhaseI', 'PhaseII', 'PhaseIII', 'Settling', 'Locked'];
+
   var state = {
     config: null,
     revision: null,
     items: [],
+    phases: [],
+    messages: [],
     apiBase: P.resolveApiBase()
   };
 
@@ -68,6 +72,7 @@
     setChecked('gw-reply', gw.reply_enabled);
     setChecked('gw-admincmds', gw.admin_commands_enabled);
     setVal('gw-whitelist', joinList(gw.whitelist_groups));
+    setVal('gw-whitelist-members', joinList(gw.whitelist_members));
     setVal('gw-actions', joinList(gw.allowed_actions));
 
     var llm = cfg.llm || {};
@@ -103,6 +108,9 @@
 
     state.items = P.deepClone(P.asArray(rd.items));
     renderItems();
+
+    state.phases = P.deepClone(P.asArray(rd.phases));
+    renderPhases();
 
     $('rev-badge').textContent = 'revision ' + (state.revision == null ? '—' : state.revision);
     $('form').classList.remove('hidden');
@@ -140,6 +148,11 @@
         ['split', 'single', 'gift'].map(function (k) {
           return '<option value="' + k + '"' + (item.kind === k ? ' selected' : '') + '>' + k + '</option>';
         }).join('') + '</select></label>' +
+      '<label class="field"><span>class（A 阶段受限 / B 不受限）</span><select' + inputAttr('item', i, null, 'class') + '>' +
+        '<option value=""' + (item.class == null || item.class === '' ? ' selected' : '') + '>（默认 B）</option>' +
+        '<option value="A"' + (item.class === 'A' ? ' selected' : '') + '>A</option>' +
+        '<option value="B"' + (item.class === 'B' ? ' selected' : '') + '>B</option>' +
+        '</select></label>' +
       '<label class="field"><span>aliases（逗号分隔）</span><input' + inputAttr('item', i, null, 'aliases') + ' value="' + P.esc(joinList(item.aliases)) + '" /></label>' +
       '<label class="field"><span>标价 unit_price_cents（分，手工确认）</span><input' + inputAttr('item', i, null, 'unit_price_cents') + ' value="' + P.esc(item.unit_price_cents == null ? 0 : item.unit_price_cents) + '" type="number" min="0" /></label>' +
       '<label class="field"><span>盒件数 box_size（拼团整盒判定）</span><input' + inputAttr('item', i, null, 'box_size') + ' value="' + P.esc(item.box_size == null ? '' : item.box_size) + '" type="number" min="1" /></label>' +
@@ -212,6 +225,81 @@
     }
   }
 
+  function phaseRow(p, i) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginBottom = '6px';
+
+    var sel = document.createElement('select');
+    sel.setAttribute('data-scope', 'phase');
+    sel.setAttribute('data-i', i);
+    sel.setAttribute('data-f', 'phase');
+    PHASE_OPTIONS.forEach(function (ph) {
+      var op = document.createElement('option');
+      op.value = ph;
+      op.textContent = ph;
+      sel.appendChild(op);
+    });
+    sel.value = PHASE_OPTIONS.indexOf(p.phase) >= 0 ? p.phase : 'Phase0';
+    row.appendChild(sel);
+
+    var start = document.createElement('input');
+    start.type = 'datetime-local';
+    start.setAttribute('data-scope', 'phase');
+    start.setAttribute('data-i', i);
+    start.setAttribute('data-f', 'start_ms');
+    start.value = msToLocalInput(p.start_ms);
+    row.appendChild(start);
+
+    var end = document.createElement('input');
+    end.type = 'datetime-local';
+    end.setAttribute('data-scope', 'phase');
+    end.setAttribute('data-i', i);
+    end.setAttribute('data-f', 'end_ms');
+    end.value = msToLocalInput(p.end_ms);
+    row.appendChild(end);
+
+    var del = document.createElement('button');
+    del.className = 'danger small';
+    del.textContent = '×';
+    del.addEventListener('click', function () {
+      state.phases.splice(i, 1);
+      renderPhases();
+    });
+    row.appendChild(del);
+    return row;
+  }
+
+  function renderPhases() {
+    var host = $('phases');
+    while (host.firstChild) host.removeChild(host.firstChild);
+    for (var i = 0; i < state.phases.length; i++) {
+      host.appendChild(phaseRow(state.phases[i] || {}, i));
+    }
+    if (!state.phases.length) {
+      var e = document.createElement('div');
+      e.className = 'hint';
+      e.textContent = '暂无阶段时间窗（空 = 不限制）';
+      host.appendChild(e);
+    }
+  }
+
+  function onPhasesInput(ev) {
+    var t = ev.target;
+    if (!t || !t.dataset || t.dataset.scope !== 'phase') return;
+    var i = parseInt(t.dataset.i, 10);
+    var f = t.dataset.f;
+    var p = state.phases[i];
+    if (!p) return;
+    if (f === 'phase') {
+      p.phase = t.value;
+    } else if (f === 'start_ms' || f === 'end_ms') {
+      var ms = localInputToMs(t.value);
+      if (ms == null) delete p[f];
+      else p[f] = ms;
+    }
+  }
+
   function onItemsInput(ev) {
     var t = ev.target;
     if (!t || !t.dataset || !t.dataset.scope) return;
@@ -223,6 +311,7 @@
       if (f === 'aliases') item.aliases = splitList(t.value);
       else if (f === 'unit_price_cents') item.unit_price_cents = t.value === '' ? 0 : P.num(t.value, 0);
       else if (f === 'box_size' || f === 'max_quantity') item[f] = t.value === '' ? null : P.num(t.value, null);
+      else if (f === 'class') item.class = t.value === '' ? null : t.value;
       else item[f] = t.value;
     } else if (t.dataset.scope === 'variant') {
       var vi = parseInt(t.dataset.vi, 10);
@@ -244,6 +333,7 @@
     cfg.gateway.reply_enabled = checked('gw-reply');
     cfg.gateway.admin_commands_enabled = checked('gw-admincmds');
     cfg.gateway.whitelist_groups = splitList(val('gw-whitelist'));
+    cfg.gateway.whitelist_members = splitList(val('gw-whitelist-members'));
     cfg.gateway.allowed_actions = splitList(val('gw-actions'));
 
     cfg.llm = cfg.llm || {};
@@ -268,6 +358,10 @@
     var e = localInputToMs(val('rd-end'));
     if (s != null) cfg.round.priority_window.start_ms = s;
     if (e != null) cfg.round.priority_window.end_ms = e;
+    cfg.round.phases = state.phases.map(function (p) {
+      var ph = PHASE_OPTIONS.indexOf(p.phase) >= 0 ? p.phase : 'Phase0';
+      return { phase: ph, start_ms: P.num(p.start_ms, 0), end_ms: P.num(p.end_ms, 0) };
+    });
     cfg.round.items = state.items;
 
     cfg.display = cfg.display || {};
@@ -379,6 +473,175 @@
     });
   }
 
+  function toggleGateway(kind) {
+    var key = kind === 'reply' ? 'gw-reply' : 'gw-admincmds';
+    var path = kind === 'reply' ? '/api/config/reply' : '/api/config/admin-commands';
+    var enabled = !checked(key);
+    var body = { enabled: enabled };
+    if (state.revision != null) body.revision = state.revision;
+    P.post(path, body).then(function (res) {
+      if (res && res.revision != null) state.revision = res.revision;
+      setChecked(key, res && res.enabled != null ? res.enabled : enabled);
+      $('rev-badge').textContent = 'revision ' + (state.revision == null ? '—' : state.revision);
+      if (state.config && state.config.gateway) {
+        if (kind === 'reply') state.config.gateway.reply_enabled = !!(res && res.reply_enabled);
+        else state.config.gateway.admin_commands_enabled = !!(res && res.admin_commands_enabled);
+      }
+      P.toast((kind === 'reply' ? 'reply_enabled' : 'admin_commands_enabled') + ' = ' + (res && res.enabled), 'ok');
+    }).catch(function (err) {
+      if (err.status === 409) banner('热切换冲突（HTTP 409）：revision 已变化，请先「重新载入」配置。', true);
+      else banner('热切换失败：' + P.errorText(err), true);
+    });
+  }
+
+  function renderMessages() {
+    var tbody = $('msg-body');
+    while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    var list = state.messages || [];
+    $('msg-empty').hidden = list.length > 0;
+    $('msg-info').textContent = list.length ? (list.length + ' 条') : '';
+    for (var i = 0; i < list.length; i++) {
+      tbody.appendChild(messageRow(list[i]));
+    }
+  }
+
+  function messageRow(m) {
+    var tr = document.createElement('tr');
+
+    var tdSeq = document.createElement('td');
+    tdSeq.className = 'mono';
+    tdSeq.textContent = m.seq;
+    tr.appendChild(tdSeq);
+
+    var tdText = document.createElement('td');
+    var textInp = document.createElement('input');
+    textInp.value = m.text == null ? '' : m.text;
+    textInp.style.width = '100%';
+    textInp.setAttribute('data-field', 'text');
+    tdText.appendChild(textInp);
+    tr.appendChild(tdText);
+
+    var tdTs = document.createElement('td');
+    var tsInp = document.createElement('input');
+    tsInp.type = 'datetime-local';
+    tsInp.value = msToLocalInput(m.timestamp_ms);
+    tsInp.setAttribute('data-field', 'timestamp_ms');
+    tdTs.appendChild(tsInp);
+    tr.appendChild(tdTs);
+
+    var tdStatus = document.createElement('td');
+    var statusInp = document.createElement('input');
+    statusInp.value = m.status == null ? '' : m.status;
+    statusInp.setAttribute('data-field', 'status');
+    tdStatus.appendChild(statusInp);
+    tr.appendChild(tdStatus);
+
+    var tdAct = document.createElement('td');
+    var save = document.createElement('button');
+    save.className = 'primary small';
+    save.textContent = '保存';
+    save.addEventListener('click', function () { saveMessage(tr, m.seq); });
+    tdAct.appendChild(save);
+    var del = document.createElement('button');
+    del.className = 'danger small';
+    del.textContent = '删除';
+    del.addEventListener('click', function () { deleteMessage(m.seq); });
+    tdAct.appendChild(del);
+    tr.appendChild(tdAct);
+
+    return tr;
+  }
+
+  function loadMessages() {
+    $('msg-refresh').disabled = true;
+    return P.get('/api/messages?limit=500').then(function (res) {
+      state.messages = (res && res.messages) || [];
+      renderMessages();
+    }).catch(function (err) {
+      banner('消息加载失败：' + P.errorText(err), true);
+    }).then(function () {
+      $('msg-refresh').disabled = false;
+    });
+  }
+
+  function saveMessage(tr, seq) {
+    var textValue = tr.querySelector('[data-field="text"]').value;
+    var statusValue = tr.querySelector('[data-field="status"]').value;
+    var ts = localInputToMs(tr.querySelector('[data-field="timestamp_ms"]').value);
+    if (!textValue.trim()) { banner('消息 text 不能为空', true); return; }
+    if (ts == null) { banner('消息时间非法：请填写有效的本地时间', true); return; }
+    var body = { text: textValue, status: statusValue, timestamp_ms: ts, recompute: true };
+    if (state.revision != null) body.revision = state.revision;
+    P.put('/api/messages/' + encodeURIComponent(seq), body).then(function () {
+      hideBanner();
+      P.toast('消息 ' + seq + ' 已保存并重算', 'ok');
+      return loadMessages();
+    }).catch(function (err) {
+      if (err.status === 404) banner('消息 ' + seq + ' 不存在（可能已被删除）。', true);
+      else if (err.status === 409) banner('保存冲突（HTTP 409）：revision 已变化，请先「重新载入」配置。', true);
+      else banner('保存消息失败：' + P.errorText(err), true);
+    });
+  }
+
+  function deleteMessage(seq) {
+    if (!window.confirm('确认删除消息 seq=' + seq + ' 并触发重算？')) return;
+    P.request('/api/messages/' + encodeURIComponent(seq), { method: 'DELETE' }).then(function () {
+      hideBanner();
+      P.toast('消息 ' + seq + ' 已删除并重算', 'ok');
+      return loadMessages();
+    }).catch(function (err) {
+      if (err.status === 404) banner('消息 ' + seq + ' 不存在。', true);
+      else banner('删除消息失败：' + P.errorText(err), true);
+    });
+  }
+
+  function exportSnapshot() {
+    var out = val('snap-out').trim();
+    var body = { format: 'file' };
+    if (out) body.out_dir = out;
+    $('snap-export').disabled = true;
+    $('snap-export-info').textContent = '导出中…';
+    P.post('/api/snapshot/export', body).then(function (res) {
+      var path = res && res.path ? res.path : '(未返回路径)';
+      var extra = '';
+      if (res && res.manifest) {
+        extra = '（manifest: round_id=' + (res.manifest.round_id || '?') + '，revision=' + (res.manifest.revision != null ? res.manifest.revision : '?') + '）';
+      }
+      $('snap-export-info').textContent = '已导出：' + path + ' ' + extra;
+      if (res && res.path) setVal('snap-path', res.path);
+      hideBanner();
+      P.toast('快照已导出', 'ok');
+    }).catch(function (err) {
+      $('snap-export-info').textContent = '导出失败：' + P.errorText(err);
+      banner('快照导出失败：' + P.errorText(err), true);
+    }).then(function () {
+      $('snap-export').disabled = false;
+    });
+  }
+
+  function importSnapshot() {
+    var path = val('snap-path').trim();
+    if (!path) { banner('请填写要导入的 path', true); return; }
+    var body = { path: path, apply: checked('snap-apply') };
+    if (state.revision != null) body.revision = state.revision;
+    $('snap-import').disabled = true;
+    $('snap-import-result').textContent = '导入中…';
+    P.post('/api/snapshot/import', body).then(function (res) {
+      var applied = !!(res && res.applied);
+      $('snap-import-result').textContent = '导入成功：verified=' + !!(res && res.verified) + '，applied=' + applied
+        + (res && res.manifest ? '，round_id=' + (res.manifest.round_id || '?') : '');
+      hideBanner();
+      P.toast('快照导入成功', 'ok');
+      if (applied) return loadMessages();
+    }).catch(function (err) {
+      if (err.status === 409) banner('导入冲突（HTTP 409）：revision 已变化，请先「重新载入」配置。', true);
+      else banner('快照导入失败：' + P.errorText(err), true);
+      $('snap-import-result').textContent = '导入失败：' + P.errorText(err);
+    }).then(function () {
+      $('snap-import').disabled = false;
+    });
+  }
+
   function init() {
     var stored = readStore('api');
     if (!P.qs('api') && stored) state.apiBase = P.stripSlash(stored);
@@ -403,7 +666,25 @@
     $('rd-end').addEventListener('input', updateWindowMs);
     $('members-refresh').addEventListener('click', refreshMembers);
 
+    $('phase-add').addEventListener('click', function () {
+      var now = Date.now();
+      state.phases.push({ phase: 'Phase0', start_ms: now, end_ms: now + 3600000 });
+      renderPhases();
+    });
+    $('phases').addEventListener('input', onPhasesInput);
+    $('phases').addEventListener('change', onPhasesInput);
+
+    $('gw-reply-toggle').addEventListener('click', function () { toggleGateway('reply'); });
+    $('gw-admin-toggle').addEventListener('click', function () { toggleGateway('admin'); });
+
+    $('msg-refresh').addEventListener('click', function () { loadMessages(); });
+    $('snap-export').addEventListener('click', exportSnapshot);
+    $('snap-import').addEventListener('click', importSnapshot);
+
+    renderPhases();
+
     load().catch(function () {}).then(loadMembers);
+    loadMessages();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

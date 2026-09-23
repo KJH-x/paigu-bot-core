@@ -10,14 +10,6 @@ pub enum BotReply {
 }
 
 impl BotReply {
-    pub fn silent() -> Self {
-        BotReply::Silent
-    }
-
-    pub fn text(s: impl Into<String>) -> Self {
-        BotReply::Text(s.into())
-    }
-
     pub fn text_content(&self) -> Option<&str> {
         match self {
             BotReply::Text(t) => Some(t.as_str()),

@@ -2,23 +2,18 @@
   "name": "paigu-bot-core",
   "version": "1.0.0",
   "description": "QQ 机器人拼团排谷系统后端，基于事件溯源架构，使用 LLM 解析自然语言消息，确定性引擎执行业务逻辑。",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "test:e2e": "node tests/e2e/sim.mjs",
     "sim:run": "node scripts/sim-run.mjs",
     "sim:record": "node scripts/sim-record.mjs",
     "sim:verify": "node simulation-corpus/real-samples/verify-samples.mjs simulation-corpus/real-samples",
-    "web:serve": "python -m http.server --directory web 8000"
+    "web:serve": "python -m http.server --directory web 8000",
+    "privacy": "node scripts/privacy-scan.mjs"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/KJH-x/paigu-bot-core.git"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {

@@ -28,6 +28,8 @@
       <span class="nav-links">
         <a href="index.html">首页</a>
         <a href="display.html">展示</a>
+        <a href="settlement.html">结算</a>
+        <a href="replay.html">回放</a>
         <a href="sim.html">模拟器</a>
       </span>
     </div>
@@ -46,7 +48,13 @@
               <label class="field"><span>admin_commands_enabled（管理员命令落地执行）</span><input id="gw-admincmds" type="checkbox" style="width:auto" /></label>
             </div>
             <label class="field"><span>whitelist_groups（逗号分隔）</span><input id="gw-whitelist" /></label>
+            <label class="field"><span>whitelist_members（成员白名单，逗号分隔 user_id/身份/显示名；空 = 不限制）</span><input id="gw-whitelist-members" /></label>
             <label class="field"><span>allowed_actions（逗号分隔，禁止 send_*）</span><input id="gw-actions" /></label>
+            <div class="row">
+              <button id="gw-reply-toggle" class="small">热切换 reply_enabled</button>
+              <button id="gw-admin-toggle" class="small">热切换 admin_commands_enabled</button>
+              <span class="hint">走后端 POST /api/config/reply、/api/config/admin-commands（只改单开关，不走整表保存）</span>
+            </div>
           </div>
         </section>
 
@@ -123,9 +131,59 @@
             <label class="field"><span>priority_window.end（独占，本地时间）</span><input id="rd-end" type="datetime-local" /></label>
           </div>
           <div class="hint" id="rd-window-ms"></div>
+
+          <div class="card">
+            <div class="card-head">
+              <span>阶段时间窗（round.phases）</span>
+              <span class="spacer"></span>
+              <button id="phase-add" class="small">添加阶段</button>
+            </div>
+            <div class="hint">字段 phase / start_ms / end_ms；phase ∈ Phase0、PhaseI、PhaseII、PhaseIII、Settling、Locked；半开区间，空列表 = 不限制。</div>
+            <div id="phases"></div>
+          </div>
+
           <div id="items"></div>
         </div>
       </section>
+
+      <div class="layout" style="margin-top:12px">
+        <section class="panel">
+          <div class="panel-head">
+            <span>消息日志编辑器（C4）</span>
+            <span class="spacer"></span>
+            <span id="msg-info" class="hint"></span>
+            <button id="msg-refresh" class="small">刷新消息</button>
+          </div>
+          <div class="panel-body">
+            <div class="hint">编辑文本 / 时间 / 状态后点「保存」调用 PUT /api/messages/:seq（带 revision，改后触发重算）；「删除」调用 DELETE /api/messages/:seq。</div>
+            <div id="msg-empty" class="empty">尚未加载消息</div>
+            <div class="table-wrap" style="max-height:46vh;overflow:auto">
+              <table class="grid">
+                <thead><tr><th>seq</th><th>text</th><th>timestamp（本地）</th><th>status</th><th>操作</th></tr></thead>
+                <tbody id="msg-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><span>快照导出 / 导入（C4）</span></div>
+          <div class="panel-body">
+            <div class="row">
+              <label class="field" style="flex:1;margin:0"><span>out_dir（可选；留空用后端默认目录）</span><input id="snap-out" placeholder="例如 data/snapshots" /></label>
+              <button id="snap-export" class="primary">导出快照（format=file）</button>
+            </div>
+            <div class="hint" id="snap-export-info"></div>
+            <hr style="border:none;border-top:1px solid var(--border);margin:10px 0" />
+            <label class="field"><span>path（.snapshot.json 文件或目录）</span><input id="snap-path" placeholder="上一步导出返回的路径" /></label>
+            <div class="row">
+              <label class="row tight"><input id="snap-apply" type="checkbox" style="width:auto" /><span>apply（写回消息日志并复算）</span></label>
+              <button id="snap-import" class="small">导入快照</button>
+            </div>
+            <div id="snap-import-result" class="hint"></div>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div id="loading" class="empty">正在载入配置…</div>

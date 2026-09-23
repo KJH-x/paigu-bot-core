@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -13,14 +11,12 @@ use crate::settlement::{
 
 const MAX_CANDIDATES: usize = 8;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Strategy {
     #[default]
     GiftMax,
     DiscountMax,
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanLimits {
@@ -168,6 +164,8 @@ pub fn plan(req: &PlanRequest) -> PlanResult {
     }
 }
 
+/// 手工结算入口（仅测试对照用；生产走 `plan`）。
+#[cfg(test)]
 pub fn manual_evaluate(config: &SettlementConfig, table: &OrderTable) -> SettlementResult {
     evaluate(config, table)
 }

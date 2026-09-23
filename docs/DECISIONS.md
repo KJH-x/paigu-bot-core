@@ -1,6 +1,7 @@
 # 待决策与需补充信息（DECISIONS）
 
-> **决策日志**。用户回复原文见 [回复（DECISIONS）.md](./回复（DECISIONS）.md)。
+> **决策日志**。原本单独存放的「用户回复原文」文件已并入本文件各条目的「回复」段，该文件（含末尾空表格）已删除。
+> 下方每条的 `已决策`/`回复` 结论即为最终口径；实现状态见 [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) §六 与 [TODOS.md](./TODOS.md)。
 > 已定稿口径同步到 [REQUIREMENTS.md](./REQUIREMENTS.md) §3/§4；工程动作见 [TODOS.md](./TODOS.md)。
 > 状态：`待决策` · `待提供` · `已决策` · `🟡待确认`（已决策但有一处细节需再确认）。
 

@@ -8,7 +8,6 @@ use crate::domain::settlement::{
     DiscountApplication, ItemTotal, SettlementSnapshot, UserBill, UserBillLine,
 };
 use crate::domain::snapshot::AllocationSnapshot;
-use crate::error::SettlementError;
 
 pub struct SettlementInput {
     pub allocation: AllocationSnapshot,
@@ -23,7 +22,7 @@ impl SettlementEngine {
         Self {}
     }
 
-    pub fn settle(&self, input: &SettlementInput) -> Result<SettlementSnapshot, SettlementError> {
+    pub fn settle(&self, input: &SettlementInput) -> SettlementSnapshot {
         let item_map: HashMap<ItemId, &Item> =
             input.items.iter().map(|i| (i.item_id.clone(), i)).collect();
         let mut bills = self.build_user_bills(&input.allocation, &item_map);
@@ -98,7 +97,7 @@ impl SettlementEngine {
             })
             .collect();
 
-        Ok(SettlementSnapshot {
+        SettlementSnapshot {
             round_id: input.allocation.round_id.clone(),
             version: input.allocation.version,
             generated_at: chrono::Utc::now(),
@@ -109,7 +108,7 @@ impl SettlementEngine {
             discount_total,
             final_total,
             warnings: vec![],
-        })
+        }
     }
 
     fn build_user_bills(
@@ -212,7 +211,7 @@ impl SettlementEngine {
     fn apply_discount_rule(
         &self,
         rule: &DiscountRule,
-        bills: &mut Vec<UserBill>,
+        bills: &mut [UserBill],
         _allocation: &AllocationSnapshot,
         _item_map: &HashMap<ItemId, &Item>,
         discount_applications: &mut Vec<DiscountApplication>,
@@ -372,7 +371,7 @@ impl SettlementEngine {
 
     fn apply_discount_shares(
         &self,
-        bills: &mut Vec<UserBill>,
+        bills: &mut [UserBill],
         shares: &[crate::domain::settlement::DiscountShare],
     ) {
         for share in shares {

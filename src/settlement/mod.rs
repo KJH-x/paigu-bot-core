@@ -1,17 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-#[allow(dead_code)]
 mod engine;
-#[allow(dead_code)]
 mod model;
 
-#[allow(unused_imports)]
 pub use engine::evaluate;
-#[allow(unused_imports)]
 pub use model::{
-    check_completeness, expected_quantities, order_table_from_allocation, table_quantities,
-    CompletenessReport, Line, LineSettlement, OrderTable, Package, PackageGift, PackageSettlement,
-    QuantityGap, QuantityKey, SettlementResult, UnitPrice,
+    check_completeness, order_table_from_allocation, CompletenessReport, Line, OrderTable, Package,
+    SettlementResult, UnitPrice,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -58,14 +53,12 @@ pub enum DiscountKind {
     WholeOrder,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ScopeMode {
     IncludeGift,
     #[default]
     ExcludeGift,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GiftTier {

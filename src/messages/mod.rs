@@ -39,6 +39,11 @@ pub fn next_seq() -> i64 {
     NEXT_SEQ.fetch_add(1, Ordering::SeqCst) + 1
 }
 
+/// 复位进程级序号（`Pipeline::reset` 时调用，使内存状态与全局序号一道回到初始）。
+pub fn reset_seq() {
+    NEXT_SEQ.store(0, Ordering::SeqCst);
+}
+
 pub fn messages_dir_from(env_value: Option<String>) -> PathBuf {
     env_value
         .filter(|s| !s.trim().is_empty())
@@ -243,7 +248,6 @@ impl MessageLog {
         self.store_for(round_id).query(pred).await
     }
 
-    #[allow(dead_code)]
     pub async fn update<F>(&self, round_id: &str, seq: i64, f: F) -> anyhow::Result<bool>
     where
         F: FnMut(&mut MessageRecord) + Send,

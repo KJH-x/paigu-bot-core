@@ -2,15 +2,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::claim::{Eligibility, EligibilityScope};
-use crate::domain::event::{DomainEvent, EventEnvelope};
-use crate::domain::ids::{ClaimId, EligibilityId, EventId, RoundId, UserId};
+use crate::domain::event::{ClaimCancelled, DomainEvent, EventEnvelope, EventStatus};
+use crate::domain::ids::{ClaimId, EligibilityId, EventId, ItemId, RoundId, UserId};
 use crate::domain::item::{Item, RoundContext};
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
 use crate::messages::{MessageRecord, MessageStore};
 use crate::parser::parsed_event::ParsedIntent;
 use crate::parser::rule_parser::RuleParser;
-use crate::parser::validation::{EventValidator, ValidationOutcome};
+use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
 use crate::replay::state_diff::StateDiff;
 use crate::round::{can_cancel, can_claim, phase_at, PhaseWindow, RoundPhase};
 use crate::settings::{in_priority_window, is_priority_user, AppConfig, ItemConfig};
@@ -197,12 +197,12 @@ async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
         latest_ts = latest_ts.max(rec.timestamp_ms);
         let processed = process_one(cfg, rec, &items, &round_contexts, &validator).await;
 
-        if let Some(event) = processed.event {
+        if !processed.events.is_empty() {
             if processed.priority_claim && !eligibilities.iter().any(|e| e.user_id.0 == rec.user_id)
             {
                 eligibilities.push(priority_eligibility(&round_id, &rec.user_id));
             }
-            events.push(event);
+            events.extend(processed.events);
         }
 
         messages.push(ReplayMessageView {
@@ -240,7 +240,7 @@ async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
 struct Processed {
     status: String,
     detail: String,
-    event: Option<EventEnvelope>,
+    events: Vec<EventEnvelope>,
     priority_claim: bool,
 }
 
@@ -248,7 +248,7 @@ fn skipped(status: &str, detail: impl Into<String>) -> Processed {
     Processed {
         status: status.to_string(),
         detail: detail.into(),
-        event: None,
+        events: Vec::new(),
         priority_claim: false,
     }
 }
@@ -298,10 +298,11 @@ async fn process_one(
         };
     }
 
-    let rule = RuleParser::parse(text, items, rec.is_admin);
-
-    if rule.intent == ParsedIntent::Modify {
-        return skipped("Ignored", "改单功能暂未实现");
+    let mut rule = RuleParser::parse(text, items, rec.is_admin);
+    // 改单（D-2）：与实时管线一致，按新数量重排，应用时先撤销本人该商品的既有认购。
+    let is_modify = rule.intent == ParsedIntent::Modify;
+    if is_modify {
+        rule.intent = ParsedIntent::Claim;
     }
     if rule.intent == ParsedIntent::Claim
         && rule.items.is_empty()
@@ -315,18 +316,20 @@ async fn process_one(
     let event = match validator
         .validate(
             rule,
-            &user_id,
-            &rec.group_id,
-            Some(rec.message_id.clone()),
-            round_contexts,
-            now,
-            rec.seq,
+            ValidateContext {
+                user_id: &user_id,
+                group_id: &rec.group_id,
+                raw_message_id: Some(rec.message_id.clone()),
+                active_rounds: round_contexts,
+                now,
+                sequence: rec.seq,
+            },
         )
         .await
     {
         Ok(ValidationOutcome::Ok(mut event)) => {
             stabilize_event(&mut event, rec.seq);
-            event
+            *event
         }
         Ok(ValidationOutcome::NeedConfirm(reply)) => {
             let detail = reply
@@ -374,13 +377,58 @@ async fn process_one(
         }
     }
 
-    let detail = describe_event(&event);
+    let mut detail = describe_event(&event);
+    if is_modify {
+        detail = format!("改单：{detail}");
+    }
     let priority_claim = is_priority && matches!(event.payload, DomainEvent::ClaimCreated(_));
+    let round_id = RoundId(cfg.round.round_id.clone());
+    let mut events: Vec<EventEnvelope> = Vec::new();
+    if is_modify {
+        if let DomainEvent::ClaimCreated(created) = &event.payload {
+            let targets: Vec<ItemId> = created.items.iter().map(|l| l.item_id.clone()).collect();
+            for (index, item_id) in targets.into_iter().enumerate() {
+                let mut cancel = cancel_for_modify(&round_id, rec, rec.seq, now, item_id);
+                cancel.event_id = EventId(format!("evt-{}-cancel-{index}", rec.seq));
+                events.push(cancel);
+            }
+        }
+    }
+    events.push(event);
     Processed {
         status: "Applied".to_string(),
         detail,
-        event: Some(event),
+        events,
         priority_claim,
+    }
+}
+
+/// 改单撤销事件（与实时 `Pipeline` 的 `cancel_for_modify` 语义一致）。
+fn cancel_for_modify(
+    round_id: &RoundId,
+    rec: &MessageRecord,
+    seq: i64,
+    now: DateTime<Utc>,
+    item_id: ItemId,
+) -> EventEnvelope {
+    EventEnvelope {
+        event_id: EventId(format!("evt-{seq}-cancel")),
+        round_id: round_id.clone(),
+        group_id: rec.group_id.clone(),
+        user_id: UserId(rec.user_id.clone()),
+        raw_message_id: Some(rec.message_id.clone()),
+        event_type: "claim_cancelled".to_string(),
+        effective_at: now,
+        sequence: seq,
+        payload: DomainEvent::ClaimCancelled(ClaimCancelled {
+            target_claim_id: None,
+            target_item_id: Some(item_id),
+            quantity: None,
+            reason: Some("改单".to_string()),
+            parse_trace: None,
+            validation_trace: vec![],
+        }),
+        status: EventStatus::Active,
     }
 }
 
@@ -650,6 +698,113 @@ mod tests {
             .unwrap();
         assert_eq!(after.outcomes[0].status, "Ignored");
         assert!(after.board.user_summaries.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    struct DisabledLlm;
+
+    #[async_trait::async_trait]
+    impl crate::llm::client::LlmClient for DisabledLlm {
+        async fn complete(
+            &self,
+            _settings: &crate::settings::LlmSettings,
+            _system_prompt: &str,
+            _user_prompt: &str,
+        ) -> anyhow::Result<String> {
+            anyhow::bail!("llm disabled in test")
+        }
+    }
+
+    fn config_store(cfg: &AppConfig) -> std::sync::Arc<crate::settings::ConfigStore> {
+        let path =
+            std::env::temp_dir().join(format!("paigu-session-cfg-{}.json", uuid::Uuid::new_v4()));
+        std::fs::write(&path, serde_json::to_string_pretty(cfg).unwrap()).unwrap();
+        std::sync::Arc::new(crate::settings::ConfigStore::load(path).unwrap())
+    }
+
+    fn incoming(message_id: &str, text: &str, ts: i64) -> crate::bus::IncomingEvent {
+        crate::bus::IncomingEvent {
+            group_id: "123456789".to_string(),
+            user_id: "u1".to_string(),
+            nickname: "u1".to_string(),
+            message_id: message_id.to_string(),
+            text: text.to_string(),
+            timestamp_ms: ts,
+            is_admin: false,
+            raw: None,
+        }
+    }
+
+    fn strip_claim_ids(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("claim_id");
+                for child in map.values_mut() {
+                    strip_claim_ids(child);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for child in items.iter_mut() {
+                    strip_claim_ids(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 规范化 board：去掉时间戳与实时/重放各自生成的内部 claim_id，只比较分配结果。
+    fn canonical_board(mut board: serde_json::Value) -> serde_json::Value {
+        if let Some(obj) = board.as_object_mut() {
+            obj.remove("generated_at");
+        }
+        strip_claim_ids(&mut board);
+        board
+    }
+
+    #[tokio::test]
+    async fn realtime_and_replay_modify_boards_match() {
+        let cfg = test_config();
+        let dir = temp_dir("modify-parity");
+        let pipeline = crate::llm::Pipeline::new_with_client_dir(
+            config_store(&cfg),
+            std::sync::Arc::new(DisabledLlm),
+            dir.clone(),
+        );
+
+        let first = pipeline
+            .process(incoming("mod-1", "排 徽章 甲 1", 1_000))
+            .await;
+        assert_eq!(first.status, "Applied");
+
+        let modified = pipeline
+            .process(incoming("mod-2", "改 徽章 甲 2", 2_000))
+            .await;
+        assert_eq!(modified.status, "Applied");
+        assert!(modified.detail.starts_with("改单"), "{}", modified.detail);
+
+        let (live_version, live_board) = pipeline.board().await;
+
+        let store = JsonlMessageStore::new(&dir, &cfg.round.round_id);
+        let records = store.read_all().await.unwrap();
+        assert_eq!(records.len(), 2);
+
+        let replayed = replay_messages(&cfg, &records, ReplayOverrides::default())
+            .await
+            .unwrap();
+        assert_eq!(replayed.outcomes[1].status, "Applied");
+        assert!(
+            replayed.outcomes[1].detail.starts_with("改单"),
+            "{}",
+            replayed.outcomes[1].detail
+        );
+
+        assert_eq!(live_version, replayed.version, "实时与重放版本应一致");
+        assert_eq!(
+            canonical_board(live_board),
+            canonical_board(serde_json::to_value(&replayed.board).unwrap()),
+            "实时 = 重放"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

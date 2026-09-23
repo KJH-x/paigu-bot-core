@@ -144,7 +144,9 @@ impl Gateway {
         };
         match self.pending.lock().unwrap().remove(echo) {
             Some(tx) => {
-                let _ = tx.send(val.clone());
+                if let Err(e) = tx.send(val.clone()) {
+                    warn!(error = ?e, "action response receiver dropped");
+                }
                 true
             }
             None => false,
@@ -219,7 +221,9 @@ impl Gateway {
                         Some(Ok(WsMessage::Ping(data))) => {
                             let clients = self.clients.lock().unwrap();
                             if let Some(tx) = clients.get(&client_id) {
-                                let _ = tx.send(WsMessage::Pong(data));
+                                if let Err(e) = tx.send(WsMessage::Pong(data)) {
+                                    warn!(error = ?e, "failed to send pong");
+                                }
                             }
                         }
                         Some(Ok(WsMessage::Pong(_))) => {}
