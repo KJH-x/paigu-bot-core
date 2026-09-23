@@ -232,11 +232,7 @@ impl MessageLog {
         self.store_for(round_id).read_all().await
     }
 
-    pub async fn replace_all(
-        &self,
-        round_id: &str,
-        recs: &[MessageRecord],
-    ) -> anyhow::Result<()> {
+    pub async fn replace_all(&self, round_id: &str, recs: &[MessageRecord]) -> anyhow::Result<()> {
         self.store_for(round_id).replace_all(recs).await
     }
 
@@ -278,10 +274,7 @@ impl MessageLog {
         Ok(())
     }
 
-    pub async fn read_raw_events(
-        &self,
-        round_id: &str,
-    ) -> anyhow::Result<Vec<serde_json::Value>> {
+    pub async fn read_raw_events(&self, round_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
         let path = self.event_path_for(round_id);
         let _guard = JsonlMessageStore::lock();
         if !path.exists() {
@@ -340,7 +333,10 @@ mod tests {
     #[test]
     fn new_uses_round_id_filename() {
         let store = JsonlMessageStore::new("data/messages", "月行水上");
-        assert_eq!(store.path(), Path::new("data/messages").join("月行水上.jsonl"));
+        assert_eq!(
+            store.path(),
+            Path::new("data/messages").join("月行水上.jsonl")
+        );
     }
 
     #[tokio::test]

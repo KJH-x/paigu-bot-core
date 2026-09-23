@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
-use crate::domain::ids::RoundId;
 use crate::domain::event::EventEnvelope;
+use crate::domain::ids::RoundId;
 use crate::error::AppResult;
 
 #[async_trait]

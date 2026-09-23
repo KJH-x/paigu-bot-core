@@ -138,7 +138,10 @@ pub struct PackageGift {
     pub unit_price_cents: i64,
 }
 
-pub fn order_table_from_allocation(snapshot: &AllocationSnapshot, prices: &[UnitPrice]) -> OrderTable {
+pub fn order_table_from_allocation(
+    snapshot: &AllocationSnapshot,
+    prices: &[UnitPrice],
+) -> OrderTable {
     type LineKey = (String, Option<String>, bool);
     let mut by_package: BTreeMap<String, BTreeMap<LineKey, (u32, i64)>> = BTreeMap::new();
 
@@ -325,7 +328,10 @@ pub fn check_completeness(table: &OrderTable, snapshot: &AllocationSnapshot) -> 
     let complete = missing.is_empty() && extra.is_empty();
     let mut messages = Vec::new();
     if !missing.is_empty() {
-        messages.push(format!("排包未完成：{} 类商品尚未排入下单表", missing.len()));
+        messages.push(format!(
+            "排包未完成：{} 类商品尚未排入下单表",
+            missing.len()
+        ));
     }
     if !extra.is_empty() {
         messages.push(format!("数量超出排谷结果：{} 类商品", extra.len()));

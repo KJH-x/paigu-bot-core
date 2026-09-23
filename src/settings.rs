@@ -218,7 +218,7 @@ pub fn in_priority_window(window: Option<(i64, i64)>, timestamp_ms: i64) -> bool
 pub fn is_priority_user(priority_users: &[String], candidates: &[&str]) -> bool {
     priority_users.iter().any(|u| {
         let u = u.trim();
-        candidates.iter().any(|c| u == *c)
+        candidates.contains(&u)
     })
 }
 
@@ -267,7 +267,10 @@ impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConfigError::StaleRevision { expected, actual } => {
-                write!(f, "stale config revision: expected {expected}, actual {actual}")
+                write!(
+                    f,
+                    "stale config revision: expected {expected}, actual {actual}"
+                )
             }
             ConfigError::Io(e) => write!(f, "io: {e}"),
             ConfigError::Json(e) => write!(f, "json: {e}"),
@@ -287,7 +290,8 @@ impl ConfigStore {
         let cfg = if path.exists() {
             let raw = std::fs::read_to_string(&path)
                 .with_context(|| format!("read config {}", path.display()))?;
-            serde_json::from_str(&raw).with_context(|| format!("parse config {}", path.display()))?
+            serde_json::from_str(&raw)
+                .with_context(|| format!("parse config {}", path.display()))?
         } else {
             let cfg = default_config();
             if let Some(parent) = path.parent() {
@@ -410,10 +414,8 @@ mod tests {
 
     #[tokio::test]
     async fn put_rejects_stale_revision() {
-        let path = std::env::temp_dir().join(format!(
-            "paigu-settings-test-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("paigu-settings-test-{}.json", uuid::Uuid::new_v4()));
         let store = ConfigStore::load(&path).expect("load config");
         let current = store.get().await.revision;
 

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ids::{UserId, ItemId, ClaimId, RoundId, EligibilityId};
+use crate::domain::ids::{ClaimId, EligibilityId, ItemId, RoundId, UserId};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ClaimType {
@@ -174,8 +174,12 @@ pub struct EffectiveClaimLine {
 }
 
 impl EffectiveClaimLine {
-    pub fn compute_priority(user_id: &UserId, item_id: &ItemId, effective_at: DateTime<Utc>,
-        eligibilities: &[Eligibility]) -> i32 {
+    pub fn compute_priority(
+        user_id: &UserId,
+        item_id: &ItemId,
+        effective_at: DateTime<Utc>,
+        eligibilities: &[Eligibility],
+    ) -> i32 {
         eligibilities
             .iter()
             .filter(|e| &e.user_id == user_id)

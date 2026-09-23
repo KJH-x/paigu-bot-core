@@ -288,7 +288,11 @@ fn select_packages(
         scope_amount[b]
             .cmp(&scope_amount[a])
             .then(line_count[b].cmp(&line_count[a]))
-            .then(table.packages[a].package_id.cmp(&table.packages[b].package_id))
+            .then(
+                table.packages[a]
+                    .package_id
+                    .cmp(&table.packages[b].package_id),
+            )
     });
     idx.truncate(shares as usize);
     idx
@@ -313,7 +317,12 @@ pub(crate) fn largest_remainder(total: i64, weights: &[(usize, i64)]) -> Vec<(us
     let allocated: i128 = shares.iter().map(|(_, q, _)| *q as i128).sum();
     let mut leftover = total_i - allocated;
     let mut order: Vec<usize> = (0..shares.len()).collect();
-    order.sort_by(|&a, &b| shares[b].2.cmp(&shares[a].2).then(shares[a].0.cmp(&shares[b].0)));
+    order.sort_by(|&a, &b| {
+        shares[b]
+            .2
+            .cmp(&shares[a].2)
+            .then(shares[a].0.cmp(&shares[b].0))
+    });
     for &k in &order {
         if leftover <= 0 {
             break;

@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ids::ItemId;
-use crate::domain::snapshot::AllocationSnapshot;
 use crate::domain::allocation::SlotStatus;
 use crate::domain::claim::SlotPolicy;
+use crate::domain::ids::ItemId;
+use crate::domain::snapshot::AllocationSnapshot;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateDiff {
@@ -19,23 +19,35 @@ impl StateDiff {
         let mut slot_changes = Vec::new();
 
         for after_ia in &after.item_allocations {
-            let before_ia = before.item_allocations.iter()
+            let before_ia = before
+                .item_allocations
+                .iter()
                 .find(|i| i.item_id == after_ia.item_id);
 
             for after_box in &after_ia.boxes {
-                let before_box = before_ia.and_then(|i| i.boxes.iter().find(|b| b.box_index == after_box.box_index));
+                let before_box = before_ia
+                    .and_then(|i| i.boxes.iter().find(|b| b.box_index == after_box.box_index));
 
                 for after_slot in &after_box.slots {
-                    let before_slot = before_box.and_then(|b| b.slots.iter().find(|s| s.slot_index == after_slot.slot_index));
+                    let before_slot = before_box.and_then(|b| {
+                        b.slots
+                            .iter()
+                            .find(|s| s.slot_index == after_slot.slot_index)
+                    });
 
                     let changed = match before_slot {
-                        Some(bs) => bs.status != after_slot.status || bs.user_id != after_slot.user_id,
+                        Some(bs) => {
+                            bs.status != after_slot.status || bs.user_id != after_slot.user_id
+                        }
                         None => true,
                     };
 
                     if changed {
                         let reason = match (before_slot, after_slot) {
-                            (Some(bs), as_) if bs.status == SlotStatus::Empty && as_.status == SlotStatus::Filled => {
+                            (Some(bs), as_)
+                                if bs.status == SlotStatus::Empty
+                                    && as_.status == SlotStatus::Filled =>
+                            {
                                 if as_.slot_policy == SlotPolicy::TailLocked {
                                     SlotChangeReason::TailSegmentCreated
                                 } else if as_.slot_policy == SlotPolicy::AdminFixed {
@@ -44,7 +56,10 @@ impl StateDiff {
                                     SlotChangeReason::NewClaimFilled
                                 }
                             }
-                            (Some(bs), as_) if bs.status == SlotStatus::Filled && as_.status == SlotStatus::Empty => {
+                            (Some(bs), as_)
+                                if bs.status == SlotStatus::Filled
+                                    && as_.status == SlotStatus::Empty =>
+                            {
                                 SlotChangeReason::CancelReleased
                             }
                             (None, as_) => {
@@ -104,29 +119,41 @@ impl StateDiff {
             }
         }
 
-        let claim_changes: Vec<ClaimChange> = changed_claim_ids.into_iter().map(|id| {
-            let before_status = before.item_allocations.iter()
-                .flat_map(|ia| ia.boxes.iter())
-                .flat_map(|b| b.slots.iter())
-                .find(|s| s.claim_id.as_ref().map(|c| &c.0) == Some(&id))
-                .map(|s| s.status.as_str().to_string());
-            let after_status = after.item_allocations.iter()
-                .flat_map(|ia| ia.boxes.iter())
-                .flat_map(|b| b.slots.iter())
-                .find(|s| s.claim_id.as_ref().map(|c| &c.0) == Some(&id))
-                .map(|s| s.status.as_str().to_string());
-            ClaimChange {
-                claim_id: id,
-                before_status,
-                after_status,
-            }
-        }).collect();
+        let claim_changes: Vec<ClaimChange> = changed_claim_ids
+            .into_iter()
+            .map(|id| {
+                let before_status = before
+                    .item_allocations
+                    .iter()
+                    .flat_map(|ia| ia.boxes.iter())
+                    .flat_map(|b| b.slots.iter())
+                    .find(|s| s.claim_id.as_ref().map(|c| &c.0) == Some(&id))
+                    .map(|s| s.status.as_str().to_string());
+                let after_status = after
+                    .item_allocations
+                    .iter()
+                    .flat_map(|ia| ia.boxes.iter())
+                    .flat_map(|b| b.slots.iter())
+                    .find(|s| s.claim_id.as_ref().map(|c| &c.0) == Some(&id))
+                    .map(|s| s.status.as_str().to_string());
+                ClaimChange {
+                    claim_id: id,
+                    before_status,
+                    after_status,
+                }
+            })
+            .collect();
 
         let mut user_total_changes = Vec::new();
         for after_summary in &after.user_summaries {
-            let before_summary = before.user_summaries.iter().find(|s| s.user_id == after_summary.user_id);
+            let before_summary = before
+                .user_summaries
+                .iter()
+                .find(|s| s.user_id == after_summary.user_id);
             let after_total: i64 = after_summary.items.iter().map(|i| i.gross.0).sum();
-            let before_total: i64 = before_summary.map(|s| s.items.iter().map(|i| i.gross.0).sum()).unwrap_or(0);
+            let before_total: i64 = before_summary
+                .map(|s| s.items.iter().map(|i| i.gross.0).sum())
+                .unwrap_or(0);
             if before_total != after_total {
                 user_total_changes.push(UserTotalChange {
                     user_id: after_summary.user_id.0.clone(),
@@ -136,7 +163,11 @@ impl StateDiff {
             }
         }
         for before_summary in &before.user_summaries {
-            if !after.user_summaries.iter().any(|s| s.user_id == before_summary.user_id) {
+            if !after
+                .user_summaries
+                .iter()
+                .any(|s| s.user_id == before_summary.user_id)
+            {
                 let before_total: i64 = before_summary.items.iter().map(|i| i.gross.0).sum();
                 user_total_changes.push(UserTotalChange {
                     user_id: before_summary.user_id.0.clone(),
@@ -158,32 +189,41 @@ impl StateDiff {
             }
         }
 
-        let item_total_changes: Vec<ItemTotalChange> = all_item_ids.into_iter().map(|id| {
-            let before_qty: u32 = before.user_summaries.iter()
-                .flat_map(|s| s.items.iter())
-                .filter(|i| i.item_id.0 == id)
-                .map(|i| i.quantity)
-                .sum();
-            let after_qty: u32 = after.user_summaries.iter()
-                .flat_map(|s| s.items.iter())
-                .filter(|i| i.item_id.0 == id)
-                .map(|i| i.quantity)
-                .sum();
-            ItemTotalChange {
-                item_id: id,
-                before_quantity: before_qty,
-                after_quantity: after_qty,
-            }
-        }).filter(|c| c.before_quantity != c.after_quantity).collect();
+        let item_total_changes: Vec<ItemTotalChange> = all_item_ids
+            .into_iter()
+            .map(|id| {
+                let before_qty: u32 = before
+                    .user_summaries
+                    .iter()
+                    .flat_map(|s| s.items.iter())
+                    .filter(|i| i.item_id.0 == id)
+                    .map(|i| i.quantity)
+                    .sum();
+                let after_qty: u32 = after
+                    .user_summaries
+                    .iter()
+                    .flat_map(|s| s.items.iter())
+                    .filter(|i| i.item_id.0 == id)
+                    .map(|i| i.quantity)
+                    .sum();
+                ItemTotalChange {
+                    item_id: id,
+                    before_quantity: before_qty,
+                    after_quantity: after_qty,
+                }
+            })
+            .filter(|c| c.before_quantity != c.after_quantity)
+            .collect();
 
-        let settlement_changes: Vec<SettlementChange> = user_total_changes.iter().map(|uc| {
-            SettlementChange {
+        let settlement_changes: Vec<SettlementChange> = user_total_changes
+            .iter()
+            .map(|uc| SettlementChange {
                 user_id: uc.user_id.clone(),
                 before_amount: uc.before_total,
                 after_amount: uc.after_total,
                 description: format!("金额 {} -> {}", uc.before_total, uc.after_total),
-            }
-        }).collect();
+            })
+            .collect();
 
         StateDiff {
             slot_changes,
@@ -193,7 +233,6 @@ impl StateDiff {
             settlement_changes,
         }
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

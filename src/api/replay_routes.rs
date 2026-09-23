@@ -63,13 +63,13 @@ async fn run_replay(
     State(state): State<Arc<ApiState>>,
     Json(body): Json<ReplayBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let result = do_replay(&state, body.overrides).await.map_err(api_internal)?;
+    let result = do_replay(&state, body.overrides)
+        .await
+        .map_err(api_internal)?;
     Ok(Json(replay_result_json(&result)))
 }
 
-async fn replay_diff(
-    State(state): State<Arc<ApiState>>,
-) -> Result<Json<Value>, ApiError> {
+async fn replay_diff(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
     let stored = last_replay().lock().ok().and_then(|guard| guard.clone());
     let result = match stored {
         Some(result) => result,
@@ -232,9 +232,10 @@ async fn snapshot_import(
             serde_json::from_value(bundle.config.clone()).map_err(api_bad_request)?;
         let store = state.messages.store_for(&cfg.round.round_id);
         store.replace_all(&records).await.map_err(api_internal)?;
-        let replayed = session::replay_messages(&imported_cfg, &records, ReplayOverrides::default())
-            .await
-            .map_err(api_internal)?;
+        let replayed =
+            session::replay_messages(&imported_cfg, &records, ReplayOverrides::default())
+                .await
+                .map_err(api_internal)?;
         applied = true;
         result = Some(replay_result_json(&replayed));
     }

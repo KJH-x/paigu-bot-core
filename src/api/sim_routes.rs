@@ -44,7 +44,10 @@ struct SimMessage {
     is_admin: bool,
 }
 
-async fn sim_message(State(state): State<Arc<ApiState>>, Json(body): Json<SimMessage>) -> Json<Value> {
+async fn sim_message(
+    State(state): State<Arc<ApiState>>,
+    Json(body): Json<SimMessage>,
+) -> Json<Value> {
     let cfg = state.cfg.get().await;
     let group_id = body
         .group_id

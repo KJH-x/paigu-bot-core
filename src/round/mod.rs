@@ -75,8 +75,16 @@ mod tests {
     #[test]
     fn phase_at_uses_half_open_windows() {
         let windows = vec![
-            PhaseWindow { phase: RoundPhase::Phase0, start_ms: 0, end_ms: 100 },
-            PhaseWindow { phase: RoundPhase::PhaseI, start_ms: 100, end_ms: 200 },
+            PhaseWindow {
+                phase: RoundPhase::Phase0,
+                start_ms: 0,
+                end_ms: 100,
+            },
+            PhaseWindow {
+                phase: RoundPhase::PhaseI,
+                start_ms: 100,
+                end_ms: 200,
+            },
         ];
         assert_eq!(phase_at(&windows, -1), None);
         assert_eq!(phase_at(&windows, 0), Some(RoundPhase::Phase0));

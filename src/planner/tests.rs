@@ -234,11 +234,7 @@ fn both_strategies_are_reproducible() {
             ]),
             strategy,
             limits: limits(3, 200_000),
-            prices: vec![
-                price("a", 25_000),
-                price("b", 25_100),
-                price("c", 12_000),
-            ],
+            prices: vec![price("a", 25_000), price("b", 25_100), price("c", 12_000)],
         };
 
         let first = plan(&req);

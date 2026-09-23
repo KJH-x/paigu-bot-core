@@ -368,7 +368,12 @@ impl Pipeline {
         }
         let (version, snapshot_value, reply) = {
             let mut state = self.state.lock().await;
-            if is_priority && !state.eligibilities.iter().any(|e| e.user_id.0 == ev.user_id) {
+            if is_priority
+                && !state
+                    .eligibilities
+                    .iter()
+                    .any(|e| e.user_id.0 == ev.user_id)
+            {
                 state
                     .eligibilities
                     .push(priority_eligibility(&round_id, &ev.user_id));
@@ -377,19 +382,14 @@ impl Pipeline {
                 if let DomainEvent::ClaimCreated(created) = &event.payload {
                     let targets: Vec<_> = created.items.iter().map(|l| l.item_id.clone()).collect();
                     for item_id in targets {
-                        state.events.push(cancel_for_modify(
-                            &round_id,
-                            &ev,
-                            seq,
-                            now,
-                            item_id,
-                        ));
+                        state
+                            .events
+                            .push(cancel_for_modify(&round_id, &ev, seq, now, item_id));
                     }
                 }
             }
             state.events.push(event);
-            let snapshot =
-                rebuild_allocation_snapshot(&items, &state.events, &state.eligibilities);
+            let snapshot = rebuild_allocation_snapshot(&items, &state.events, &state.eligibilities);
             let version = snapshot.version;
             let snapshot_value = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
             state.version = version;
@@ -401,7 +401,11 @@ impl Pipeline {
                 status: "Applied".to_string(),
                 detail: detail.clone(),
             });
-            (version, snapshot_value, format!("已记录，当前版本 #{}", version))
+            (
+                version,
+                snapshot_value,
+                format!("已记录，当前版本 #{}", version),
+            )
         };
 
         self.persist(&ev, "Applied", &detail, "message").await;
@@ -524,8 +528,8 @@ impl Pipeline {
             }
         };
 
-        let path = std::path::PathBuf::from("data/snapshots")
-            .join(format!("{round_id}.snapshot.json"));
+        let path =
+            std::path::PathBuf::from("data/snapshots").join(format!("{round_id}.snapshot.json"));
         match bundle.export_file(&path) {
             Ok(path) => (
                 "Applied",
@@ -581,8 +585,16 @@ impl Pipeline {
         let mut grouped: BTreeMap<String, (String, BTreeMap<String, u32>)> = BTreeMap::new();
         for summary in &snapshot.user_summaries {
             let uid = summary.user_id.0.clone();
-            let display = state.display.get(&uid).cloned().unwrap_or_else(|| uid.clone());
-            let identity = state.identity.get(&uid).cloned().unwrap_or_else(|| display.clone());
+            let display = state
+                .display
+                .get(&uid)
+                .cloned()
+                .unwrap_or_else(|| uid.clone());
+            let identity = state
+                .identity
+                .get(&uid)
+                .cloned()
+                .unwrap_or_else(|| display.clone());
             let entry = grouped
                 .entry(display)
                 .or_insert_with(|| (identity, BTreeMap::new()));
@@ -654,7 +666,11 @@ impl Pipeline {
         }
     }
 
-    async fn llm_parse(&self, cfg: &AppConfig, ev: &IncomingEvent) -> anyhow::Result<ParsedMessage> {
+    async fn llm_parse(
+        &self,
+        cfg: &AppConfig,
+        ev: &IncomingEvent,
+    ) -> anyhow::Result<ParsedMessage> {
         let system = prompt::build_system_prompt(cfg);
         let user = prompt::build_user_prompt(ev);
         let raw = self.llm.complete(&cfg.llm, &system, &user).await?;
@@ -796,10 +812,7 @@ struct LlmItem {
 fn parse_llm_json(raw: &str, items: &[Item], round_id: &str) -> anyhow::Result<ParsedMessage> {
     let json_text = extract_json(raw);
     let out: LlmOut = serde_json::from_str(&json_text).map_err(|e| {
-        anyhow::anyhow!(
-            "LLM JSON 解析失败: {e}; raw={}",
-            super::truncate(raw, 200)
-        )
+        anyhow::anyhow!("LLM JSON 解析失败: {e}; raw={}", super::truncate(raw, 200))
     })?;
 
     let intent = match out
@@ -837,13 +850,22 @@ fn parse_llm_json(raw: &str, items: &[Item], round_id: &str) -> anyhow::Result<P
     })
 }
 
-fn resolve_llm_item(item: &LlmItem, items: &[Item], round_id: &str) -> (ParsedClaimItem, Option<String>) {
+fn resolve_llm_item(
+    item: &LlmItem,
+    items: &[Item],
+    round_id: &str,
+) -> (ParsedClaimItem, Option<String>) {
     let item_tok = item
         .item
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .or_else(|| item.name.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+        .or_else(|| {
+            item.name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or("");
     let variant_tok = item
         .variant
@@ -929,9 +951,9 @@ fn extract_json(raw: &str) -> String {
 mod tests {
     use super::*;
     use crate::messages::{JsonlMessageStore, MessageStore};
-    use std::path::PathBuf;
     use crate::round::PhaseWindow;
     use crate::settings::{default_config, LlmSettings};
+    use std::path::PathBuf;
 
     struct MockClient {
         reply: std::sync::Mutex<MockReply>,
@@ -983,10 +1005,8 @@ mod tests {
     }
 
     fn store(cfg: &AppConfig) -> Arc<ConfigStore> {
-        let path = std::env::temp_dir().join(format!(
-            "paigu-llm-test-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("paigu-llm-test-{}.json", uuid::Uuid::new_v4()));
         std::fs::write(&path, serde_json::to_string_pretty(cfg).unwrap()).unwrap();
         Arc::new(ConfigStore::load(path).unwrap())
     }
@@ -995,11 +1015,11 @@ mod tests {
         cfg: &AppConfig,
         llm: Arc<dyn LlmClient>,
     ) -> (Arc<Pipeline>, PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "paigu-msgs-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        (Pipeline::new_with_client_dir(store(cfg), llm, dir.clone()), dir)
+        let dir = std::env::temp_dir().join(format!("paigu-msgs-test-{}", uuid::Uuid::new_v4()));
+        (
+            Pipeline::new_with_client_dir(store(cfg), llm, dir.clone()),
+            dir,
+        )
     }
 
     fn test_pipeline(cfg: &AppConfig, llm: Arc<dyn LlmClient>) -> Arc<Pipeline> {
@@ -1015,7 +1035,11 @@ mod tests {
     }
 
     fn phase_window(phase: RoundPhase, start_ms: i64, end_ms: i64) -> PhaseWindow {
-        PhaseWindow { phase, start_ms, end_ms }
+        PhaseWindow {
+            phase,
+            start_ms,
+            end_ms,
+        }
     }
 
     fn event(user_id: &str, nickname: &str, text: &str, timestamp_ms: i64) -> IncomingEvent {

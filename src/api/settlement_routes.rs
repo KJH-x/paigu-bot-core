@@ -51,7 +51,9 @@ async fn put_settlement_config(
     match state.cfg.put(cfg, body.revision).await {
         Ok(revision) => {
             let cfg = state.cfg.get().await;
-            Ok(Json(json!({ "config": cfg.settlement, "revision": revision })))
+            Ok(Json(
+                json!({ "config": cfg.settlement, "revision": revision }),
+            ))
         }
         Err(crate::settings::ConfigError::StaleRevision { actual, .. }) => {
             Err(api_stale_revision(actual))
@@ -273,7 +275,10 @@ mod tests {
 
     #[test]
     fn parse_strategy_accepts_known_values() {
-        assert!(matches!(parse_strategy("gift_max"), Ok(planner::Strategy::GiftMax)));
+        assert!(matches!(
+            parse_strategy("gift_max"),
+            Ok(planner::Strategy::GiftMax)
+        ));
         assert!(matches!(
             parse_strategy("discount_max"),
             Ok(planner::Strategy::DiscountMax)

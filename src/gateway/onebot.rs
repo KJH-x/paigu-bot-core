@@ -238,10 +238,14 @@ pub fn decide_route_with_reason(ev: &RouteMessageEvent, policy: &RoutePolicy) ->
     }
     if !policy.whitelist_members.is_empty() {
         let id = parse_identity(ev);
-        let candidates = [id.user_id.as_str(), id.identity.as_str(), id.display.as_str()];
+        let candidates = [
+            id.user_id.as_str(),
+            id.identity.as_str(),
+            id.display.as_str(),
+        ];
         let allowed = policy.whitelist_members.iter().any(|m| {
             let m = m.trim();
-            !m.is_empty() && candidates.iter().any(|c| *c == m)
+            !m.is_empty() && candidates.contains(&m)
         });
         if !allowed {
             return RouteDecision::Drop("not_whitelisted_member".to_string());
@@ -413,7 +417,12 @@ mod tests {
             role: Some("admin".to_string()),
             ..Default::default()
         });
-        let rec = to_message_record(&ev, "drop:not_whitelisted_member", "Dropped", "not_whitelisted_member");
+        let rec = to_message_record(
+            &ev,
+            "drop:not_whitelisted_member",
+            "Dropped",
+            "not_whitelisted_member",
+        );
         assert_eq!(rec.routed, "drop:not_whitelisted_member");
         assert_eq!(rec.status, "Dropped");
         assert_eq!(rec.detail, "not_whitelisted_member");

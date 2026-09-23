@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ids::{EventId, RoundId, UserId, ItemId, ClaimId};
 use crate::domain::claim::{ClaimLine, SlotPolicy};
+use crate::domain::ids::{ClaimId, EventId, ItemId, RoundId, UserId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event_type")]
@@ -164,6 +164,7 @@ pub struct ParseOverrideEvent {
 }
 
 pub fn compare_event_order(a: &EventEnvelope, b: &EventEnvelope) -> std::cmp::Ordering {
-    a.effective_at.cmp(&b.effective_at)
+    a.effective_at
+        .cmp(&b.effective_at)
         .then_with(|| a.sequence.cmp(&b.sequence))
 }

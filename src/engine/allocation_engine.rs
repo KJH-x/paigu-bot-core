@@ -1,15 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::domain::allocation::{
+    BoxAllocation, ItemAllocation, SingleAllocation, SlotAllocation, SlotStatus,
+    UserAllocationSummary, UserItemAllocation, WaitingLine,
+};
+use crate::domain::claim::{ClaimType, EffectiveClaimLine, SlotPolicy};
+use crate::domain::event::{AdminAllocationAction, DomainEvent, EventEnvelope};
 use crate::domain::ids::{ItemId, UserId};
 use crate::domain::item::Item;
-use crate::domain::claim::{EffectiveClaimLine, ClaimType, SlotPolicy};
-use crate::domain::event::{EventEnvelope, DomainEvent, AdminAllocationAction};
-use crate::domain::allocation::{
-    ItemAllocation, BoxAllocation, SlotAllocation, SlotStatus,
-    SingleAllocation, WaitingLine, UserAllocationSummary, UserItemAllocation,
-};
-use crate::domain::snapshot::AllocationSnapshot;
 use crate::domain::money::MoneyCents;
+use crate::domain::snapshot::AllocationSnapshot;
 use crate::error::AppResult;
 
 pub struct AllocationEngine {}
@@ -26,19 +26,24 @@ impl AllocationEngine {
         events: &[EventEnvelope],
     ) -> AppResult<AllocationSnapshot> {
         let now = chrono::Utc::now();
-        let round_id = items.first().map(|i| i.round_id.clone()).unwrap_or_else(|| crate::domain::ids::RoundId("unknown".to_string()));
+        let round_id = items
+            .first()
+            .map(|i| i.round_id.clone())
+            .unwrap_or_else(|| crate::domain::ids::RoundId("unknown".to_string()));
         let version = 1i64;
 
         let mut sorted_lines = claim_lines.to_vec();
         sorted_lines.sort_by(|a, b| {
-            b.priority_level.cmp(&a.priority_level)
+            b.priority_level
+                .cmp(&a.priority_level)
                 .then_with(|| a.effective_at.cmp(&b.effective_at))
                 .then_with(|| a.sequence.cmp(&b.sequence))
                 .then_with(|| a.line_index.cmp(&b.line_index))
         });
 
         let mut item_states: HashMap<(ItemId, Option<String>), ItemWorkingState> = HashMap::new();
-        let item_map: HashMap<ItemId, &Item> = items.iter().map(|i| (i.item_id.clone(), i)).collect();
+        let item_map: HashMap<ItemId, &Item> =
+            items.iter().map(|i| (i.item_id.clone(), i)).collect();
 
         let mut needs_variantless: HashSet<ItemId> = HashSet::new();
         for line in &sorted_lines {
@@ -80,7 +85,9 @@ impl AllocationEngine {
                         self.allocate_split_line(state, line);
                     }
                     ClaimType::Single => {
-                        let max_qty = item_map.get(&line.item_id).and_then(|item| item.max_quantity);
+                        let max_qty = item_map
+                            .get(&line.item_id)
+                            .and_then(|item| item.max_quantity);
                         state.allocate_single(line, max_qty);
                     }
                 }
@@ -94,9 +101,13 @@ impl AllocationEngine {
         for ((item_id, variant_id), state) in &item_states {
             let item = item_map.get(item_id);
             let item_name = item.map(|i| i.name.clone()).unwrap_or_default();
-            let kind = item.map(|i| i.kind.as_str().to_string()).unwrap_or_default();
+            let kind = item
+                .map(|i| i.kind.as_str().to_string())
+                .unwrap_or_default();
 
-            let mut boxes: Vec<BoxAllocation> = state.boxes.values()
+            let mut boxes: Vec<BoxAllocation> = state
+                .boxes
+                .values()
                 .map(|b| BoxAllocation {
                     box_index: b.box_index,
                     slots: b.slots.clone(),
@@ -109,9 +120,13 @@ impl AllocationEngine {
                     if let Some(ref uid) = slot.user_id {
                         if let Some(item) = item {
                             let entry = user_summaries_map.entry(uid.clone()).or_default();
-                            if let Some(existing) = entry.iter_mut().find(|e| e.item_id == *item_id) {
+                            if let Some(existing) = entry.iter_mut().find(|e| e.item_id == *item_id)
+                            {
                                 existing.quantity += 1;
-                                existing.gross = existing.gross.checked_add(item.unit_price).unwrap_or(existing.gross);
+                                existing.gross = existing
+                                    .gross
+                                    .checked_add(item.unit_price)
+                                    .unwrap_or(existing.gross);
                             } else {
                                 entry.push(UserItemAllocation {
                                     item_id: item_id.clone(),
@@ -136,7 +151,10 @@ impl AllocationEngine {
                         quantity: sa.quantity,
                         claim_type: ClaimType::Single,
                         unit_price: sa.unit_price,
-                        gross: sa.unit_price.checked_mul_u32(sa.quantity).unwrap_or(MoneyCents::zero()),
+                        gross: sa
+                            .unit_price
+                            .checked_mul_u32(sa.quantity)
+                            .unwrap_or(MoneyCents::zero()),
                     });
                 }
             }
@@ -160,7 +178,8 @@ impl AllocationEngine {
                 .then_with(|| a.variant_id.cmp(&b.variant_id))
         });
 
-        let mut user_summaries: Vec<UserAllocationSummary> = user_summaries_map.into_iter()
+        let mut user_summaries: Vec<UserAllocationSummary> = user_summaries_map
+            .into_iter()
             .map(|(uid, items)| UserAllocationSummary {
                 user_id: uid,
                 display_name: String::new(),
@@ -207,15 +226,29 @@ impl AllocationEngine {
         } else {
             line.quantity.min(box_size)
         };
-        let segment_id = format!("fullbox:{}:{}:{}", line.user_id.0, line.claim_id.0, line.line_index);
+        let segment_id = format!(
+            "fullbox:{}:{}:{}",
+            line.user_id.0, line.claim_id.0, line.line_index
+        );
 
         for slot_idx in 1..=take {
             state.ensure_slot_exists(box_idx, slot_idx);
-            state.fill_slot(box_idx, slot_idx, line, SlotPolicy::FullBox, Some(segment_id.clone()));
+            state.fill_slot(
+                box_idx,
+                slot_idx,
+                line,
+                SlotPolicy::FullBox,
+                Some(segment_id.clone()),
+            );
         }
         for slot_idx in (take + 1)..=box_size {
             state.ensure_slot_exists(box_idx, slot_idx);
-            state.mark_locked_empty(box_idx, slot_idx, SlotPolicy::FullBox, Some(segment_id.clone()));
+            state.mark_locked_empty(
+                box_idx,
+                slot_idx,
+                SlotPolicy::FullBox,
+                Some(segment_id.clone()),
+            );
         }
     }
 
@@ -235,7 +268,10 @@ impl AllocationEngine {
     }
 
     fn allocate_tail_locked(&self, state: &mut ItemWorkingState, line: &EffectiveClaimLine) {
-        let segment_id = format!("tail:{}:{}:{}", line.user_id.0, line.claim_id.0, line.line_index);
+        let segment_id = format!(
+            "tail:{}:{}:{}",
+            line.user_id.0, line.claim_id.0, line.line_index
+        );
         let box_idx = state.next_box_index();
 
         let take = match state.box_size {
@@ -246,13 +282,24 @@ impl AllocationEngine {
         for i in 0..take {
             let slot_idx = i + 1;
             state.ensure_slot_exists(box_idx, slot_idx);
-            state.fill_slot(box_idx, slot_idx, line, SlotPolicy::TailLocked, Some(segment_id.clone()));
+            state.fill_slot(
+                box_idx,
+                slot_idx,
+                line,
+                SlotPolicy::TailLocked,
+                Some(segment_id.clone()),
+            );
         }
 
         if let Some(box_size) = state.box_size {
             for slot_idx in (take + 1)..=box_size {
                 state.ensure_slot_exists(box_idx, slot_idx);
-                state.mark_locked_empty(box_idx, slot_idx, SlotPolicy::TailLocked, Some(segment_id.clone()));
+                state.mark_locked_empty(
+                    box_idx,
+                    slot_idx,
+                    SlotPolicy::TailLocked,
+                    Some(segment_id.clone()),
+                );
             }
         }
     }
@@ -264,30 +311,46 @@ impl AllocationEngine {
     ) {
         for ev in events {
             match &ev.payload {
-                DomainEvent::AdminAllocationAdjusted(adj) => {
-                    match &adj.action {
-                        AdminAllocationAction::FixUserToSlot { item_id, user_id, box_index, slot_index } => {
-                            Self::for_item_states(item_states, item_id, |state| {
-                                state.admin_fix_slot(*box_index, *slot_index, user_id.clone());
-                            });
-                        }
-                        AdminAllocationAction::LockSlot { item_id, box_index, slot_index, reason } => {
-                            Self::for_item_states(item_states, item_id, |state| {
-                                state.admin_lock_slot(*box_index, *slot_index, reason.clone());
-                            });
-                        }
-                        AdminAllocationAction::UnlockSlot { item_id, box_index, slot_index } => {
-                            Self::for_item_states(item_states, item_id, |state| {
-                                state.admin_unlock_slot(*box_index, *slot_index);
-                            });
-                        }
-                        AdminAllocationAction::RemoveUserItem { item_id, user_id, quantity } => {
-                            Self::for_item_states(item_states, item_id, |state| {
-                                state.remove_user_quantity(user_id, *quantity);
-                            });
-                        }
+                DomainEvent::AdminAllocationAdjusted(adj) => match &adj.action {
+                    AdminAllocationAction::FixUserToSlot {
+                        item_id,
+                        user_id,
+                        box_index,
+                        slot_index,
+                    } => {
+                        Self::for_item_states(item_states, item_id, |state| {
+                            state.admin_fix_slot(*box_index, *slot_index, user_id.clone());
+                        });
                     }
-                }
+                    AdminAllocationAction::LockSlot {
+                        item_id,
+                        box_index,
+                        slot_index,
+                        reason,
+                    } => {
+                        Self::for_item_states(item_states, item_id, |state| {
+                            state.admin_lock_slot(*box_index, *slot_index, reason.clone());
+                        });
+                    }
+                    AdminAllocationAction::UnlockSlot {
+                        item_id,
+                        box_index,
+                        slot_index,
+                    } => {
+                        Self::for_item_states(item_states, item_id, |state| {
+                            state.admin_unlock_slot(*box_index, *slot_index);
+                        });
+                    }
+                    AdminAllocationAction::RemoveUserItem {
+                        item_id,
+                        user_id,
+                        quantity,
+                    } => {
+                        Self::for_item_states(item_states, item_id, |state| {
+                            state.remove_user_quantity(user_id, *quantity);
+                        });
+                    }
+                },
                 DomainEvent::AdminSlotLocked(lock) => {
                     Self::for_item_states(item_states, &lock.item_id, |state| {
                         state.admin_lock_slot(lock.box_index, lock.slot_index, lock.reason.clone());
@@ -364,16 +427,27 @@ impl ItemWorkingState {
     }
 
     fn ensure_slot_exists(&mut self, box_index: u32, slot_index: u32) {
-        let mbox = self.boxes.entry(box_index).or_insert_with(|| BoxWorkingState {
-            box_index,
-            slots: Vec::new(),
-        });
+        let mbox = self
+            .boxes
+            .entry(box_index)
+            .or_insert_with(|| BoxWorkingState {
+                box_index,
+                slots: Vec::new(),
+            });
         while mbox.slots.len() < slot_index as usize {
-            mbox.slots.push(SlotAllocation::empty((mbox.slots.len() + 1) as u32));
+            mbox.slots
+                .push(SlotAllocation::empty((mbox.slots.len() + 1) as u32));
         }
     }
 
-    fn fill_slot(&mut self, box_index: u32, slot_index: u32, line: &EffectiveClaimLine, policy: SlotPolicy, segment_id: Option<String>) {
+    fn fill_slot(
+        &mut self,
+        box_index: u32,
+        slot_index: u32,
+        line: &EffectiveClaimLine,
+        policy: SlotPolicy,
+        segment_id: Option<String>,
+    ) {
         self.ensure_slot_exists(box_index, slot_index);
         let mbox = self.boxes.get_mut(&box_index).unwrap();
         let idx = (slot_index - 1) as usize;
@@ -391,7 +465,13 @@ impl ItemWorkingState {
         }
     }
 
-    fn mark_locked_empty(&mut self, box_index: u32, slot_index: u32, policy: SlotPolicy, segment_id: Option<String>) {
+    fn mark_locked_empty(
+        &mut self,
+        box_index: u32,
+        slot_index: u32,
+        policy: SlotPolicy,
+        segment_id: Option<String>,
+    ) {
         self.ensure_slot_exists(box_index, slot_index);
         let mbox = self.boxes.get_mut(&box_index).unwrap();
         let idx = (slot_index - 1) as usize;
@@ -453,7 +533,12 @@ impl ItemWorkingState {
         }
     }
 
-    fn admin_fix_slot(&mut self, box_index: u32, slot_index: u32, user_id: crate::domain::ids::UserId) {
+    fn admin_fix_slot(
+        &mut self,
+        box_index: u32,
+        slot_index: u32,
+        user_id: crate::domain::ids::UserId,
+    ) {
         self.ensure_slot_exists(box_index, slot_index);
         let mbox = self.boxes.get_mut(&box_index).unwrap();
         let idx = (slot_index - 1) as usize;
@@ -580,15 +665,23 @@ mod tests {
             line("u2", "badge", Some("v_b"), 2, SlotPolicy::Normal, 2),
         ];
 
-        let snapshot = AllocationEngine::new().allocate(&[item], &lines, &[]).unwrap();
+        let snapshot = AllocationEngine::new()
+            .allocate(&[item], &lines, &[])
+            .unwrap();
         let rows: Vec<_> = snapshot
             .item_allocations
             .iter()
             .filter(|i| i.item_id.0 == "badge")
             .collect();
         assert_eq!(rows.len(), 2);
-        let a = rows.iter().find(|r| r.variant_id.as_deref() == Some("v_a")).unwrap();
-        let b = rows.iter().find(|r| r.variant_id.as_deref() == Some("v_b")).unwrap();
+        let a = rows
+            .iter()
+            .find(|r| r.variant_id.as_deref() == Some("v_a"))
+            .unwrap();
+        let b = rows
+            .iter()
+            .find(|r| r.variant_id.as_deref() == Some("v_b"))
+            .unwrap();
         assert_eq!(a.boxes.len(), 1);
         assert_eq!(b.boxes.len(), 1);
         assert_eq!(a.boxes[0].slots[0].user_id_str(), Some("u1"));
@@ -605,7 +698,9 @@ mod tests {
         let mut claim = line("u1", "gift", None, 2, SlotPolicy::Normal, 1);
         claim.claim_type = ClaimType::Single;
 
-        let snapshot = AllocationEngine::new().allocate(&[item], &[claim], &[]).unwrap();
+        let snapshot = AllocationEngine::new()
+            .allocate(&[item], &[claim], &[])
+            .unwrap();
         let gift = snapshot
             .item_allocations
             .iter()
@@ -621,7 +716,9 @@ mod tests {
         let item = split_item("bonus", "特典卡", 3);
         let claim = line("u1", "bonus", None, 10, SlotPolicy::TailLocked, 1);
 
-        let snapshot = AllocationEngine::new().allocate(&[item], &[claim], &[]).unwrap();
+        let snapshot = AllocationEngine::new()
+            .allocate(&[item], &[claim], &[])
+            .unwrap();
         let bonus = snapshot
             .item_allocations
             .iter()

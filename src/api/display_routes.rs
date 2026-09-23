@@ -43,7 +43,10 @@ struct SinceQuery {
     since: Option<i64>,
 }
 
-async fn display(State(state): State<Arc<ApiState>>, Query(query): Query<SinceQuery>) -> Json<Value> {
+async fn display(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<SinceQuery>,
+) -> Json<Value> {
     let since = query.since.unwrap_or(0);
     let (version, board) = state.pipeline.board().await;
     let messages = state.pipeline.messages_since(since).await;
@@ -125,7 +128,7 @@ fn diff_board(previous: &Value, current: &Value) -> Vec<Value> {
         }
         changed.push(cell_change(key, Some(value)));
     }
-    for (key, _) in &prev {
+    for key in prev.keys() {
         if !next.contains_key(key) {
             changed.push(cell_change(key, None));
         }

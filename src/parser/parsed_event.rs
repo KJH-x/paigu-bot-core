@@ -89,7 +89,10 @@ impl ResolveResult {
         }
     }
 
-    pub fn resolved(round_id: crate::domain::ids::RoundId, item_id: crate::domain::ids::ItemId) -> Self {
+    pub fn resolved(
+        round_id: crate::domain::ids::RoundId,
+        item_id: crate::domain::ids::ItemId,
+    ) -> Self {
         Self {
             round_id: Some(round_id),
             item_id: Some(item_id),
@@ -115,7 +118,10 @@ impl ResolveResult {
         }
     }
 
-    pub fn ambiguous(candidates: Vec<(crate::domain::ids::RoundId, crate::domain::ids::ItemId, i32)>, msg: String) -> Self {
+    pub fn ambiguous(
+        candidates: Vec<(crate::domain::ids::RoundId, crate::domain::ids::ItemId, i32)>,
+        msg: String,
+    ) -> Self {
         Self {
             round_id: None,
             item_id: None,
@@ -150,7 +156,8 @@ impl MessageParser {
     ) -> Result<ParsedMessage, crate::error::ParseError> {
         if let Some(ref client) = self.llm_client {
             let prompt = SYSTEM_PROMPT.to_string();
-            let payload = serde_json::to_value(msg).map_err(|e| crate::error::ParseError::InvalidJson(e))?;
+            let payload =
+                serde_json::to_value(msg).map_err(crate::error::ParseError::InvalidJson)?;
 
             let response = client
                 .parse_message(crate::parser::llm_client::LlmParseRequest {

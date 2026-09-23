@@ -1,11 +1,8 @@
-use crate::domain::ids::{RoundId, ItemId};
+use crate::domain::ids::{ItemId, RoundId};
 use crate::domain::item::RoundContext;
 use crate::parser::parsed_event::{ParsedClaimItem, ResolveResult};
 
-pub fn resolve_item(
-    parsed: &ParsedClaimItem,
-    active_rounds: &[RoundContext],
-) -> ResolveResult {
+pub fn resolve_item(parsed: &ParsedClaimItem, active_rounds: &[RoundContext]) -> ResolveResult {
     let base = resolve_base_item(parsed, active_rounds);
     if base.resolved || base.ambiguity.is_some() {
         return base;
@@ -13,10 +10,7 @@ pub fn resolve_item(
     resolve_variant(parsed, active_rounds)
 }
 
-fn resolve_base_item(
-    parsed: &ParsedClaimItem,
-    active_rounds: &[RoundContext],
-) -> ResolveResult {
+fn resolve_base_item(parsed: &ParsedClaimItem, active_rounds: &[RoundContext]) -> ResolveResult {
     let mut candidates: Vec<(RoundId, ItemId, i32)> = Vec::new();
 
     for round in active_rounds {
@@ -52,7 +46,8 @@ fn resolve_base_item(
             }
 
             if let Some(ref claim_type_str) = parsed.claim_type {
-                if let Some(claim_type) = crate::domain::claim::ClaimType::from_str(claim_type_str) {
+                if let Some(claim_type) = crate::domain::claim::ClaimType::from_str(claim_type_str)
+                {
                     if item.kind.compatible_with(&claim_type) {
                         score += 100;
                     } else {
@@ -73,16 +68,19 @@ fn resolve_base_item(
         ResolveResult::resolved(candidates[0].0.clone(), candidates[0].1.clone())
     } else {
         let threshold = candidates[0].2 - 200;
-        let top = candidates.into_iter().filter(|c| c.2 >= threshold).collect::<Vec<_>>();
-        let names: Vec<String> = top.iter().map(|c| format!("({},{})", c.0.0, c.1.0)).collect();
+        let top = candidates
+            .into_iter()
+            .filter(|c| c.2 >= threshold)
+            .collect::<Vec<_>>();
+        let names: Vec<String> = top
+            .iter()
+            .map(|c| format!("({},{})", c.0 .0, c.1 .0))
+            .collect();
         ResolveResult::ambiguous(top, format!("匹配到多个商品：{}", names.join(", ")))
     }
 }
 
-fn resolve_variant(
-    parsed: &ParsedClaimItem,
-    active_rounds: &[RoundContext],
-) -> ResolveResult {
+fn resolve_variant(parsed: &ParsedClaimItem, active_rounds: &[RoundContext]) -> ResolveResult {
     let mut candidates: Vec<(RoundId, ItemId, String, i32)> = Vec::new();
 
     for round in active_rounds {
@@ -110,7 +108,9 @@ fn resolve_variant(
                 }
 
                 if let Some(ref claim_type_str) = parsed.claim_type {
-                    if let Some(claim_type) = crate::domain::claim::ClaimType::from_str(claim_type_str) {
+                    if let Some(claim_type) =
+                        crate::domain::claim::ClaimType::from_str(claim_type_str)
+                    {
                         if item.kind.compatible_with(&claim_type) {
                             score += 100;
                         } else {
@@ -140,9 +140,18 @@ fn resolve_variant(
         ResolveResult::resolved_variant(best.0.clone(), best.1.clone(), best.2.clone())
     } else {
         let threshold = candidates[0].3 - 200;
-        let top = candidates.into_iter().filter(|c| c.3 >= threshold).collect::<Vec<_>>();
-        let names: Vec<String> = top.iter().map(|c| format!("({},{},{})", c.0.0, c.1.0, c.2)).collect();
-        let plain: Vec<(RoundId, ItemId, i32)> = top.iter().map(|c| (c.0.clone(), c.1.clone(), c.3)).collect();
+        let top = candidates
+            .into_iter()
+            .filter(|c| c.3 >= threshold)
+            .collect::<Vec<_>>();
+        let names: Vec<String> = top
+            .iter()
+            .map(|c| format!("({},{},{})", c.0 .0, c.1 .0, c.2))
+            .collect();
+        let plain: Vec<(RoundId, ItemId, i32)> = top
+            .iter()
+            .map(|c| (c.0.clone(), c.1.clone(), c.3))
+            .collect();
         ResolveResult::ambiguous(plain, format!("匹配到多个变体：{}", names.join(", ")))
     }
 }
@@ -151,5 +160,8 @@ pub fn resolve_multiple_items(
     parsed_items: &[ParsedClaimItem],
     active_rounds: &[RoundContext],
 ) -> Vec<ResolveResult> {
-    parsed_items.iter().map(|item| resolve_item(item, active_rounds)).collect()
+    parsed_items
+        .iter()
+        .map(|item| resolve_item(item, active_rounds))
+        .collect()
 }
