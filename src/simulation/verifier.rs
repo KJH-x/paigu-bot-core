@@ -14,6 +14,7 @@ use crate::domain::round::{Round, RoundConfig, RoundStatus};
 use crate::domain::settlement::SettlementSnapshot;
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::parser::parsed_event::ParsedIntent;
+use crate::parser::policy;
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
 use crate::replay::replay_engine::{ReplayEngine, ReplayOptions, ReplayResult};
@@ -387,8 +388,8 @@ pub async fn verify(queue_path: &Path, fixture: RoundFixture) -> anyhow::Result<
         }
 
         // 优先时段：仅预存(购物金)用户可排，其余请求拒绝。
-        if crate::settings::in_priority_window(fixture.priority_window, rec.timestamp_ms)
-            && !crate::settings::is_priority_user(&fixture.priority_users, &[rec.user_id.as_str()])
+        if policy::in_priority_window(fixture.priority_window, rec.timestamp_ms)
+            && !policy::is_priority_user(&fixture.priority_users, &[rec.user_id.as_str()])
         {
             outcomes.push(outcome(
                 rec,

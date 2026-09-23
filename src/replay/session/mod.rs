@@ -9,11 +9,12 @@ use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
 use crate::messages::{MessageLog, MessageRecord};
 use crate::parser::parsed_event::ParsedIntent;
+use crate::parser::policy;
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
 use crate::replay::state_diff::StateDiff;
-use crate::round::{can_cancel, can_claim, phase_at, PhaseWindow, RoundPhase};
-use crate::settings::{in_priority_window, is_priority_user, AppConfig, ItemConfig};
+use crate::round::PhaseWindow;
+use crate::settings::{AppConfig, ItemConfig};
 use crate::settlement::SettlementConfig;
 
 /// 重放离线解析使用的规则置信度阈值（与实时校验层一致）。
@@ -265,23 +266,21 @@ async fn process_one(
     } else {
         rec.nickname.clone()
     };
-    let (identity, _) = crate::gateway::onebot::clean_nickname(&rec.nickname);
+    let (identity, _) = crate::parser::normalize::clean_nickname(&rec.nickname);
 
     if rec.routed.eq_ignore_ascii_case("drop") {
         return skipped("Dropped", "非白名单/Drop");
     }
 
-    if !cfg.gateway.whitelist_members.is_empty()
-        && !is_priority_user(
-            &cfg.gateway.whitelist_members,
-            &[
-                rec.user_id.as_str(),
-                rec.nickname.as_str(),
-                identity.as_str(),
-                display.as_str(),
-            ],
-        )
-    {
+    if !policy::member_allowed(
+        &cfg.gateway.whitelist_members,
+        &[
+            rec.user_id.as_str(),
+            rec.nickname.as_str(),
+            identity.as_str(),
+            display.as_str(),
+        ],
+    ) {
         return skipped("Dropped", "成员不在白名单");
     }
 
@@ -351,8 +350,8 @@ async fn process_one(
         Err(e) => return skipped("Error", format!("处理失败: {e}")),
     };
 
-    let is_priority = is_priority_user(
-        &cfg.round.priority_users,
+    let is_priority = policy::is_priority(
+        cfg,
         &[
             rec.user_id.as_str(),
             rec.nickname.as_str(),
@@ -360,18 +359,13 @@ async fn process_one(
             display.as_str(),
         ],
     );
-    let window = cfg
-        .round
-        .priority_window
-        .as_ref()
-        .map(|w| (w.start_ms, w.end_ms));
-    if in_priority_window(window, rec.timestamp_ms) && !is_priority {
+    if policy::in_priority_at(cfg, rec.timestamp_ms) && !is_priority {
         return skipped("Rejected", "优先时段仅限预存(购物金)用户");
     }
 
     if !cfg.round.phases.is_empty() {
-        if let Some(phase) = phase_at(&cfg.round.phases, rec.timestamp_ms) {
-            if let Some(detail) = phase_rejection(cfg, &event, phase, is_priority) {
+        if let Some(phase) = policy::phase_at(&cfg.round.phases, rec.timestamp_ms) {
+            if let Some(detail) = policy::phase_rejection(cfg, &event, phase, is_priority) {
                 return skipped("Rejected", detail);
             }
         }
@@ -460,353 +454,5 @@ fn priority_eligibility(round_id: &RoundId, user_id: &str) -> Eligibility {
     }
 }
 
-fn phase_label(phase: RoundPhase) -> &'static str {
-    match phase {
-        RoundPhase::Phase0 => "Phase 0",
-        RoundPhase::PhaseI => "Phase I",
-        RoundPhase::PhaseII => "Phase II",
-        RoundPhase::PhaseIII => "Phase III",
-        RoundPhase::Settling => "结算",
-        RoundPhase::Locked => "锁定",
-    }
-}
-
-fn phase_rejection(
-    cfg: &AppConfig,
-    event: &EventEnvelope,
-    phase: RoundPhase,
-    is_priority: bool,
-) -> Option<String> {
-    let label = phase_label(phase);
-    if phase == RoundPhase::Locked {
-        return Some(format!("阶段越权：{label}阶段已锁定，禁止操作"));
-    }
-    match &event.payload {
-        DomainEvent::ClaimCreated(c) => c.items.iter().find_map(|line| {
-            let class = cfg.round.item_class(&line.item_id.0);
-            (!can_claim(phase, class, is_priority))
-                .then_some(format!("阶段越权：{label}阶段不允许排该商品"))
-        }),
-        DomainEvent::ClaimCancelled(c) => c.target_item_id.as_ref().and_then(|item_id| {
-            let class = cfg.round.item_class(&item_id.0);
-            (!can_cancel(phase, class, is_priority))
-                .then_some(format!("阶段越权：{label}阶段不允许撤销该商品"))
-        }),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::messages::MessageLog;
-    use crate::settings::{default_config, VariantConfig};
-
-    fn temp_dir(tag: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("paigu-session-{tag}-{}", uuid::Uuid::new_v4()))
-    }
-
-    fn test_config() -> AppConfig {
-        let mut cfg = default_config();
-        cfg.llm.enabled = false;
-        cfg.round.round_id = "test_round".to_string();
-        cfg.round.title = "测试团".to_string();
-        cfg.round.priority_users = vec![];
-        cfg.round.priority_window = None;
-        cfg.round.phases = vec![];
-        cfg.round.items = vec![ItemConfig {
-            item_id: "badge".to_string(),
-            name: "徽章".to_string(),
-            kind: "split".to_string(),
-            class: Some("B".to_string()),
-            unit_price_cents: 0,
-            box_size: None,
-            max_quantity: None,
-            aliases: vec!["徽章".to_string()],
-            variants: vec![VariantConfig {
-                variant_id: "v_a".to_string(),
-                name: "甲".to_string(),
-                unit_price_cents: 0,
-                pieces: 0,
-                capacity: Some(1),
-                aliases: vec![],
-            }],
-        }];
-        cfg
-    }
-
-    fn record(seq: i64, user_id: &str, text: &str, ts: i64) -> MessageRecord {
-        MessageRecord {
-            seq,
-            group_id: "123456789".to_string(),
-            user_id: user_id.to_string(),
-            nickname: user_id.to_string(),
-            message_id: format!("m{seq}"),
-            text: text.to_string(),
-            timestamp_ms: ts,
-            is_admin: false,
-            routed: "message".to_string(),
-            status: "Applied".to_string(),
-            detail: String::new(),
-        }
-    }
-
-    fn slot_user(board: &AllocationSnapshot, box_index: u32, slot_index: u32) -> Option<String> {
-        board
-            .item_allocations
-            .iter()
-            .find(|ia| ia.item_id.0 == "badge")
-            .and_then(|ia| ia.boxes.iter().find(|b| b.box_index == box_index))
-            .and_then(|b| b.slots.iter().find(|s| s.slot_index == slot_index))
-            .and_then(|s| s.user_id.as_ref().map(|u| u.0.clone()))
-    }
-
-    #[tokio::test]
-    async fn replay_is_deterministic() {
-        let cfg = test_config();
-        let records = vec![
-            record(1, "u1", "排 徽章 甲 1", 1_000),
-            record(2, "u2", "排 徽章 甲 1", 2_000),
-        ];
-        let first = replay_messages(&cfg, &records, ReplayOverrides::default())
-            .await
-            .unwrap();
-        let second = replay_messages(&cfg, &records, ReplayOverrides::default())
-            .await
-            .unwrap();
-
-        assert_eq!(
-            serde_json::to_value(&first.board).unwrap(),
-            serde_json::to_value(&second.board).unwrap()
-        );
-        assert_eq!(
-            serde_json::to_value(&first.outcomes).unwrap(),
-            serde_json::to_value(&second.outcomes).unwrap()
-        );
-        assert_eq!(first.version, second.version);
-    }
-
-    #[tokio::test]
-    async fn override_priority_changes_board() {
-        let cfg = test_config();
-        let records = vec![
-            record(1, "u1", "排 徽章 甲 1", 1_000),
-            record(2, "u2", "排 徽章 甲 1", 2_000),
-        ];
-
-        let base = replay_messages(&cfg, &records, ReplayOverrides::default())
-            .await
-            .unwrap();
-        assert_eq!(slot_user(&base.board, 1, 1).as_deref(), Some("u1"));
-
-        let overridden = replay_messages(
-            &cfg,
-            &records,
-            ReplayOverrides {
-                priority_users: Some(vec!["u2".to_string()]),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(slot_user(&overridden.board, 1, 1).as_deref(), Some("u2"));
-        assert!(overridden.diff.changed);
-        assert!(!overridden.diff.state.slot_changes.is_empty());
-    }
-
-    #[tokio::test]
-    async fn override_phases_rejects_and_empties_board() {
-        let cfg = test_config();
-        let records = vec![record(1, "u1", "排 徽章 甲 1", 1_000)];
-
-        let base = replay_messages(&cfg, &records, ReplayOverrides::default())
-            .await
-            .unwrap();
-        assert_eq!(base.outcomes[0].status, "Applied");
-
-        let locked = replay_messages(
-            &cfg,
-            &records,
-            ReplayOverrides {
-                phases: Some(vec![PhaseWindow {
-                    phase: RoundPhase::Locked,
-                    start_ms: 0,
-                    end_ms: i64::MAX,
-                }]),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(locked.outcomes[0].status, "Rejected");
-        assert!(locked.board.user_summaries.is_empty());
-        assert!(locked.diff.changed);
-    }
-
-    #[tokio::test]
-    async fn override_whitelist_drops_outsider() {
-        let cfg = test_config();
-        let records = vec![
-            record(1, "u1", "排 徽章 甲 1", 1_000),
-            record(2, "u2", "排 徽章 甲 1", 2_000),
-        ];
-
-        let filtered = replay_messages(
-            &cfg,
-            &records,
-            ReplayOverrides {
-                whitelist_members: Some(vec!["u1".to_string()]),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(filtered.outcomes[0].status, "Applied");
-        assert_eq!(filtered.outcomes[1].status, "Dropped");
-        assert!(filtered
-            .board
-            .user_summaries
-            .iter()
-            .all(|s| s.user_id.0 == "u1"));
-    }
-
-    #[tokio::test]
-    async fn replay_reads_store_and_supports_edit_recompute() {
-        let cfg = test_config();
-        let dir = temp_dir("store");
-        let log = MessageLog::new(&dir, dir.join("events"));
-        log.append(&cfg.round.round_id, &record(1, "u1", "排 徽章 甲 1", 1_000))
-            .await
-            .unwrap();
-
-        let before = replay(&log, &cfg, ReplayOverrides::default())
-            .await
-            .unwrap();
-        assert_eq!(before.version, 1);
-        assert_eq!(before.board.user_summaries.len(), 1);
-
-        log.replace_all(
-            &cfg.round.round_id,
-            &[record(1, "u1", "今天天气不错", 1_000)],
-        )
-        .await
-        .unwrap();
-        let after = replay(&log, &cfg, ReplayOverrides::default())
-            .await
-            .unwrap();
-        assert_eq!(after.outcomes[0].status, "Ignored");
-        assert!(after.board.user_summaries.is_empty());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    struct DisabledLlm;
-
-    #[async_trait::async_trait]
-    impl crate::llm::client::LlmClient for DisabledLlm {
-        async fn complete(
-            &self,
-            _settings: &crate::settings::LlmSettings,
-            _system_prompt: &str,
-            _user_prompt: &str,
-        ) -> anyhow::Result<String> {
-            anyhow::bail!("llm disabled in test")
-        }
-    }
-
-    fn config_store(cfg: &AppConfig) -> std::sync::Arc<crate::settings::ConfigStore> {
-        let path =
-            std::env::temp_dir().join(format!("paigu-session-cfg-{}.json", uuid::Uuid::new_v4()));
-        std::fs::write(&path, serde_json::to_string_pretty(cfg).unwrap()).unwrap();
-        std::sync::Arc::new(crate::settings::ConfigStore::load(path).unwrap())
-    }
-
-    fn incoming(message_id: &str, text: &str, ts: i64) -> crate::bus::IncomingEvent {
-        crate::bus::IncomingEvent {
-            group_id: "123456789".to_string(),
-            user_id: "u1".to_string(),
-            nickname: "u1".to_string(),
-            message_id: message_id.to_string(),
-            text: text.to_string(),
-            timestamp_ms: ts,
-            is_admin: false,
-            raw: None,
-        }
-    }
-
-    fn strip_claim_ids(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                map.remove("claim_id");
-                for child in map.values_mut() {
-                    strip_claim_ids(child);
-                }
-            }
-            serde_json::Value::Array(items) => {
-                for child in items.iter_mut() {
-                    strip_claim_ids(child);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// 规范化 board：去掉时间戳与实时/重放各自生成的内部 claim_id，只比较分配结果。
-    fn canonical_board(mut board: serde_json::Value) -> serde_json::Value {
-        if let Some(obj) = board.as_object_mut() {
-            obj.remove("generated_at");
-        }
-        strip_claim_ids(&mut board);
-        board
-    }
-
-    #[tokio::test]
-    async fn realtime_and_replay_modify_boards_match() {
-        let cfg = test_config();
-        let dir = temp_dir("modify-parity");
-        let pipeline = crate::llm::Pipeline::new_with_client_dir(
-            config_store(&cfg),
-            std::sync::Arc::new(DisabledLlm),
-            dir.clone(),
-        );
-
-        let first = pipeline
-            .process(incoming("mod-1", "排 徽章 甲 1", 1_000))
-            .await;
-        assert_eq!(first.status, "Applied");
-
-        let modified = pipeline
-            .process(incoming("mod-2", "改 徽章 甲 2", 2_000))
-            .await;
-        assert_eq!(modified.status, "Applied");
-        assert!(modified.detail.starts_with("改单"), "{}", modified.detail);
-
-        let (live_version, live_board) = pipeline.board().await;
-
-        let log = MessageLog::new(&dir, dir.join("events"));
-        let records = log.read_all(&cfg.round.round_id).await.unwrap();
-        assert_eq!(records.len(), 2);
-
-        let replayed = replay_messages(&cfg, &records, ReplayOverrides::default())
-            .await
-            .unwrap();
-        assert_eq!(replayed.outcomes[1].status, "Applied");
-        assert!(
-            replayed.outcomes[1].detail.starts_with("改单"),
-            "{}",
-            replayed.outcomes[1].detail
-        );
-
-        assert_eq!(live_version, replayed.version, "实时与重放版本应一致");
-        assert_eq!(
-            canonical_board(live_board),
-            canonical_board(serde_json::to_value(&replayed.board).unwrap()),
-            "实时 = 重放"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
+mod tests;
