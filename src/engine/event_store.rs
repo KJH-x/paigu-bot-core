@@ -11,12 +11,14 @@ pub trait EventStore: Send + Sync {
     async fn read_all(&self, round_id: &RoundId) -> anyhow::Result<Vec<EventEnvelope>>;
 }
 
+#[allow(dead_code)] // 保留：内存事件存储夹具，暂无生产消费者（重放接线备用）。
 pub struct InMemoryEventStore {
     #[allow(dead_code)] // 仅由保留的 `read_all` 读取（见上）。
     events: tokio::sync::RwLock<Vec<EventEnvelope>>,
 }
 
 impl InMemoryEventStore {
+    #[allow(dead_code)] // 保留：与 `InMemoryEventStore` 配套的构造函数。
     pub fn new() -> Self {
         Self {
             events: tokio::sync::RwLock::new(Vec::new()),

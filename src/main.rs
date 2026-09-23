@@ -12,6 +12,7 @@ mod parser;
 mod planner;
 mod replay;
 mod round;
+mod services;
 mod settings;
 mod settlement;
 mod simulation;
