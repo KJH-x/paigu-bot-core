@@ -7,7 +7,7 @@
 
 ```
                          (真实群 123456789)
- NapCatQQ ──reverse WS──▶ Gateway  192.0.2.1:9801
+ NapCatQQ ──reverse WS──▶ Gateway  0.0.0.0:9801
                               │  白名单/drop · 心跳 · 动作回包(只读)
                               ▼
                     Intake Queue (有界 mpsc)
@@ -52,7 +52,7 @@
 {
   "revision": 1,
   "gateway": {
-    "bind": "192.0.2.1:9801",
+    "bind": "0.0.0.0:9801",
     "whitelist_groups": ["123456789"],
     "heartbeat_secs": 15,
     "reply_enabled": false,          // 默认 false：绝不发送；send_* 仅当 true 且在白名单时放行（已强制）

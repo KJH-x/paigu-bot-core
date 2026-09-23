@@ -1,7 +1,7 @@
 {
   "revision": 1,
   "gateway": {
-    "bind": "192.0.2.1:9801",
+    "bind": "0.0.0.0:9801",
     "whitelist_groups": ["123456789"],
     "whitelist_members": [],
     "heartbeat_secs": 15,
