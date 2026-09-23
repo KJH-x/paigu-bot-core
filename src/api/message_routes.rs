@@ -308,7 +308,7 @@ mod tests {
     fn sample() -> MessageRecord {
         MessageRecord {
             seq: 7,
-            group_id: "720675572".to_string(),
+            group_id: "123456789".to_string(),
             user_id: "u1".to_string(),
             nickname: "成员01".to_string(),
             message_id: "m7".to_string(),

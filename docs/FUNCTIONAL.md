@@ -9,7 +9,7 @@
 
 ## 1. 概述与定位
 
-- **本地数据处理 + 远程展示**：本地机（`192.168.100.2`）接收 QQ 群消息、LLM 解析、排谷计算；排位快照/回放将来发布到 Cloudflare（R2 + Pages）供成员查看（`docs/POLICY.md:8`）。
+- **本地数据处理 + 远程展示**：本地机（`部署主机`）接收 QQ 群消息、LLM 解析、排谷计算；排位快照/回放将来发布到 Cloudflare（R2 + Pages）供成员查看（`docs/POLICY.md:8`）。
 - **绝不主动发消息给真实群**：`reply_enabled=false`（`config.example.json:7`）默认关闭；`send_*` 仅当 `reply_enabled=true` 且 `action ∈ allowed_actions` 时放行（已强制，见 §10.1）。成员名单拉取为只读动作，允许。
 - **确定性优先**：LLM 只做自然语言 → 结构化；排序/分配/结算由确定性引擎完成（`docs/POLICY.md:10`）。
 - **与文档的关系**：POLICY 是权威业务规则；DESIGN 定义模块/接口/路由/部署；TASKS 记录分工与完成状态。本文是**功能视角**的描述（触发 → 处理 → 结果 + JSON），与 DESIGN §5 的接口契约一一对应。
@@ -22,7 +22,7 @@
 ### 2.1 进程 / 端口 / 线程
 
 - **单进程**：`#[tokio::main]` 异步运行时（`src/main.rs:31`）。`run` 模式下不连接 PostgreSQL。
-- **反向 WebSocket 服务器（Gateway）**：绑定 `AppConfig.gateway.bind`，默认 `192.168.100.2:9801`（`config.example.json:4`；绑定逻辑 `src/gateway/ws_server.rs:46-73`）。NapCat 主动连入。
+- **反向 WebSocket 服务器（Gateway）**：绑定 `AppConfig.gateway.bind`，默认 `0.0.0.0:9801`（`config.example.json:4`；绑定逻辑 `src/gateway/ws_server.rs:46-73`）。NapCat 主动连入。
 - **HTTP API**：绑定 `127.0.0.1:{PAIGU_HTTP_PORT}`，默认 `21081`（`src/api/mod.rs:80-87`；`src/main.rs:100-103`）。
 - **成员调度任务**：一个 `tokio::spawn` 循环，每日在 `members.daily_pull_at`（默认 `19:00`）拉取群成员（`src/main.rs:143-158`）。
 - **每条消息一个任务**：Gateway 对路由通过的每条消息 `tokio::spawn(sink.handle(...))`（`src/gateway/ws_server.rs:267-269`）。Pipeline 共享状态由 `tokio::sync::Mutex` 保护（`src/llm/pipeline.rs:34`），因此业务状态应用是串行的，但多消息的**加锁顺序不等于到达顺序**（并发下 `sequence` 由加锁时刻决定，`src/llm/pipeline.rs:82-112`）。
@@ -31,7 +31,7 @@
 ### 2.2 数据流图
 
 ```
-NapCatQQ ──反向 WS──▶ Gateway 192.168.100.2:9801
+NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
                        │  decide_route（白名单/群消息/非空）→ Drop 记 debug
                        ▼
               IncomingEvent（每消息 spawn）
@@ -76,7 +76,7 @@ NapCatQQ ──反向 WS──▶ Gateway 192.168.100.2:9801
 
 | 模式 | 命令 | 效果 |
 |---|---|---|
-| `run`（默认，新栈） | `cargo run` 或 `cargo run -- run` | Gateway(`gateway.bind`, 默认 `192.168.100.2:9801`) + Pipeline + API(`127.0.0.1:21081`) + 每日 19:00 成员调度（`src/main.rs:46-48,82-117`） |
+| `run`（默认，新栈） | `cargo run` 或 `cargo run -- run` | Gateway(`gateway.bind`, 默认 `0.0.0.0:9801`) + Pipeline + API(`127.0.0.1:21081`) + 每日 19:00 成员调度（`src/main.rs:46-48,82-117`） |
 | `simulate`（离线重放验证，旧引擎） | `cargo run -- simulate --round-config <json> --queue <jsonl> [--out <dir>]` | 逐条解析/校验/重放语料，输出 `out/report.md`、`out/result.json`、`out/outcomes.jsonl`（`src/main.rs:38-41`；`src/simulation/verifier.rs:62-93`） |
 | `serve`（本地聊天服务器，旧引擎） | `cargo run -- serve --round-config <json> [--port 8090]` | 内存会话聊天页 + 实时排结果，无 PostgreSQL（`src/main.rs:42-45`；`src/simulation/chat_server.rs:302-323`） |
 | `legacy`（旧栈，弃用） | `cargo run -- <任意未识别子命令>` | **无 `legacy` 字面分支**；任何非 `simulate/serve/run` 的子命令落入旧栈：读取 `DATABASE_URL` 等环境变量、连接 PostgreSQL、WS 服务 `3001`、HTTP API `8080`（`src/main.rs:50-79`；`src/config.rs:52-108`）。需数据库，已弃用 |
@@ -160,7 +160,7 @@ NapCatQQ ──反向 WS──▶ Gateway 192.168.100.2:9801
 
 ### F1 接入与白名单
 
-- **触发**：NapCat 反向连接 `ws://192.168.100.2:9801` 并上报群消息文本帧。
+- **触发**：NapCat 反向连接 `ws://0.0.0.0:9801` 并上报群消息文本帧。
 - **处理**：`accept_async` → `on_text`（先尝试 echo 回包）→ `RouteMessageEvent` 反序列化 → `decide_route`（`post_type=="message"`、`message_type=="group"`、`group_id∈whitelist`、`normalize_message` 非空）；非路由项 `Drop` 仅记 debug（`src/gateway/ws_server.rs:230-263`；`src/gateway/onebot.rs:218-235`）。消息文本由 `message` 段的 text 拼接，或从 `raw_message` 去 CQ 码并反转义（`src/gateway/onebot.rs:97-150`）。
 - **结果**：路由通过 → `IncomingEvent` → spawn 交给 Pipeline。出站动作仅允许 `allowed_actions`；`send_*` 仅当 `reply_enabled=true` 且在白名单时放行（默认 `false` → 拒绝并告警，`src/gateway/ws_server.rs:75-88`）。
 - **入站事件 JSON 示例**（OneBot 字段）：
@@ -170,7 +170,7 @@ NapCatQQ ──反向 WS──▶ Gateway 192.168.100.2:9801
   "message_type": "group",
   "self_id": 3000000000,
   "user_id": 10001,
-  "group_id": 720675572,
+  "group_id": 123456789,
   "message_id": 42,
   "raw_message": "排 通行证 结城理 1",
   "message": [{ "type": "text", "data": { "text": "排 通行证 结城理 1" } }],
@@ -178,7 +178,7 @@ NapCatQQ ──反向 WS──▶ Gateway 192.168.100.2:9801
   "time": 1788782400
 }
 ```
-- **出站动作帧（只读）**：`{ "action": "get_group_member_list", "params": { "group_id": "720675572" }, "echo": "<uuid>" }`（`src/gateway/ws_server.rs:94`；`src/gateway/action.rs:7-10`）。
+- **出站动作帧（只读）**：`{ "action": "get_group_member_list", "params": { "group_id": "123456789" }, "echo": "<uuid>" }`（`src/gateway/ws_server.rs:94`；`src/gateway/action.rs:7-10`）。
 
 ### F2 昵称清洗与身份
 
@@ -593,7 +593,7 @@ node tests/e2e/sim.mjs
 ```
 
 - 数据落 `config/app.json`、`data/members.json`（`src/main.rs:82-117`）。
-- `gateway.bind` 默认 `192.168.100.2:9801`；若该地址不可用，Gateway 每 2s 重试绑定并记录 `last_error`，**HTTP API 不受影响**（`src/gateway/ws_server.rs:46-72`；`/api/gateway/status` 可查）。
+- `gateway.bind` 默认 `0.0.0.0:9801`；若该地址不可用，Gateway 每 2s 重试绑定并记录 `last_error`，**HTTP API 不受影响**（`src/gateway/ws_server.rs:46-72`；`/api/gateway/status` 可查）。
 
 ### 9.2 将来 Cloudflare（R2 快照 + Pages 静态展示）——**未接线**
 

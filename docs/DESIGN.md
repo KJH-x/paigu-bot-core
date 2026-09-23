@@ -6,8 +6,8 @@
 ## 1. 总体架构
 
 ```
-                         (真实群 720675572)
- NapCatQQ ──reverse WS──▶ Gateway  192.168.100.2:9801
+                         (真实群 123456789)
+ NapCatQQ ──reverse WS──▶ Gateway  0.0.0.0:9801
                               │  白名单/drop · 心跳 · 动作回包(只读)
                               ▼
                     Intake Queue (有界 mpsc)
@@ -52,8 +52,8 @@
 {
   "revision": 1,
   "gateway": {
-    "bind": "192.168.100.2:9801",
-    "whitelist_groups": ["720675572"],
+    "bind": "0.0.0.0:9801",
+    "whitelist_groups": ["123456789"],
     "heartbeat_secs": 15,
     "reply_enabled": false,          // 默认 false：绝不发送；send_* 仅当 true 且在白名单时放行（已强制）
     "allowed_actions": ["get_group_member_list","get_group_info","get_group_list","get_login_info"]
@@ -72,13 +72,13 @@
   "round": {
     "round_id": "月行水上",
     "title": "月行水上",
-    "group_id": "720675572",
+    "group_id": "123456789",
     "priority_users": ["user_a","user_b","user_c","user_d"],
     "priority_window": { "start_ms": 1788782400000, "end_ms": 1788789600000 },
     "items": [ /* 见 §4 */ ]
   },
   "display": { "refresh_ms": 5000, "data_source": "local", "remote_base_url": "" },
-  "members": { "group_id": "720675572", "cache_path": "data/members.json", "daily_pull_at": "19:00" }
+  "members": { "group_id": "123456789", "cache_path": "data/members.json", "daily_pull_at": "19:00" }
 }
 ```
 

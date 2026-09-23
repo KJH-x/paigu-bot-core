@@ -13,7 +13,7 @@
 ## 2. 安全红线（最高优先）
 
 - **绝不发送消息到真实群**：不得调用 `send_group_msg`/`send_msg`/`send_*`。`reply_enabled` 默认 `false`，实现时必须强制校验。
-- NapCat 已接入真实群 `720675572`：只接收、只读拉取成员；测试一律走**本地模拟器/离线夹具**，不触发真实动作。
+- NapCat 已接入真实群 `123456789`：只接收、只读拉取成员；测试一律走**本地模拟器/离线夹具**，不触发真实动作。
 - 不得把密钥写入代码或提交：LLM key 只经 `api_key_env`（`DEEPSEEK_API_KEY`）读取。
 - 隐私数据不入库：`config/app.json`、`data/**`、`*.xlsx`、`sample*.json`、`simulation-corpus/real-*/` 已被 `.gitignore` 忽略，保持忽略状态。
 

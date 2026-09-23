@@ -317,7 +317,7 @@ mod tests {
 
         let record = MessageRecord {
             seq: 1,
-            group_id: "720675572".to_string(),
+            group_id: "123456789".to_string(),
             user_id: "u1".to_string(),
             nickname: "u1".to_string(),
             message_id: "m1".to_string(),

@@ -81,7 +81,7 @@
 | 项 | 状态 | 说明 |
 |---|---|---|
 | A0 接口冻结 | ✅ | `src/bus.rs`（IncomingEvent/EventSink/PipelineOutcome）、`src/settings.rs`（AppConfig + ConfigStore 热载）、`config.example.json` |
-| A1 Gateway | ✅ | `src/gateway/**`：白名单/drop、反向 WS（`192.168.100.2:9801`）、心跳、echo 动作回包、拒绝 `send_*` |
+| A1 Gateway | ✅ | `src/gateway/**`：白名单/drop、反向 WS（`0.0.0.0:9801`）、心跳、echo 动作回包、拒绝 `send_*` |
 | A2 LLM+Pipeline | ✅ | `src/llm/**`：DeepSeek 客户端 + 规则快路径 + 权限（时段/预存）+ 内存重放 + who-whats |
 | A3 HTTP API | ✅ | `src/api/**`：config(409)/board/display/messages/sim/members/gateway-status + 静态页 |
 | A4 前端 | ✅ | `web/**`：display(5s 增量、不打断)/admin(config 面板+成员拉取)/sim(身份+偏移) |
@@ -93,7 +93,7 @@
 
 **运行**：
 ```powershell
-cargo run -- run            # Gateway(192.168.100.2:9801) + API(127.0.0.1:21081) + 每日19:00成员拉取
+cargo run -- run            # Gateway(0.0.0.0:9801) + API(127.0.0.1:21081) + 每日19:00成员拉取
 # 展示 http://127.0.0.1:21081/  ·  管理 http://127.0.0.1:21081/admin  ·  模拟 http://127.0.0.1:21081/sim
 node tests/e2e/sim.mjs      # 端到端测试
 ```

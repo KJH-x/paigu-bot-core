@@ -5,16 +5,16 @@
 
 ## 0. 总原则
 
-- **本地做数据处理，展示放远程**：本地（本机 `192.168.100.2`）负责接收 QQ 群消息、LLM 解析、排谷计算；排位快照/回放发布到 Cloudflare（R2 + Pages）供成员查看。
-- **绝不主动发消息给真实群**：NapCat 已接入真实群 `720675572`。当前阶段 **`reply_enabled=false`**：只接收、只计算、只记录；**不调用 `send_group_msg`**。成员名单拉取是只读操作，允许。
+- **本地做数据处理，展示放远程**：本地（本机 `部署主机`）负责接收 QQ 群消息、LLM 解析、排谷计算；排位快照/回放发布到 Cloudflare（R2 + Pages）供成员查看。
+- **绝不主动发消息给真实群**：NapCat 已接入真实群 `123456789`。当前阶段 **`reply_enabled=false`**：只接收、只计算、只记录；**不调用 `send_group_msg`**。成员名单拉取是只读操作，允许。
 - **确定性优先**：LLM 只做自然语言→结构化；排序/分配/结算由确定性引擎完成。任何 LLM 输出都必须经校验层。
 
 ## 1. 接入与白名单（Gateway）
 
-- 形态：**反向 WebSocket 服务器**，NapCat 主动连入 `ws://192.168.100.2:9801`。
+- 形态：**反向 WebSocket 服务器**，NapCat 主动连入 `ws://0.0.0.0:9801`。
 - 鉴权：**不校验 token**（反向 WS 接受连接时不校验；无 token 配置项）。
 - 只处理：`post_type == "message"` 且 `message_type == "group"` 且 `group_id ∈ whitelist_groups`。
-- 白名单群：`["720675572"]`（可在 admin 面板热改）。
+- 白名单群：`["123456789"]`（可在 admin 面板热改）。
 - 其余数据一律 **Drop**：非白名单群、私聊、非 message 事件（notice/meta_event/request）、空消息、无法解析帧。Drop 只记 debug 日志，不回复、不入库为业务事件。
 - 出站动作：仅允许只读动作（当前只允许 `get_group_member_list`、`get_group_info`、`get_group_list`、`get_login_info`）。**默认禁止 `send_*`**：`send_*` 仅当 `reply_enabled=true` **且** `action ∈ allowed_actions` 时才放行（默认 `reply_enabled=false` → 绝不发送）。
 
@@ -84,7 +84,7 @@ LLM 输出契约（严格 JSON）：
 
 ## 7. 成员名单
 
-- 群：`720675572`。
+- 群：`123456789`。
 - **每日 19:00** 尝试 `get_group_member_list` 拉取，缓存到 `data/members.json`（gitignored）。
 - 拉取失败或未接入 → 使用内置子集（见 [DESIGN.md](./DESIGN.md) §8，已按 §2 清洗）。
 - **只读**：只拉取，不发送任何消息。

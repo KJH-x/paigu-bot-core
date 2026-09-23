@@ -351,7 +351,7 @@ mod tests {
     async fn send_action_rejects_send_actions() {
         let gw = test_gateway();
         let err = gw
-            .send_action("send_group_msg", json!({ "group_id": "720675572" }))
+            .send_action("send_group_msg", json!({ "group_id": "123456789" }))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("forbidden"));
@@ -366,7 +366,7 @@ mod tests {
         });
         let gw = Gateway::new(store, Arc::new(NullSink));
         let err = gw
-            .send_action("send_group_msg", json!({ "group_id": "720675572" }))
+            .send_action("send_group_msg", json!({ "group_id": "123456789" }))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("forbidden"));
@@ -380,7 +380,7 @@ mod tests {
         });
         let gw = Gateway::new(store, Arc::new(NullSink));
         assert!(gw
-            .send_action("send_group_msg", json!({ "group_id": "720675572" }))
+            .send_action("send_group_msg", json!({ "group_id": "123456789" }))
             .await
             .is_err());
     }
@@ -411,7 +411,7 @@ mod tests {
         });
 
         let result = gw
-            .send_action("send_group_msg", json!({ "group_id": "720675572", "message": "x" }))
+            .send_action("send_group_msg", json!({ "group_id": "123456789", "message": "x" }))
             .await;
         assert!(result.is_ok(), "expected send allowed: {result:?}");
         assert_eq!(result.unwrap()["retcode"], 0);
@@ -428,7 +428,7 @@ mod tests {
     async fn send_action_without_client_errors() {
         let gw = test_gateway();
         assert!(gw
-            .send_action("get_group_member_list", json!({ "group_id": "720675572" }))
+            .send_action("get_group_member_list", json!({ "group_id": "123456789" }))
             .await
             .is_err());
     }

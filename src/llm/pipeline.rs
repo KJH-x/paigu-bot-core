@@ -1020,7 +1020,7 @@ mod tests {
 
     fn event(user_id: &str, nickname: &str, text: &str, timestamp_ms: i64) -> IncomingEvent {
         IncomingEvent {
-            group_id: "720675572".to_string(),
+            group_id: "123456789".to_string(),
             user_id: user_id.to_string(),
             nickname: nickname.to_string(),
             message_id: format!("{}::{}", user_id, text),

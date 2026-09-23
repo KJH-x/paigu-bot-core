@@ -365,7 +365,7 @@
       P.toast('WS 未连接', 'bad');
       return;
     }
-    var gid = $('group').value.trim() || state.groupId || '720675572';
+    var gid = $('group').value.trim() || state.groupId || '123456789';
     state.msgCounter++;
     var messageId = 'sim-' + Date.now() + '-' + state.msgCounter;
     var event = P.buildOneBotEvent({

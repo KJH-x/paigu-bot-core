@@ -44,7 +44,7 @@ function usage() {
 async function runRecord(args) {
   const file = args.record;
   const wsUrl = typeof args.ws === 'string' ? args.ws : DEFAULT_WS;
-  const defaultGroup = typeof args.group === 'string' ? args.group : '720675572';
+  const defaultGroup = typeof args.group === 'string' ? args.group : '123456789';
 
   let ws;
   try {

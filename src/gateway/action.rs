@@ -60,8 +60,8 @@ mod tests {
     #[tokio::test]
     async fn read_only_helpers_fail_without_client() {
         let gw = test_gateway();
-        assert!(get_group_member_list(&gw, "720675572").await.is_err());
-        assert!(get_group_info(&gw, "720675572").await.is_err());
+        assert!(get_group_member_list(&gw, "123456789").await.is_err());
+        assert!(get_group_info(&gw, "123456789").await.is_err());
         assert!(get_group_list(&gw).await.is_err());
         assert!(get_login_info(&gw).await.is_err());
     }

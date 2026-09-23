@@ -18,7 +18,7 @@ const EXE = path.join(
 const FIXED_WINDOW = { start_ms: 1600000000000, end_ms: 1600003600000 };
 const TARGET_IDENTITY = '成员01';
 const BLOCKED_IDENTITY = '成员02';
-const GROUP_ID = '720675572';
+const GROUP_ID = '123456789';
 
 function log(line) {
   process.stdout.write(line + '\n');

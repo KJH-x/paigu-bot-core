@@ -311,7 +311,7 @@ mod tests {
     fn record(seq: i64, text: &str) -> MessageRecord {
         MessageRecord {
             seq,
-            group_id: "720675572".to_string(),
+            group_id: "123456789".to_string(),
             user_id: "10001".to_string(),
             nickname: "成员01".to_string(),
             message_id: format!("m{seq}"),

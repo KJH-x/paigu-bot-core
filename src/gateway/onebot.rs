@@ -314,7 +314,7 @@ mod tests {
 
     fn policy() -> RoutePolicy {
         RoutePolicy {
-            whitelist_groups: vec!["720675572".to_string()],
+            whitelist_groups: vec!["123456789".to_string()],
             whitelist_members: Vec::new(),
         }
     }
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn decide_route_passes_whitelisted_group() {
         assert_eq!(
-            decide_route(&group_event("720675572", "结城理 通行证"), &policy()),
+            decide_route(&group_event("123456789", "结城理 通行证"), &policy()),
             RouteKind::Message
         );
     }
@@ -351,11 +351,11 @@ mod tests {
 
     #[test]
     fn decide_route_drops_non_message() {
-        let mut ev = group_event("720675572", "结城理");
+        let mut ev = group_event("123456789", "结城理");
         ev.post_type = "notice".to_string();
         assert_eq!(decide_route(&ev, &policy()), RouteKind::Drop);
 
-        let mut private = group_event("720675572", "结城理");
+        let mut private = group_event("123456789", "结城理");
         private.message_type = Some("private".to_string());
         assert_eq!(decide_route(&private, &policy()), RouteKind::Drop);
     }
@@ -365,17 +365,17 @@ mod tests {
         let mut p = policy();
         p.whitelist_members = vec!["10001".to_string()];
         assert_eq!(
-            decide_route(&group_event("720675572", "结城理"), &p),
+            decide_route(&group_event("123456789", "结城理"), &p),
             RouteKind::Message
         );
 
         p.whitelist_members = vec!["99999".to_string()];
         assert_eq!(
-            decide_route(&group_event("720675572", "结城理"), &p),
+            decide_route(&group_event("123456789", "结城理"), &p),
             RouteKind::Drop
         );
         assert_eq!(
-            decide_route_with_reason(&group_event("720675572", "结城理"), &p),
+            decide_route_with_reason(&group_event("123456789", "结城理"), &p),
             RouteDecision::Drop("not_whitelisted_member".to_string())
         );
     }
@@ -384,7 +384,7 @@ mod tests {
     fn decide_route_member_whitelist_matches_identity_and_display() {
         let mut p = policy();
         p.whitelist_members = vec!["甲".to_string()];
-        let mut ev = group_event("720675572", "结城理");
+        let mut ev = group_event("123456789", "结城理");
         ev.sender = Some(Sender {
             user_id: Some(json!("10001")),
             nickname: Some("nick".to_string()),
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn decide_route_empty_member_whitelist_allows_all() {
-        let mut ev = group_event("720675572", "结城理");
+        let mut ev = group_event("123456789", "结城理");
         ev.sender = Some(Sender {
             user_id: Some(json!("10001")),
             ..Default::default()
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn to_message_record_marks_drop_reason() {
-        let mut ev = group_event("720675572", "结城理 通行证");
+        let mut ev = group_event("123456789", "结城理 通行证");
         ev.sender = Some(Sender {
             user_id: Some(json!("10001")),
             nickname: Some("成员01".to_string()),
@@ -417,7 +417,7 @@ mod tests {
         assert_eq!(rec.routed, "drop:not_whitelisted_member");
         assert_eq!(rec.status, "Dropped");
         assert_eq!(rec.detail, "not_whitelisted_member");
-        assert_eq!(rec.group_id, "720675572");
+        assert_eq!(rec.group_id, "123456789");
         assert_eq!(rec.user_id, "10001");
         assert_eq!(rec.nickname, "成员01");
         assert_eq!(rec.message_id, "42");
@@ -428,11 +428,11 @@ mod tests {
 
     #[test]
     fn decide_route_drops_empty_message() {
-        let mut ev = group_event("720675572", "   ");
+        let mut ev = group_event("123456789", "   ");
         ev.raw_message = Some("[CQ:image,file=a.jpg]".to_string());
         assert_eq!(decide_route(&ev, &policy()), RouteKind::Drop);
 
-        let mut missing = group_event("720675572", "x");
+        let mut missing = group_event("123456789", "x");
         missing.message = None;
         missing.raw_message = None;
         assert_eq!(decide_route(&missing, &policy()), RouteKind::Drop);
@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn normalize_message_from_segments() {
-        let mut ev = group_event("720675572", "");
+        let mut ev = group_event("123456789", "");
         ev.message = Some(json!([
             { "type": "text", "data": { "text": "结城理" } },
             { "type": "image", "data": { "file": "a.jpg" } },
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn normalize_message_from_cq_codes() {
-        let mut ev = group_event("720675572", "");
+        let mut ev = group_event("123456789", "");
         ev.message = Some(json!(
             "[CQ:at,qq=123] 结城理 [CQ:image,file=a.jpg]通行证 [CQ:face,id=1]"
         ));
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn normalize_message_unescapes_entities() {
-        let mut ev = group_event("720675572", "");
+        let mut ev = group_event("123456789", "");
         ev.message = None;
         ev.raw_message = Some("[CQ:at,qq=1]A&#91;x&#93;&#44;B&amp;C".to_string());
         assert_eq!(normalize_message(&ev), "A[x],B&C");
@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn parse_identity_uses_card_and_role() {
-        let mut ev = group_event("720675572", "hi");
+        let mut ev = group_event("123456789", "hi");
         ev.sender = Some(Sender {
             user_id: Some(json!("10001")),
             nickname: Some("nick".to_string()),
@@ -505,9 +505,9 @@ mod tests {
 
     #[test]
     fn to_incoming_event_maps_fields() {
-        let ev = group_event("720675572", "结城理 通行证");
+        let ev = group_event("123456789", "结城理 通行证");
         let incoming = to_incoming_event(&ev);
-        assert_eq!(incoming.group_id, "720675572");
+        assert_eq!(incoming.group_id, "123456789");
         assert_eq!(incoming.user_id, "10001");
         assert_eq!(incoming.message_id, "42");
         assert_eq!(incoming.text, "结城理 通行证");

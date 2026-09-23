@@ -37,7 +37,7 @@
 
 ## 三、红线（不可违反）
 
-- **绝不向真实群发送消息**（群 `720675572`；`reply_enabled=false`；`send_*` 被引擎强制拦截）。
+- **绝不向真实群发送消息**（群 `123456789`；`reply_enabled=false`；`send_*` 被引擎强制拦截）。
 - **真实昵称/隐私不入库**：69 人名单与优先昵称不得出现在任何跟踪文件（`data/members.seed.json` 由用户放置、gitignored；入库仅 `data/members.example.json` 占位）。
 - 不改 `docs/REQUIREMENTS.md` 的业务口径（只可标注「待确认」）；实现与需求冲突时以需求为准并上报。
 

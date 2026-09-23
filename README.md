@@ -2,14 +2,14 @@
 
 QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。本机接收 QQ 群消息，经 LLM 清理与抽取、确定性引擎排谷计算；排位快照与回放发布到 Cloudflare（R2 + Pages）供成员查看。
 
-> 定位：**本地处理 + 远程展示**。本地（本机 `192.168.100.2`）负责接入、解析、排谷；远程只负责只读展示。
+> 定位：**本地处理 + 远程展示**。本地（本机 `部署主机`）负责接入、解析、排谷；远程只负责只读展示。
 > 安全红线：`reply_enabled` 默认 `false`，**绝不主动发消息给真实群**（只读拉取成员名单允许）。
 > 必读文档：**[docs/POLICY.md](./docs/POLICY.md)**（业务政策）· **[docs/DESIGN.md](./docs/DESIGN.md)**（程序路线）· **[docs/TASKS.md](./docs/TASKS.md)**（任务拆分）· **[docs/AGENT-RULES.md](./docs/AGENT-RULES.md)**（协作规则）· **[docs/FUNCTIONAL.md](./docs/FUNCTIONAL.md)**（功能描述）· **[docs/MODULES.md](./docs/MODULES.md)**（模块契约与文件所有权）。
 
 ## 运行时架构
 
 ```text
- NapCatQQ ──反向 WS──▶ Gateway 192.168.100.2:9801
+ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
                            │ 白名单/drop · 心跳 · 只读动作回包（禁止 send_*）
                            ▼
                     IncomingEvent（src/bus.rs）
@@ -36,7 +36,7 @@ QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。�
 ```bash
 # 新栈（默认）：Gateway + Pipeline + HTTP API + 每日 19:00 成员拉取
 cargo run -- run
-#   反向 WS   → ws://192.168.100.2:9801（NapCat 主动连入；白名单群 720675572；默认不回复）
+#   反向 WS   → ws://0.0.0.0:9801（NapCat 主动连入；白名单群 123456789；默认不回复）
 #   HTTP API  → http://127.0.0.1:21081
 #   展示 /  管理 /admin  模拟 /sim  重放 /replay
 
