@@ -50,21 +50,21 @@
 | T-26 | todo | **补单测**：`domain/**`、`engine/replay`、`api/board_routes` | — | 覆盖率提升 |
 | T-27 | todo | **远程展示接线**（C-1 暂不部署；`domain::snapshot::Public*` 视图模型已保留） | — | 待用户开启 |
 
-## 技术债（本轮审查，2026-09-23）
+## 技术债（2026-09-23 审查 → 已全部处理）
 
-> 来源：本轮 4 份代码审查（结算栈 / 重复策略 / 重放 / 架构分层）。`P0>P1>P2`；每条给出证据文件。
+> 来源：4 份代码审查（结算栈 / 重复策略 / 重放 / 架构分层）。**D-01…D-09 已于同日全部完成**（`cargo test` 154 passed / 0 warning / e2e 11-11 / real-samples·real-xlsx ALL PASS）。
 
-| # | 优先级 | 技术债 | 证据文件 |
-|---|---|---|---|
-| D-01 | P1 | **统一结算栈**：`settlement`（v2，`evaluate`）与 `engine::settlement_engine`（旧，`DiscountRule`）两套并存，语义重叠 | `src/settlement/{engine,model}.rs`、`src/engine/settlement_engine.rs`、`src/domain/discount.rs` |
-| D-02 | P1 | **三份重复策略**：`pipeline::process` / `session::process_one` / `verifier::verify` 各有一套「规则→LLM→校验→权限」，易漂移 | `src/llm/pipeline.rs`、`src/replay/session.rs`、`src/simulation/verifier.rs` |
-| D-03 | P1 | **重放引擎收敛**：`engine::replay`（内存）、`replay::replay_engine`（逐步）、`replay::session`（消息重放）三处重叠 | `src/engine/replay.rs`、`src/replay/replay_engine.rs`、`src/replay/session.rs` |
-| D-04 | P1 | **拆分 `src/llm/pipeline.rs`（1300+ 行）**：与 T-25 合并；职责过多（解析/校验/权限/管理员命令/who-whats） | `src/llm/pipeline.rs` |
-| D-05 | P2 | **`clean_nickname` 下沉出 `gateway`**：`llm::pipeline` 直接依赖 `gateway::onebot::clean_nickname`，形成 llm→gateway 反向依赖 | `src/gateway/onebot.rs`、`src/llm/pipeline.rs` |
-| D-06 | P2 | **`error.rs` 收敛**：`AppError`/`AppResult` 与 `anyhow` 混用；`SettlementError` 为空枚举；HTTP 映射分散 | `src/error.rs`、`src/api/*_routes.rs` |
-| D-07 | P2 | **测试风格统一（当前 4 种）**：inline `mod tests` / 同级 `tests.rs` / `src/tests/` / Node e2e。统一后并入 AGENTS 约定 | 见 `AGENTS.md`「测试放置」各例 |
-| D-08 | P2 | **`MessageStore` / `MessageLog` / `EventSink` 三件套整合**：历史 trait 概念与现役 `MessageLog` 并存 | `src/bus.rs`、`src/messages/mod.rs` |
-| D-09 | P2 | **API 薄层化**：handler 直接持有 `Pipeline`/`MessageLog`/`Gateway` 并做业务判断，宜下沉到服务层 | `src/api/{config,board,display,message,replay,settlement,sim,member}_routes.rs` |
+| # | 状态 | 处置结果 |
+|---|---|---|
+| D-01 | ✅ | **统一结算真源**：`SettlementEngine::settle` 改为调用 `settlement::evaluate` 并映射回 `SettlementSnapshot`（适配器路线；对外 DTO/JSON 不变）。`src/engine/settlement_engine.rs:39`、`allocation_to_order_table` |
+| D-02 | ✅ | **抽出共享策略模块** `src/parser/policy.rs`：群/成员白名单、优先时段/优先用户、`phase_label`/`phase_rejection`；`llm/pipeline` 与 `replay/session` 共用。新增对照测试 `realtime_and_replay_phase_rejection_match`、`realtime_and_replay_whitelist_decisions_match` |
+| D-03 | ✅ | **删除死重放栈**：`ReplayService`/`rebuild_snapshot`/`collect_discount_rules`；保留 `rebuild_allocation_snapshot`/`collect_effective_claims`/`describe_event`（签名不变） |
+| D-04 | ✅ | **拆分** `src/llm/pipeline.rs` → `pipeline/{mod,state,llm_parse,admin,export,tests}.rs` |
+| D-05 | ✅ | **`clean_nickname` 下沉**至 `src/parser/normalize.rs`；`gateway` 之外不再依赖 `gateway::onebot` |
+| D-06 | ✅ | **删除** `src/error.rs` 与 `thiserror` 依赖（领域层无失败路径），应用层统一 `anyhow` |
+| D-07 | ✅ | **测试放置统一**（约定见 [AGENTS.md](../AGENTS.md) §4）：测试模块 ≥120 行 → 目录化 `foo/mod.rs` + `foo/tests.rs`；<120 行内联。已落地 `allocation_engine`/`settlement_engine`/`onebot`/`ws_server`/`session`/`settings`/`planner`/`settlement`/`messages`/`api`/`llm/pipeline` 等 |
+| D-08 | ✅ | **消息三件套整合**：删除 `MessageStore` trait，`MessageLog` 成为唯一对外存储 API（`JsonlMessageStore` 降为内部句柄） |
+| D-09 | ✅ | **API 薄层化**：新增 `src/services/**`（settlement/display/messages/members/replay/snapshot）；handler 仅做请求→服务→响应映射，**HTTP 契约不变**（e2e 11/11） |
 
 ## 关键提交
 

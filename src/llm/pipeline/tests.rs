@@ -1,7 +1,7 @@
 use super::*;
 use crate::messages::JsonlMessageStore;
-use crate::round::PhaseWindow;
-use crate::settings::{default_config, LlmSettings};
+use crate::round::{PhaseWindow, RoundPhase};
+use crate::settings::{default_config, AppConfig, LlmSettings};
 use std::path::PathBuf;
 
 struct MockClient {

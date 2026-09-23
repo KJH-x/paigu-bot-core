@@ -7,16 +7,16 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::bus::{EventSink, IncomingEvent, PipelineOutcome};
-use crate::domain::event::{DomainEvent, EventEnvelope};
+use crate::domain::event::DomainEvent;
 use crate::domain::ids::{RoundId, UserId};
 use crate::domain::item::RoundContext;
 use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
 use crate::messages::{MessageLog, MessageRecord as LogMessageRecord};
 use crate::parser::parsed_event::ParsedIntent;
+use crate::parser::policy;
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
-use crate::round::{can_cancel, can_claim, phase_at, RoundPhase};
-use crate::settings::{AppConfig, ConfigStore};
+use crate::settings::ConfigStore;
 
 use super::client::{LlmClient, OpenAiClient};
 
@@ -101,7 +101,7 @@ impl Pipeline {
                 warn!("原始事件写入失败: {e}");
             }
         }
-        let (identity, display_raw) = crate::gateway::onebot::clean_nickname(&ev.nickname);
+        let (identity, display_raw) = crate::parser::normalize::clean_nickname(&ev.nickname);
         let display = if display_raw.trim().is_empty() {
             ev.user_id.clone()
         } else {
@@ -292,8 +292,8 @@ impl Pipeline {
             }
         };
 
-        let is_priority = crate::settings::is_priority_user(
-            &cfg.round.priority_users,
+        let is_priority = policy::is_priority(
+            &cfg,
             &[
                 ev.user_id.as_str(),
                 ev.nickname.as_str(),
@@ -301,12 +301,7 @@ impl Pipeline {
                 display.as_str(),
             ],
         );
-        let window = cfg
-            .round
-            .priority_window
-            .as_ref()
-            .map(|w| (w.start_ms, w.end_ms));
-        if crate::settings::in_priority_window(window, ev.timestamp_ms) && !is_priority {
+        if policy::in_priority_at(&cfg, ev.timestamp_ms) && !is_priority {
             return self
                 .finish(
                     &ev,
@@ -320,8 +315,8 @@ impl Pipeline {
         }
 
         if !cfg.round.phases.is_empty() {
-            if let Some(phase) = phase_at(&cfg.round.phases, ev.timestamp_ms) {
-                if let Some(detail) = phase_rejection(&cfg, &event, phase, is_priority) {
+            if let Some(phase) = policy::phase_at(&cfg.round.phases, ev.timestamp_ms) {
+                if let Some(detail) = policy::phase_rejection(&cfg, &event, phase, is_priority) {
                     let reply = detail.clone();
                     return self
                         .finish(&ev, &display, seq, "Rejected", &detail, Some(reply))
@@ -467,39 +462,4 @@ impl EventSink for Pipeline {
     }
 }
 
-fn phase_label(phase: RoundPhase) -> &'static str {
-    match phase {
-        RoundPhase::Phase0 => "Phase 0",
-        RoundPhase::PhaseI => "Phase I",
-        RoundPhase::PhaseII => "Phase II",
-        RoundPhase::PhaseIII => "Phase III",
-        RoundPhase::Settling => "结算",
-        RoundPhase::Locked => "锁定",
-    }
-}
 
-/// 阶段越权判定；返回 `Some(detail)` 表示应拒绝（detail 含「阶段」）。
-fn phase_rejection(
-    cfg: &AppConfig,
-    event: &EventEnvelope,
-    phase: RoundPhase,
-    is_priority: bool,
-) -> Option<String> {
-    let label = phase_label(phase);
-    if phase == RoundPhase::Locked {
-        return Some(format!("阶段越权：{label}阶段已锁定，禁止操作"));
-    }
-    match &event.payload {
-        DomainEvent::ClaimCreated(c) => c.items.iter().find_map(|line| {
-            let class = cfg.round.item_class(&line.item_id.0);
-            (!can_claim(phase, class, is_priority))
-                .then_some(format!("阶段越权：{label}阶段不允许排该商品"))
-        }),
-        DomainEvent::ClaimCancelled(c) => c.target_item_id.as_ref().and_then(|item_id| {
-            let class = cfg.round.item_class(&item_id.0);
-            (!can_cancel(phase, class, is_priority))
-                .then_some(format!("阶段越权：{label}阶段不允许撤销该商品"))
-        }),
-        _ => None,
-    }
-}
