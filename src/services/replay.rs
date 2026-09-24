@@ -96,17 +96,18 @@ pub async fn replay_diff(state: &ApiState) -> Result<Value, ServiceError> {
     }))
 }
 
-/// 原始事件日志（C-3）：保留的所有入站成员原始事件 JSON。
-pub async fn list_raw_events(state: &ApiState) -> Result<Value, ServiceError> {
+/// 原始事件日志（C-3）：返回**最后 `limit` 条**（`limit=0` 为全部）。
+pub async fn list_raw_events(state: &ApiState, limit: usize) -> Result<Value, ServiceError> {
     let cfg = state.cfg.get().await;
     let events = state
         .messages
-        .read_raw_events(&cfg.round.round_id)
+        .read_raw_events(&cfg.round.round_id, limit)
         .await
         .map_err(ServiceError::from)?;
     Ok(json!({
         "round_id": cfg.round.round_id,
         "count": events.len(),
+        "limit": limit,
         "events": events,
     }))
 }

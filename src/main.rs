@@ -21,6 +21,7 @@ mod snapshot_bundle;
 mod tests;
 
 use anyhow::Result;
+use std::io::IsTerminal;
 use std::sync::Arc;
 use tracing::info;
 
@@ -28,6 +29,8 @@ use tracing::info;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        // 重定向到文件时不写 ANSI 颜色码（终端下保留颜色；需 use std::io::IsTerminal）
+        .with_ansi(std::io::stdout().is_terminal())
         .init();
 
     let args: Vec<String> = std::env::args().collect();

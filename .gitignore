@@ -50,3 +50,7 @@ REPLAY_SIMULATION_ADDENDUM.md
 /simulation-corpus/CHANGELOG.md
 !/simulation-corpus/VERIFICATION.public.md
 !/simulation-corpus/CHANGELOG.public.md
+
+# ---------- 部署产物（运行时） ----------
+/deploy/bin/
+/deploy/logs/

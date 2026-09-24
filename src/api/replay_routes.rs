@@ -37,11 +37,22 @@ async fn replay_diff(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, 
     Ok(Json(value))
 }
 
-async fn list_raw_events(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
-    let value = replay::list_raw_events(&state)
+async fn list_raw_events(
+    State(state): State<Arc<ApiState>>,
+    axum::extract::Query(query): axum::extract::Query<EventsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    // 默认只回最后 1000 条；显式 limit=0 才取全部（事件日志可达数十 MB）
+    let limit = query.limit.unwrap_or(1000).min(100_000);
+    let value = replay::list_raw_events(&state, limit)
         .await
         .map_err(ServiceError::into_api)?;
     Ok(Json(value))
+}
+
+#[derive(serde::Deserialize, Default)]
+struct EventsQuery {
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 async fn snapshot_export(
