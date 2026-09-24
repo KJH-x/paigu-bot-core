@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +10,9 @@ use crate::domain::item::{Item, RoundContext};
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
 use crate::messages::{MessageLog, MessageRecord};
-use crate::parser::parsed_event::ParsedIntent;
+use crate::parser::parsed_event::{
+    apply_parse_override, collect_parse_overrides, ParsedIntent, ParsedMessage,
+};
 use crate::parser::policy;
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
@@ -132,23 +136,47 @@ pub async fn replay(
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
     let records = store.read_all(&base.round.round_id).await?;
-    replay_messages(base, &records, overrides).await
+    let parse_overrides = load_parse_overrides(store, &base.round.round_id).await;
+    replay_messages_with_parse(base, &records, overrides, &parse_overrides).await
 }
 
-/// 从内存消息列表重放（快照导入 / 单测复用）。
+/// 从内存消息列表重放（快照导入 / 单测复用）；不消费 `ParseOverride` 事件。
 pub async fn replay_messages(
     base: &AppConfig,
     records: &[MessageRecord],
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
+    replay_messages_with_parse(base, records, overrides, &HashMap::new()).await
+}
+
+/// §U7：读取轮次事件日志中的 `ParseOverride`，建立 `message_id → 修正解析` 映射。
+async fn load_parse_overrides(store: &MessageLog, round_id: &str) -> HashMap<String, ParsedMessage> {
+    let raw = match store.read_raw_events(round_id, 0).await {
+        Ok(raw) => raw,
+        Err(_) => return HashMap::new(),
+    };
+    let events: Vec<EventEnvelope> = raw
+        .into_iter()
+        .filter_map(|value| serde_json::from_value(value).ok())
+        .collect();
+    collect_parse_overrides(&events)
+}
+
+/// 从内存消息列表重放，并消费给定的 `ParseOverride` 映射。
+async fn replay_messages_with_parse(
+    base: &AppConfig,
+    records: &[MessageRecord],
+    overrides: ReplayOverrides,
+    parse_overrides: &HashMap<String, ParsedMessage>,
+) -> anyhow::Result<ReplayResult> {
     let replay_cfg = apply_overrides(base, &overrides);
 
     let (baseline_board, computed) = if overrides.is_empty() {
-        let computed = compute(&replay_cfg, records).await;
+        let computed = compute(&replay_cfg, records, parse_overrides).await;
         (computed.board.clone(), computed)
     } else {
-        let baseline = compute(base, records).await;
-        let computed = compute(&replay_cfg, records).await;
+        let baseline = compute(base, records, parse_overrides).await;
+        let computed = compute(&replay_cfg, records, parse_overrides).await;
         (baseline.board, computed)
     };
 
@@ -175,7 +203,11 @@ struct Computation {
     version: i64,
 }
 
-async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
+async fn compute(
+    cfg: &AppConfig,
+    records: &[MessageRecord],
+    parse_overrides: &HashMap<String, ParsedMessage>,
+) -> Computation {
     let items = cfg.round.to_items();
     let round_id = RoundId(cfg.round.round_id.clone());
     let round_contexts = vec![RoundContext {
@@ -184,6 +216,17 @@ async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
         items: items.clone(),
     }];
     let validator = EventValidator::new(REPLAY_CONFIDENCE_THRESHOLD);
+
+    // U4：CN → 归一化昵称 → user_id，供分配展示名与消息人名输出。
+    let mut display_names: HashMap<UserId, String> = HashMap::new();
+    for rec in records {
+        if display_names.contains_key(&UserId(rec.user_id.clone())) {
+            continue;
+        }
+        if let Some(name) = crate::settings::resolve_cn(cfg, &rec.user_id, &rec.nickname) {
+            display_names.insert(UserId(rec.user_id.clone()), name);
+        }
+    }
 
     let mut ordered: Vec<&MessageRecord> = records.iter().collect();
     ordered.sort_by_key(|r| (r.timestamp_ms, r.seq));
@@ -196,7 +239,16 @@ async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
 
     for rec in ordered {
         latest_ts = latest_ts.max(rec.timestamp_ms);
-        let processed = process_one(cfg, rec, &items, &round_contexts, &validator).await;
+        let processed = process_one(
+            cfg,
+            rec,
+            &items,
+            &round_contexts,
+            &validator,
+            parse_overrides,
+            &display_names,
+        )
+        .await;
 
         if !processed.events.is_empty() {
             if processed.priority_claim && !eligibilities.iter().any(|e| e.user_id.0 == rec.user_id)
@@ -210,7 +262,10 @@ async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
             seq: rec.seq,
             group_id: rec.group_id.clone(),
             user_id: rec.user_id.clone(),
-            nickname: rec.nickname.clone(),
+            nickname: display_names
+                .get(&UserId(rec.user_id.clone()))
+                .cloned()
+                .unwrap_or_else(|| rec.nickname.clone()),
             text: rec.text.clone(),
             timestamp_ms: rec.timestamp_ms,
             is_admin: rec.is_admin,
@@ -225,7 +280,8 @@ async fn compute(cfg: &AppConfig, records: &[MessageRecord]) -> Computation {
         });
     }
 
-    let mut board = rebuild_allocation_snapshot(&items, &events, &eligibilities);
+    let mut board =
+        rebuild_allocation_snapshot(&items, &events, &eligibilities, &display_names);
     board.generated_at = DateTime::<Utc>::from_timestamp_millis(latest_ts).unwrap_or_else(Utc::now);
     let version = board.version;
 
@@ -260,6 +316,8 @@ async fn process_one(
     items: &[Item],
     round_contexts: &[RoundContext],
     validator: &EventValidator,
+    parse_overrides: &HashMap<String, ParsedMessage>,
+    display_names: &HashMap<UserId, String>,
 ) -> Processed {
     let display = if rec.nickname.trim().is_empty() {
         rec.user_id.clone()
@@ -267,6 +325,8 @@ async fn process_one(
         rec.nickname.clone()
     };
     let (identity, _) = crate::parser::normalize::clean_nickname(&rec.nickname);
+    // U4：人名优先 CN（已由 `compute` 解析），回退昵称。
+    let cn = display_names.get(&UserId(rec.user_id.clone()));
 
     if rec.routed.eq_ignore_ascii_case("drop") {
         return skipped("Dropped", "非白名单/Drop");
@@ -279,6 +339,7 @@ async fn process_one(
             rec.nickname.as_str(),
             identity.as_str(),
             display.as_str(),
+            cn.map(String::as_str).unwrap_or(""),
         ],
     ) {
         return skipped("Dropped", "成员不在白名单");
@@ -298,6 +359,8 @@ async fn process_one(
     }
 
     let mut rule = RuleParser::parse(text, items, rec.is_admin);
+    // §U7：重放消费该消息的 `ParseOverride`（first-match LLM 澄清修复），使实时 == 重放。
+    rule = apply_parse_override(rule, Some(&rec.message_id), parse_overrides);
     // 改单（D-2）：与实时管线一致，按新数量重排，应用时先撤销本人该商品的既有认购。
     let is_modify = rule.intent == ParsedIntent::Modify;
     if is_modify {
@@ -350,15 +413,8 @@ async fn process_one(
         Err(e) => return skipped("Error", format!("处理失败: {e}")),
     };
 
-    let is_priority = policy::is_priority(
-        cfg,
-        &[
-            rec.user_id.as_str(),
-            rec.nickname.as_str(),
-            identity.as_str(),
-            display.as_str(),
-        ],
-    );
+    // U4：优先用户候选含 CN/别名。
+    let is_priority = policy::is_priority(cfg, &rec.user_id, &rec.nickname);
     if policy::in_priority_at(cfg, rec.timestamp_ms) && !is_priority {
         return skipped("Rejected", "优先时段仅限预存(购物金)用户");
     }

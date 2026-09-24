@@ -9,6 +9,8 @@ use crate::domain::money::MoneyCents;
 pub enum ItemKind {
     Split,
     Single,
+    /// §U8（2026-09-24）：**整盒**是独立种类，默认进入**单领队列**，不参与拼团成盒。
+    WholeBox,
     Gift,
     Shipping,
     Adjustment,
@@ -19,6 +21,7 @@ impl ItemKind {
         match self {
             ItemKind::Split => "split",
             ItemKind::Single => "single",
+            ItemKind::WholeBox => "whole_box",
             ItemKind::Gift => "gift",
             ItemKind::Shipping => "shipping",
             ItemKind::Adjustment => "adjustment",
@@ -30,6 +33,7 @@ impl ItemKind {
             (self, claim_type),
             (ItemKind::Split, ClaimType::Split)
                 | (ItemKind::Single, ClaimType::Single)
+                | (ItemKind::WholeBox, ClaimType::Single)
                 | (ItemKind::Gift, ClaimType::GiftClaim)
         )
     }

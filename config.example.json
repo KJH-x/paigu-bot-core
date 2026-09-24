@@ -40,12 +40,11 @@
         "class": "A",
         "aliases": ["通行证", "通行认证SP", "通行认证"],
         "unit_price_cents": 5000,
-        "box_size": 8,
         "variants": [
-          { "variant_id": "v_jcl", "name": "结城理", "unit_price_cents": 5000, "pieces": 2, "capacity": null, "aliases": [] },
-          { "variant_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 5000, "pieces": 2, "capacity": null, "aliases": [] },
-          { "variant_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 5000, "pieces": 2, "capacity": null, "aliases": [] },
-          { "variant_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 2500, "pieces": 1, "capacity": null, "aliases": [] }
+          { "variant_id": "v_jcl", "name": "结城理", "unit_price_cents": 5000, "adjust_cents": -500, "capacity": null, "aliases": [] },
+          { "variant_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 5000, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "variant_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 5000, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "variant_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 2500, "adjust_cents": 0, "capacity": null, "aliases": [] }
         ]
       },
       {
@@ -81,13 +80,12 @@
         "class": "B",
         "aliases": ["特典卡组", "特典", "校园凭证"],
         "unit_price_cents": 1200,
-        "box_size": 5,
         "variants": [
-          { "variant_id": "v_jcl", "name": "结城理", "unit_price_cents": 1200, "pieces": 1, "capacity": null, "aliases": [] },
-          { "variant_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 1200, "pieces": 1, "capacity": null, "aliases": [] },
-          { "variant_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 1200, "pieces": 1, "capacity": null, "aliases": [] },
-          { "variant_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 1200, "pieces": 1, "capacity": null, "aliases": [] },
-          { "variant_id": "v_zt", "name": "整套", "unit_price_cents": 4800, "pieces": 4, "capacity": null, "aliases": ["一套"] }
+          { "variant_id": "v_jcl", "name": "结城理", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "variant_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "variant_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "variant_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "variant_id": "v_zt", "name": "整套", "unit_price_cents": 4800, "adjust_cents": 200, "capacity": null, "aliases": ["一套"] }
         ]
       }
     ]

@@ -3,7 +3,7 @@
 > 本目录是 paigu-bot-core 的**现行文档集合**，也是 **LLM/子 agent 接手工作的唯一入口**。
 > 任何新会话/新 agent 从本文件开始，按下面的顺序读完即可接手工作。
 
-> 🔴 **最新口径优先**：[SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md)（用户 2026-09-24 追加；与其它文档冲突处**以它为准**，被覆盖原文已标 `⚠️ 已废弃`）。实现完成后再由 Wave G2 更新正文。
+> ✅ **SPEC-UPDATE-2026-09-24 已实现（正文已更新）**：[SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) 的用户口径 U1–U9 已为**现行口径**，并同步进 [REQUIREMENTS.md](./REQUIREMENTS.md) / [POLICY.md](./POLICY.md) / [DESIGN.md](./DESIGN.md) / [INTERFACES.md](./INTERFACES.md)（原 `⚠️ 已废弃` 标记已改为 `✅ 已更新`）。未落地的实现差距记为 [TODOS.md](./TODOS.md)「本轮遗留（Wave G2）」。
 
 ## 一、必读顺序（接手工作前）
 
@@ -20,6 +20,8 @@
 | 9 | [AGENT-RULES.md](./AGENT-RULES.md) | 协作规则（边界/红线/接口/DoD） | ✅ 全体 |
 | 10 | [DECISIONS.md](./DECISIONS.md) | **待决策 + 需补充信息**（含建议默认） | 领任务时 |
 | 11 | [TODOS.md](./TODOS.md) | **工程待办**（ID/优先级/依赖/验收） | 领任务时 |
+
+> **流程两页（2026-09-24）**：**开团 = `/round`**（轮次与商品；轮次库 `active_round_id` + `data/rounds/<round_id>.json`，切换与重放解耦），**其余配置 = `/settings`**（不进 Stepper）；详见 [DESIGN.md](./DESIGN.md) §3/§5、[POLICY.md](./POLICY.md) §9、[INTERFACES.md](./INTERFACES.md) §8.7。
 
 ## 二、LLM 接手工作协议
 

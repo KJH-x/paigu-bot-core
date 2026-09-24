@@ -40,7 +40,15 @@ impl SettlementEngine {
         let item_map: HashMap<ItemId, &Item> =
             input.items.iter().map(|i| (i.item_id.clone(), i)).collect();
 
-        let table = allocation_to_order_table(input, &item_map);
+        // §U8：结算阶段执行「包尾强制成盒 + 自动滑入」（幂等；分配阶段已解析时结果一致）。
+        let resolved = crate::domain::allocation::resolve_tail_boxes(&input.allocation);
+        let forced_tail_boxes = resolved
+            .warnings
+            .iter()
+            .filter(|w| w.message.starts_with("包尾强制成盒"))
+            .count();
+
+        let table = allocation_to_order_table(&resolved, &item_map);
         let config = SettlementConfig::default();
         let result = evaluate(&config, &table);
 
@@ -155,6 +163,13 @@ impl SettlementEngine {
             message: m.clone(),
             severity: "warning".to_string(),
         }));
+        if forced_tail_boxes > 0 {
+            warnings.push(SettlementWarning {
+                user_id: None,
+                message: format!("包尾强制成盒：{forced_tail_boxes} 个"),
+                severity: "info".to_string(),
+            });
+        }
 
         SettlementSnapshot {
             round_id: input.allocation.round_id.clone(),
@@ -174,13 +189,13 @@ impl SettlementEngine {
 /// 把排谷结果按用户归组为下单表；行价为商品标价（与旧 `build_user_bills` 一致），
 /// 所有行按 `is_gift = false` 处理（旧栈不含特典折价语义）。
 fn allocation_to_order_table(
-    input: &SettlementInput,
+    allocation: &AllocationSnapshot,
     item_map: &HashMap<ItemId, &Item>,
 ) -> OrderTable {
     type LineKey = (String, Option<String>);
     let mut by_user: BTreeMap<String, BTreeMap<LineKey, (u32, i64)>> = BTreeMap::new();
 
-    for ia in &input.allocation.item_allocations {
+    for ia in &allocation.item_allocations {
         let price = item_map
             .get(&ia.item_id)
             .map(|i| i.unit_price.as_cents())

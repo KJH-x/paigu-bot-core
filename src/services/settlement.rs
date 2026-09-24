@@ -9,12 +9,45 @@ use crate::domain::ids::{ClaimId, ItemId, RoundId, UserId};
 use crate::domain::money::MoneyCents;
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::planner::{self, PlanLimits, PlanRequest};
+use crate::settings::RoundSettings;
 use crate::settlement::{
     check_completeness, evaluate, order_table_from_allocation, CompletenessReport, OrderTable,
-    SettlementConfig, SettlementResult, UnitPrice,
+    PricingEntry, PricingMode, SettlementConfig, SettlementResult, UnitPrice,
 };
 
 use super::ServiceError;
+
+/// §U6：把目录变体的 `adjust_cents`（B）合成为结算定价（`mode=AdjustBy`，精确匹配
+/// `item_id`/`variant_id`），使 `evaluate` 的「调后价」列反映 C = A + B。
+///
+/// **仅内存合并，不持久化**。已有同 `(item_id, variant_id)` 的显式定价优先保留，
+/// 以便配置/覆盖中的显式定价仍以显式为准；请求自带 `pricing` 时整体以请求为准（不调用本函数）。
+pub fn merge_catalog_pricing(
+    mut config: SettlementConfig,
+    round: &RoundSettings,
+) -> SettlementConfig {
+    for item in &round.items {
+        for variant in &item.variants {
+            if variant.adjust_cents == 0 {
+                continue;
+            }
+            let exists = config.pricing.iter().any(|entry| {
+                entry.item_id == item.item_id
+                    && entry.variant_id.as_deref() == Some(variant.variant_id.as_str())
+            });
+            if exists {
+                continue;
+            }
+            config.pricing.push(PricingEntry {
+                item_id: item.item_id.clone(),
+                variant_id: Some(variant.variant_id.clone()),
+                mode: PricingMode::AdjustBy,
+                value: variant.adjust_cents,
+            });
+        }
+    }
+    config
+}
 
 pub async fn get_settlement_config(state: &ApiState) -> Value {
     let cfg = state.cfg.get().await;
@@ -60,8 +93,12 @@ pub async fn evaluate_order(
     body: EvaluateBody,
 ) -> Result<SettlementResult, ServiceError> {
     let config = match body.config {
+        // 请求显式带 config（含 pricing）→ 以请求为准，不合并目录调价。
         Some(config) => config,
-        None => state.cfg.get().await.settlement,
+        None => {
+            let cfg = state.cfg.get().await;
+            merge_catalog_pricing(cfg.settlement, &cfg.round)
+        }
     };
     if let Some(allocation) = &body.allocation {
         let report = check_completeness(&body.order_table, allocation);
@@ -118,7 +155,7 @@ pub async fn plan_order(state: &ApiState, body: PlanBody) -> Result<Value, Servi
     let cfg_now = state.cfg.get().await;
     let config = match body.config {
         Some(config) => config,
-        None => cfg_now.settlement.clone(),
+        None => merge_catalog_pricing(cfg_now.settlement.clone(), &cfg_now.round),
     };
     // 标价表：请求未带则取「商品目录」（A-4 口径）
     let prices = if body.prices.is_empty() {
@@ -310,5 +347,68 @@ mod tests {
             .map(|p| p.gift_count)
             .sum();
         assert!(hits >= 1);
+    }
+
+    fn round_with_adjust(adjust_cents: i64) -> RoundSettings {
+        use crate::settings::{ItemConfig, RoundSettings, VariantConfig};
+        RoundSettings {
+            round_id: "r".to_string(),
+            title: "t".to_string(),
+            group_id: "g".to_string(),
+            priority_users: vec![],
+            priority_window: None,
+            phases: vec![],
+            items: vec![ItemConfig {
+                item_id: "a".to_string(),
+                name: "A".to_string(),
+                kind: "group".to_string(),
+                class: None,
+                aliases: vec![],
+                unit_price_cents: 5000,
+                max_quantity: None,
+                variants: vec![VariantConfig {
+                    variant_id: "v1".to_string(),
+                    name: "甲".to_string(),
+                    unit_price_cents: 5000,
+                    adjust_cents,
+                    capacity: None,
+                    aliases: vec![],
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn merge_catalog_adjust_sets_adjusted_price_only() {
+        let merged = merge_catalog_pricing(SettlementConfig::default(), &round_with_adjust(-500));
+        assert_eq!(merged.pricing.len(), 1);
+        assert!(matches!(merged.pricing[0].mode, PricingMode::AdjustBy));
+        assert_eq!(merged.pricing[0].value, -500);
+
+        let table = OrderTable::new(vec![Package::new(
+            "p1",
+            vec![Line::new("a", 1, 5000).variant("v1")],
+        )]);
+        let result = evaluate(&merged, &table);
+        assert_eq!(result.lines[0].unit_price_cents, 5000, "标价 A 口径不变");
+        assert_eq!(result.packages[0].gross_cents, 5000, "毛额以 A 计");
+        assert_eq!(
+            result.packages[0].adjusted_cents, 4500,
+            "调后价 = C = A + B"
+        );
+    }
+
+    #[test]
+    fn explicit_pricing_wins_over_catalog_adjust() {
+        let mut base = SettlementConfig::default();
+        base.pricing.push(PricingEntry {
+            item_id: "a".to_string(),
+            variant_id: Some("v1".to_string()),
+            mode: PricingMode::SetFinal,
+            value: 6000,
+        });
+        let merged = merge_catalog_pricing(base, &round_with_adjust(-500));
+        assert_eq!(merged.pricing.len(), 1, "已存在的显式定价保留、不追加");
+        assert_eq!(merged.pricing[0].value, 6000);
     }
 }

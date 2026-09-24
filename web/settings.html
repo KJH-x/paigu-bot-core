@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>设置 · 系统与接入</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="./manage.css" />
+  <script>
+    window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
+  </script>
+  <script defer src="./common.js"></script>
+  <script defer src="shell.js"></script>
+  <script defer src="./manage.js"></script>
+  <script defer src="./msglog.js"></script>
+  <script defer src="./settings.js"></script>
+</head>
+<body data-page="settings">
+  <div class="page">
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>设置 · 系统与接入</b><small>gateway / llm / display / members / 快照</small></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">API</span>
+          <input id="api" size="26" />
+        </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
+      </div>
+      <div class="tools-row">
+        <span id="rev-badge" class="status-badge">revision —</span>
+        <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
+        <span class="spacer"></span>
+        <button id="load" class="small">重新载入</button>
+        <button id="reload" class="small">从磁盘重载</button>
+        <button id="save" class="primary">保存配置</button>
+        <span class="nav-links">
+          <a href="index.html">首页</a>
+          <a href="round.html">开团</a>
+          <a href="display.html">展示</a>
+          <a href="settlement.html">结算</a>
+          <a href="replay.html">回放</a>
+          <a href="sim.html">模拟器</a>
+        </span>
+      </div>
+    </header>
+
+    <div id="banner" class="banner"></div>
+
+    <nav class="section-nav">
+      <a href="#sec-gateway">接入</a>
+      <a href="#sec-display">展示</a>
+      <a href="#sec-llm">LLM</a>
+      <a href="#sec-members">成员 / CN</a>
+      <a href="#sec-messages">消息日志</a>
+      <a href="#sec-snapshot">快照</a>
+    </nav>
+
+    <div id="form" class="hidden">
+      <div class="layout">
+        <section class="panel admin-section" id="sec-gateway">
+          <div class="panel-head"><span>接入（gateway）</span></div>
+          <div class="panel-body">
+            <label class="field"><span>bind</span><input id="gw-bind" /></label>
+            <div class="split">
+              <label class="field"><span>heartbeat_secs</span><input id="gw-heartbeat" type="number" min="1" /></label>
+              <label class="field"><span>reply_enabled（真实群必须关闭）</span><input id="gw-reply" type="checkbox" style="width:auto" /></label>
+              <label class="field"><span>admin_commands_enabled（管理员命令落地执行）</span><input id="gw-admincmds" type="checkbox" style="width:auto" /></label>
+            </div>
+            <label class="field"><span>whitelist_groups（逗号分隔）</span><input id="gw-whitelist" /></label>
+            <label class="field"><span>whitelist_members（成员白名单，逗号分隔 user_id/身份/显示名；空 = 不限制）</span><input id="gw-whitelist-members" /></label>
+            <label class="field"><span>allowed_actions（逗号分隔，禁止 send_*）</span><input id="gw-actions" /></label>
+            <div class="row">
+              <button id="gw-reply-toggle" class="small">热切换 reply_enabled</button>
+              <button id="gw-admin-toggle" class="small">热切换 admin_commands_enabled</button>
+              <span class="hint">走后端 POST /api/config/reply、/api/config/admin-commands（只改单开关，不走整表保存）</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel admin-section" id="sec-display">
+          <div class="panel-head"><span>展示（display）</span></div>
+          <div class="panel-body">
+            <div class="split">
+              <label class="field"><span>refresh_ms</span><input id="dp-refresh" type="number" min="500" /></label>
+              <label class="field"><span>data_source</span>
+                <select id="dp-source"><option value="local">local</option><option value="remote">remote</option></select>
+              </label>
+            </div>
+            <label class="field"><span>remote_base_url</span><input id="dp-remote" placeholder="https://…/rounds/{round_id} 或 …/current.json" /></label>
+          </div>
+        </section>
+      </div>
+
+      <div class="layout" style="margin-top:12px">
+        <section class="panel admin-section" id="sec-llm">
+          <div class="panel-head"><span>LLM（llm）</span></div>
+          <div class="panel-body">
+            <div class="split">
+              <label class="field"><span>enabled</span><input id="llm-enabled" type="checkbox" style="width:auto" /></label>
+              <label class="field"><span>fallback_to_rules</span><input id="llm-fallback" type="checkbox" style="width:auto" /></label>
+              <label class="field"><span>base_url</span><input id="llm-base" /></label>
+              <label class="field"><span>model</span><input id="llm-model" /></label>
+              <label class="field"><span>api_key_env</span><input id="llm-keyenv" /></label>
+              <label class="field"><span>timeout_secs</span><input id="llm-timeout" type="number" min="1" /></label>
+              <label class="field"><span>max_tokens</span><input id="llm-maxtokens" type="number" min="1" /></label>
+              <label class="field"><span>temperature</span><input id="llm-temp" type="number" step="0.05" min="0" max="2" /></label>
+            </div>
+            <label class="field"><span>prompt_template</span><textarea id="llm-prompt" rows="12"></textarea></label>
+          </div>
+        </section>
+
+        <section class="panel admin-section" id="sec-members">
+          <div class="panel-head">
+            <span>成员（members）· CN 具体名</span>
+            <span class="spacer"></span>
+            <button id="members-cn-save" class="small">保存成员 CN</button>
+          </div>
+          <div class="panel-body">
+            <div class="split">
+              <label class="field"><span>group_id</span><input id="mb-group" /></label>
+              <label class="field"><span>cache_path</span><input id="mb-cache" /></label>
+              <label class="field"><span>daily_pull_at</span><input id="mb-pull" placeholder="19:00" /></label>
+            </div>
+            <div class="row">
+              <button id="members-refresh" class="small">拉取群成员</button>
+              <span id="members-info" class="hint"></span>
+            </div>
+            <div class="explain" style="margin-top:8px">
+              <b>CN = 净化后的群昵称，绑定 QQ(user_id)</b>。用途：① 请求匹配；② <b>制作结算表格/账单里的人名</b>（回退顺序：CN → 归一化昵称 → user_id）。
+              人工编辑 CN 后写入 <code>members.cn_overrides</code>（config 热载 + 乐观并发 409）。
+            </div>
+            <div class="table-scroll" style="max-height:40vh;margin-top:8px">
+              <table class="grid cn-table">
+                <thead><tr><th>user_id</th><th>昵称（清洗后）</th><th>CN</th><th>别名</th><th>角色</th><th>操作</th></tr></thead>
+                <tbody id="members-body"></tbody>
+              </table>
+              <div id="members-empty" class="empty">尚未加载成员列表</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="layout" style="margin-top:12px">
+        <section class="panel admin-section" id="sec-messages">
+          <div class="panel-head">
+            <span>消息日志编辑器（C4）</span>
+            <span class="spacer"></span>
+            <span id="msg-info" class="hint"></span>
+            <button id="msg-refresh" class="small">刷新消息</button>
+          </div>
+          <div class="panel-body">
+            <div class="hint">编辑文本 / 时间 / 状态后点「保存」调用 PUT /api/messages/:seq（带 revision，改后触发重算）；「删除」调用 DELETE /api/messages/:seq。</div>
+            <div id="msg-empty" class="empty">尚未加载消息</div>
+            <div class="table-wrap" style="max-height:46vh;overflow:auto">
+              <table class="grid">
+                <thead><tr><th>seq</th><th>text</th><th>timestamp（本地）</th><th>status</th><th>操作</th></tr></thead>
+                <tbody id="msg-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel admin-section" id="sec-snapshot">
+          <div class="panel-head"><span>快照导出 / 导入（C4）</span></div>
+          <div class="panel-body">
+            <div class="row">
+              <label class="field" style="flex:1;margin:0"><span>out_dir（可选；留空用后端默认目录）</span><input id="snap-out" placeholder="例如 data/snapshots" /></label>
+              <button id="snap-export" class="primary">导出快照（format=file）</button>
+            </div>
+            <div class="hint" id="snap-export-info"></div>
+            <hr style="border:none;border-top:1px solid var(--border);margin:10px 0" />
+            <label class="field"><span>path（.snapshot.json 文件或目录）</span><input id="snap-path" placeholder="上一步导出返回的路径" /></label>
+            <div class="row">
+              <label class="row tight"><input id="snap-apply" type="checkbox" style="width:auto" /><span>apply（写回消息日志并复算）</span></label>
+              <button id="snap-import" class="small">导入快照</button>
+            </div>
+            <div id="snap-import-result" class="hint"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="loading" class="empty">正在载入配置…</div>
+  </div>
+</body>
+</html>

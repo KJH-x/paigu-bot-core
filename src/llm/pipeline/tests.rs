@@ -1,29 +1,33 @@
 use super::*;
 use crate::messages::JsonlMessageStore;
+use crate::replay::session::ReplayOverrides;
 use crate::round::{PhaseWindow, RoundPhase};
 use crate::settings::{default_config, AppConfig, LlmSettings};
 use std::path::PathBuf;
 
 struct MockClient {
-    reply: std::sync::Mutex<MockReply>,
+    replies: std::sync::Mutex<std::collections::VecDeque<MockReply>>,
 }
 
+#[derive(Clone)]
 enum MockReply {
     Ok(String),
     Err(String),
 }
 
 impl MockClient {
-    fn ok(body: &str) -> Arc<Self> {
+    fn script(replies: Vec<MockReply>) -> Arc<Self> {
         Arc::new(Self {
-            reply: std::sync::Mutex::new(MockReply::Ok(body.to_string())),
+            replies: std::sync::Mutex::new(replies.into()),
         })
     }
 
+    fn ok(body: &str) -> Arc<Self> {
+        Self::script(vec![MockReply::Ok(body.to_string())])
+    }
+
     fn err(message: &str) -> Arc<Self> {
-        Arc::new(Self {
-            reply: std::sync::Mutex::new(MockReply::Err(message.to_string())),
-        })
+        Self::script(vec![MockReply::Err(message.to_string())])
     }
 }
 
@@ -35,9 +39,15 @@ impl LlmClient for MockClient {
         _system_prompt: &str,
         _user_prompt: &str,
     ) -> anyhow::Result<String> {
-        match &*self.reply.lock().unwrap() {
-            MockReply::Ok(body) => Ok(body.clone()),
-            MockReply::Err(message) => Err(anyhow::anyhow!(message.clone())),
+        let mut queue = self.replies.lock().unwrap();
+        let next = if queue.len() > 1 {
+            queue.pop_front().unwrap()
+        } else {
+            queue.front().cloned().unwrap()
+        };
+        match next {
+            MockReply::Ok(body) => Ok(body),
+            MockReply::Err(message) => Err(anyhow::anyhow!(message)),
         }
     }
 }
@@ -233,13 +243,152 @@ async fn non_claim_ignored() {
 }
 
 #[tokio::test]
-async fn ambiguous_need_confirm() {
+async fn bare_variant_first_match_resolves_to_catalog_first() {
     let body = r#"{"intent":"claim","items":[{"variant":"结城理","quantity":1,"claim_type":"split"}],"confidence":0.95,"ambiguous_parts":[]}"#;
     let pipeline = test_pipeline(&base_config(), MockClient::ok(body));
     let outcome = pipeline
         .process(event("u1", "小明", "帮我留一份yukari", 1_000))
         .await;
+    assert_eq!(outcome.status, "Applied");
+    let who = pipeline.who_whats().await;
+    assert_eq!(who[0]["items"][0]["name"], "通行认证SP-月行水上");
+}
+
+#[tokio::test]
+async fn rule_bare_variant_first_match() {
+    let pipeline = test_pipeline(&base_config(), MockClient::ok("{}"));
+    let outcome = pipeline
+        .process(event("u1", "小明", "排 结城理 1", 1_000))
+        .await;
+    assert_eq!(outcome.status, "Applied");
+    let who = pipeline.who_whats().await;
+    assert_eq!(who[0]["items"][0]["name"], "通行认证SP-月行水上");
+}
+
+#[tokio::test]
+async fn ambiguous_category_need_confirm() {
+    let body = r#"{"intent":"claim","items":[{"item":"SP","quantity":1,"claim_type":"split"}],"confidence":0.95,"ambiguous_parts":[]}"#;
+    let pipeline = test_pipeline(&base_config(), MockClient::ok(body));
+    let outcome = pipeline
+        .process(event("u1", "小明", "帮我留一份", 1_000))
+        .await;
     assert_eq!(outcome.status, "NeedConfirm");
+}
+
+#[tokio::test]
+async fn first_match_clarification_emits_parse_override() {
+    let parse_body = r#"{"intent":"claim","items":[{"variant":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
+    let clarify_body =
+        r#"{"matches":[{"name":"悠人","item":"通行认证SP-月行水上","variant":"结城理"}]}"#;
+    let pipeline = test_pipeline(
+        &base_config(),
+        MockClient::script(vec![
+            MockReply::Ok(parse_body.to_string()),
+            MockReply::Ok(clarify_body.to_string()),
+        ]),
+    );
+    let outcome = pipeline
+        .process(event("u1", "小明", "要一个悠人", 1_000))
+        .await;
+    assert_eq!(outcome.status, "Applied");
+    let raw = pipeline
+        .messages()
+        .read_raw_events("月行水上", 0)
+        .await
+        .unwrap();
+    assert!(
+        raw.iter().any(|v| v["payload"]["event_type"] == "ParseOverride"),
+        "应落盘 ParseOverride 事件: {raw:?}"
+    );
+    assert!(
+        raw.iter().any(|v| v["payload"]["target_raw_message_id"] == "u1::要一个悠人"),
+        "ParseOverride 应指向原 message_id"
+    );
+}
+
+/// §U7：重放消费 `ParseOverride`，与实时对同一消息结果一致。
+#[tokio::test]
+async fn replay_consumes_parse_override_matching_realtime() {
+    let parse_body = r#"{"intent":"claim","items":[{"variant":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
+    let clarify_body =
+        r#"{"matches":[{"name":"悠人","item":"通行认证SP-月行水上","variant":"结城理"}]}"#;
+    let cfg = base_config();
+    let pipeline = test_pipeline(
+        &cfg,
+        MockClient::script(vec![
+            MockReply::Ok(parse_body.to_string()),
+            MockReply::Ok(clarify_body.to_string()),
+        ]),
+    );
+
+    let live = pipeline
+        .process(event("u1", "小明", "要一个悠人", 1_000))
+        .await;
+    assert_eq!(live.status, "Applied");
+    let (_, live_board) = pipeline.board().await;
+    assert_eq!(
+        slot_user(&live_board, "pass_sp", "v_jcl"),
+        Some("u1".to_string())
+    );
+
+    let log = pipeline.messages();
+    let replayed =
+        crate::replay::session::replay(log.as_ref(), &cfg, ReplayOverrides::default())
+            .await
+            .unwrap();
+    assert_eq!(
+        replayed.outcomes[0].status, "Applied",
+        "{:?}",
+        replayed.outcomes
+    );
+    let replayed_board = serde_json::to_value(&replayed.board).unwrap();
+    assert_eq!(
+        slot_user(&replayed_board, "pass_sp", "v_jcl"),
+        Some("u1".to_string()),
+        "重放应消费 ParseOverride，与实时一致"
+    );
+}
+
+#[tokio::test]
+async fn first_match_clarification_failure_falls_back_to_ignore() {
+    let parse_body = r#"{"intent":"claim","items":[{"variant":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
+    let clarify_body = r#"{"matches":[{"name":"悠人","item":"不存在的商品","variant":"谁"}]}"#;
+    let pipeline = test_pipeline(
+        &base_config(),
+        MockClient::script(vec![
+            MockReply::Ok(parse_body.to_string()),
+            MockReply::Ok(clarify_body.to_string()),
+        ]),
+    );
+    let outcome = pipeline
+        .process(event("u1", "小明", "要一个悠人", 1_000))
+        .await;
+    assert_eq!(outcome.status, "Ignored");
+    let raw = pipeline
+        .messages()
+        .read_raw_events("月行水上", 0)
+        .await
+        .unwrap();
+    assert!(raw.is_empty(), "澄清失败不应落 ParseOverride 事件");
+}
+
+#[tokio::test]
+async fn first_match_clarification_failure_without_fallback_rejected() {
+    let mut cfg = base_config();
+    cfg.llm.fallback_to_rules = false;
+    let parse_body = r#"{"intent":"claim","items":[{"variant":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
+    let pipeline = test_pipeline(
+        &cfg,
+        MockClient::script(vec![
+            MockReply::Ok(parse_body.to_string()),
+            MockReply::Err("timeout".to_string()),
+        ]),
+    );
+    let outcome = pipeline
+        .process(event("u1", "小明", "要一个悠人", 1_000))
+        .await;
+    assert_eq!(outcome.status, "Rejected");
+    assert_eq!(outcome.detail, "没识别成功");
 }
 
 #[tokio::test]

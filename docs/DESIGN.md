@@ -1,4 +1,4 @@
-# 排谷机器人 · 程序设计路线（DESIGN）
+﻿# 排谷机器人 · 程序设计路线（DESIGN）
 
 > 与 [POLICY.md](./POLICY.md) 配套。本文件定义**模块、接口、数据结构、路由、部署**。
 > 所有子 agent 必须遵守本文的**文件所有权**与**接口契约**。
@@ -51,6 +51,7 @@
 ```jsonc
 {
   "revision": 1,
+  "active_round_id": "月行水上",       // U3：指向 data/rounds/月行水上.json（启动/热载据此覆盖 round）
   "gateway": {
     "bind": "0.0.0.0:9801",
     "whitelist_groups": ["123456789"],
@@ -78,33 +79,65 @@
     "items": [ /* 见 §4 */ ]
   },
   "display": { "refresh_ms": 5000, "data_source": "local", "remote_base_url": "" },
-  "members": { "group_id": "123456789", "cache_path": "data/members.json", "daily_pull_at": "19:00" }
+  "members": {
+    "group_id": "123456789",
+    "cache_path": "data/members.json",
+    "daily_pull_at": "19:00",
+    "cn_overrides": []               // U4：成员具体名（CN），[{user_id, cn, aliases[]}]
+  }
 }
 ```
 
+- **轮次库（U3，2026-09-24）**：`round`（运行时激活轮次）由 **`active_round_id` → `data/rounds/<round_id>.json`** 驱动；启动/热载解析见 `src/settings/rounds.rs::resolve_active`（文件存在则覆盖 `round`；否则把当前 `round` 落盘并回填 `active_round_id`）。目录可由 `PAIGU_ROUNDS_DIR` 覆盖（默认 `data/rounds`）。`config/app.json` 不再内联完整商品目录，仅保留 `active_round_id`。
+
 - 存储：`ConfigStore`（`tokio::sync::RwLock<AppConfig>` + `revision`）；`PUT` 时校验 `revision`，成功 `revision+1`；`notify` 监听文件变更自动热载。
 - 环境变量覆盖：`PAIGU_CONFIG_PATH`（默认 `config/app.json`）、`PAIGU_HTTP_PORT`（默认 `21081`）。
-- 成员名单读取顺序：`data/members.seed.json`（gitignored，真实名单，支持 `[...]` 或 `{"members":[...]}`）→ `data/members.example.json`（入库占位）→ 空数组；`/api/members` 的 `source` 为 `seed|example|empty`。路径可用 `PAIGU_MEMBERS_SEED_PATH` / `PAIGU_MEMBERS_EXAMPLE_PATH` 覆盖。
+- 成员名单读取顺序：**刷新缓存 `data/members.json` → `data/members.seed.json`（gitignored，真实名单，支持 `[...]` 或 `{"members":[...]}`）→ `data/members.example.json`（入库占位）→ 空数组**；`/api/members` 的 `source` 为 `cache|seed|example|empty`，每项附 `cn`/`resolved`（U4）。路径可用 `PAIGU_MEMBERS_SEED_PATH` / `PAIGU_MEMBERS_EXAMPLE_PATH` 覆盖。
 
 ## 4. 商品目录（`round.items`，种子来自 `simulation-corpus/real-chat/月行水上`）
 
-> ⚠️ **已废弃（2026-09-24）**：本节示例缺 `class`（现**自动推导**）、**调价**（`adjust_cents`）；且 **`box_size` 与 `variants[].pieces` 已移除**；**种类**为 `拼团/单领/整盒/特典`。见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U6。
+> ✅ **已更新（2026-09-24，见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U6；源码 `src/settings/mod.rs`）**：**商品级只有原价**；**仅变体**有 `adjust_cents`；`class` **自动推导**；**种类**为 `拼团/单领/整盒/特典`。
+
+**现行字段表**（`ItemConfig` / `VariantConfig`）：
+
+| 层级 | 字段 | 类型 | 含义 |
+|---|---|---|---|
+| 商品 | `item_id` | String | 稳定 id（唯一） |
+| 商品 | `name` | String | 展示名 |
+| 商品 | `kind` | String | **种类**：`拼团`/`单领`/`整盒`/`特典`（兼容 `group/single/box/gift` 与旧 `split/single/gift`；UI 用「种类」） |
+| 商品 | `class` | Option<String> | `A`/`B`；**缺省自动推导**（有变体⇒A，无变体⇒B），显式合法值可覆盖 |
+| 商品 | `aliases` | String[] | 商品名别名（本地词组切分 + LLM 建议 + 跨商品冲突校验） |
+| 商品 | `unit_price_cents` | i64 | **原价**（分）；商品级**无**调价 |
+| 商品 | `max_quantity` | Option<u32> | **单领上限**（仅单领；不出现在拼团商品） |
+| 变体 | `variant_id` | String | **只读、自动生成**（不允许手填） |
+| 变体 | `name` | String | 变体名（**可改**） |
+| 变体 | `unit_price_cents` | i64 | **原价 A**（分） |
+| 变体 | `adjust_cents` | i64 | **调价 B**（分）；最终价 **C = A + B**（见下方实现注记） |
+| 变体 | `capacity` | Option<u32> | 容量（可空） |
+| 变体 | `aliases` | String[] | 变体别名 |
+
+> **移除口径**：`box_size` 与 `variants[].pieces` 已从**商品模型口径**移除（拼团逐个设置变体；单领/整盒不考虑内容）。⚠️ 实现注记：Rust `ItemConfig.box_size` / `VariantConfig.pieces` 字段目前**仍保留为兼容反序列化**（编辑器不再读写），且 `config.example.json` 仍含旧值 —— 清理项见 [TODOS.md](./TODOS.md) W-G2-04。
+> ⚠️ **`adjust_cents` 实现注记**：`/round` 编辑器（`web/round.js`）已按 `原价 A ± 调价 B = 最终价 C` 三格联动读写 `variants[].adjust_cents`；但 Rust `VariantConfig` **尚未声明该字段**（当前反序列化时被忽略、不落 `data/rounds/*.json`）。落库/结算接线见 [TODOS.md](./TODOS.md) W-G2-01。
 
 ```jsonc
-{ "item_id":"pass_sp", "name":"通行认证SP-月行水上", "kind":"split",
+{ "item_id":"pass_sp", "name":"通行认证SP-月行水上", "kind":"拼团",
+  "class": null,                       // 自动推导：有变体 ⇒ A
   "aliases":["通行证","通行认证SP","通行认证"],
+  "unit_price_cents": 0,               // 商品级原价（有变体时通常为 0，价格挂变体）
   "variants":[
-    {"variant_id":"v_jcl","name":"结城理","capacity":null,"aliases":[]},
-    {"variant_id":"v_yy","name":"岳羽由加莉","capacity":null,"aliases":[]},
-    {"variant_id":"v_ajs","name":"埃癸斯","capacity":null,"aliases":[]},
-    {"variant_id":"v_hlw","name":"虎狼丸","capacity":null,"aliases":[]}
+    {"variant_id":"v_jcl","name":"结城理","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
+    {"variant_id":"v_yy","name":"岳羽由加莉","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
+    {"variant_id":"v_ajs","name":"埃癸斯","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
+    {"variant_id":"v_hlw","name":"虎狼丸","unit_price_cents":2500,"adjust_cents":0,"capacity":null,"aliases":[]}
   ] }
 ```
 另含：`hr_resume`(人事部简历SP-月行水上)、`fashion`(风尚速递SP-月行水上)、`gift_card`(特典卡组-校园凭证，变体含 `整套`，别名 `一套`)。
 
+**编辑器（`/round`，2026-09-24）**：4 种类选择；变体 A±B=C 三格联动；别名本地词切 + LLM 异步建议（状态：等待回复/已填入新方案/是最佳）+ 锁定（人工编辑后自动上锁）；跨商品冲突校验（失焦/切换面板时检查，后端 `POST /api/rounds/:id/check` 兜底）；末尾虚线卡 + 缝隙「+」插入；单领 1 tab 多行；整盒独立种类；消息日志编辑器为排谷界面**折叠面板**。
+
 ## 5. HTTP API（`127.0.0.1:21081`）
 
-> ⚠️ **已废弃（2026-09-24）**：本表不全。现行接口见 [INTERFACES.md](./INTERFACES.md) §8，另新增 `/api/workflow`、`/api/rounds*`、`/api/items/suggest-aliases`、`/api/messages` CRUD、`/api/settlement/*`、`/api/replay`、`/api/snapshot/*`、`/api/events`。
+> ✅ **已更新（2026-09-24）**：本表为摘要，**完整接口/字段以 [INTERFACES.md](./INTERFACES.md) §8（尤其 §8.7）为准**。下表原有行 + 2026-09-24 新增行如下。
 
 | Method | Path | 说明 |
 |---|---|---|
@@ -118,11 +151,18 @@
 | POST | `/api/sim/message` | `{user_id, nickname, text, offset_ms, group_id?, is_admin?}` → `{outcome, board, version}` |
 | POST | `/api/sim/identity` | `{user_id, nickname, is_admin?, priority?}` |
 | POST | `/api/sim/reset` | 清空模拟会话 |
-| GET | `/api/members` | 成员列表（`data/members.seed.json` → `data/members.example.json` → 空） |
+| GET | `/api/members` | 成员列表（刷新缓存 → `data/members.seed.json` → `data/members.example.json` → 空；每项附 `cn`/`resolved`） |
 | POST | `/api/members/refresh` | 经 Gateway 拉取 `get_group_member_list` |
 | GET | `/api/gateway/status` | WS 连接状态 |
 | GET | `/api/replay`、`/api/replay/*` | 逐步重放（Wave 1–4 已实现；路由/返回值见 [INTERFACES.md](./INTERFACES.md) §8） |
-| GET | `/` `/admin` `/sim` `/replay` | 静态页（display / admin / sim / replay） |
+| GET | `/` `/admin` `/sim` `/replay` `/settlement` | 静态页（display / admin / sim / replay / settlement） |
+| GET | `/round.html`、`/settings.html` | 静态页（轮次与商品 / 其余配置）；**无 `/round`、`/settings` 短路由**，由静态文件服务提供 |
+| GET | `/api/workflow` | 只读工作流快照（含 `phases`）；见 [INTERFACES.md](./INTERFACES.md) §8.6/§8.7 |
+| GET/POST | `/api/rounds` | 轮次列表 / 新建（`{round_id,title?,copy_from?}`） |
+| POST | `/api/rounds/:id/activate` | 切换激活（`{mode?:continue\|fresh\|replay}`，默认 `continue`） |
+| POST | `/api/rounds/:id/check` | 轮次结构校验（`{ok,issues[]}`） |
+| DELETE | `/api/rounds/:id` | 删除轮次（激活中拒绝） |
+| POST | `/api/items/suggest-aliases` | **前端已接入、后端已实现**（UI 404/501 兜底）；见 §8.7 与 [TODOS.md](./TODOS.md) W-G2-02 |
 | GET | `/web/*` | 静态文件；未命中时 `fallback_service` 回退到目录 `web/` |
 
 CORS：本地开发允许 `http://127.0.0.1:*`；远程展示页读 R2，不经此 API。
@@ -149,7 +189,8 @@ CORS：本地开发允许 `http://127.0.0.1:*`；远程展示页读 R2，不经�
 
 内置/示例成员使用占位名（`成员01`…`成员05`），入库文件 `data/members.example.json`；
 真实名单放在 gitignored 的 `data/members.seed.json`（支持 `[...]` 或 `{"members":[...]}`）。
-`/api/members` 读取顺序 seed → example → 空，`source` 为 `seed|example|empty`。
+`/api/members` 读取顺序 **刷新缓存 → seed → example → 空**，`source` 为 `cache|seed|example|empty`。
+**成员具体名（CN，U4）**：`members.cn_overrides[{user_id, cn, aliases[]}]`；展示人名回退 **CN → 归一化昵称 → user_id**（`settings::resolve_cn`），每项附 `cn`/`resolved`；用于匹配与结算表/账单人名。
 
 ```
 成员01, 成员02, 成员03, 成员04, 成员05

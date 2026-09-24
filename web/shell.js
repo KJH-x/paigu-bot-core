@@ -17,14 +17,14 @@
   };
 
   var STEPS = [
-    { n: 1, label: '开团', href: 'admin.html#sec-round', icon: 'flag', title: '开团 · 轮次与商品（round）' },
+    { n: 1, label: '开团', href: 'round.html', icon: 'flag', title: '开团 · 轮次与商品（round）' },
     { n: 2, label: '排谷', href: 'display.html', icon: 'grid', title: '排谷 · 排位/消息/名单' },
     { n: 3, label: '结算', href: 'settlement.html', icon: 'calc', title: '结算 · 试算' },
     { n: 4, label: '下单', href: 'settlement.html#order', icon: 'cart', title: '下单 / 锁定' },
     { n: 5, label: '复盘', href: 'replay.html', icon: 'replay', title: '复盘 · 重放' }
   ];
 
-  var PAGE_DEFAULT = { index: 2, display: 2, sim: 2, admin: 1, settlement: 3, replay: 5 };
+  var PAGE_DEFAULT = { index: 2, display: 2, sim: 2, admin: 1, round: 1, settings: 1, settlement: 3, replay: 5 };
 
   var state = { workflow: null, ok: false, step: null, timer: null };
   var listeners = [];

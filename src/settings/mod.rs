@@ -10,6 +10,9 @@ use crate::domain::item::{Item, ItemKind, ItemVariant};
 use crate::domain::money::MoneyCents;
 use crate::round::{ItemClass, PhaseWindow};
 
+/// 轮次库（`data/rounds/<round_id>.json`）读写与激活解析（U3）。
+pub mod rounds;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub revision: u64,
@@ -20,6 +23,9 @@ pub struct AppConfig {
     pub members: MembersSettings,
     #[serde(default)]
     pub settlement: crate::settlement::SettlementConfig,
+    /// 当前激活轮次 id（U3）：指向 `data/rounds/<id>.json`。
+    #[serde(default)]
+    pub active_round_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,18 +109,17 @@ pub struct RoundSettings {
 pub struct ItemConfig {
     pub item_id: String,
     pub name: String,
+    /// 种类（U6；UI 用「种类」，字段沿用 `kind`）：`拼团`/`单领`/`整盒`/`特典`
+    /// （兼容 `group`/`single`/`box`/`gift`，以及旧值 `split`/`single`/`gift`）。
     pub kind: String,
     /// 商品类别：`"A"`（盲盒/变体，阶段受限）或 `"B"`（固定价单领）；缺省按 B 处理。
     #[serde(default)]
     pub class: Option<String>,
     #[serde(default)]
     pub aliases: Vec<String>,
-    /// 标价（分）。添加商品时由管理员手工确认。
+    /// 标价（分）。添加商品时由管理员手工确认（§U6：商品级只设原价，无调价）。
     #[serde(default)]
     pub unit_price_cents: i64,
-    /// 每盒件数（拼团整盒判定用）。
-    #[serde(default)]
-    pub box_size: Option<u32>,
     /// 单领上限（`kind="single"`）。
     #[serde(default)]
     pub max_quantity: Option<u32>,
@@ -126,27 +131,98 @@ pub struct ItemConfig {
 pub struct VariantConfig {
     pub variant_id: String,
     pub name: String,
-    /// 变体标价（分）。通行证类 = `25 × pieces`（结城理/岳羽由加莉/埃癸斯 2 件=5000、虎狼丸 1 件=2500）。
+    /// 变体原价 A（分）。
     #[serde(default)]
     pub unit_price_cents: i64,
-    /// 件数（精一/精二两块 = 2）。
+    /// 变体调价 B（分，可负）；最终价 C = A + B（§U6）。
     #[serde(default)]
-    pub pieces: u32,
+    pub adjust_cents: i64,
     #[serde(default)]
     pub capacity: Option<u32>,
     #[serde(default)]
     pub aliases: Vec<String>,
 }
 
+impl VariantConfig {
+    /// 最终价 C = 原价 A + 调价 B（饱和运算）。
+    #[allow(dead_code)] // UI/展示与测试派生；结算经 `pricing(AdjustBy)` 复用同一 B。
+    pub fn final_price_cents(&self) -> i64 {
+        self.unit_price_cents.saturating_add(self.adjust_cents)
+    }
+}
+
+/// 商品种类（U6）。`class` 由种类/变体自动推导（有变体 ⇒ A，无变体 ⇒ B）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemCategory {
+    /// 拼团（有变体）。
+    Group,
+    /// 单领（无变体）。
+    Single,
+    /// 整盒（无变体；独立种类）。
+    Box,
+    /// 特典（有变体）。
+    Gift,
+}
+
+impl ItemCategory {
+    /// 解析种类（中英兼容）；未识别返回 `None`。
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "拼团" | "group" | "split" => Some(ItemCategory::Group),
+            "单领" | "single" => Some(ItemCategory::Single),
+            "整盒" | "box" | "whole_box" | "fullbox" => Some(ItemCategory::Box),
+            "特典" | "gift" => Some(ItemCategory::Gift),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ItemCategory::Group => "group",
+            ItemCategory::Single => "single",
+            ItemCategory::Box => "box",
+            ItemCategory::Gift => "gift",
+        }
+    }
+
+    /// 该种类是否必须带变体（U6：有变体 ⇒ 拼团/特典；无变体 ⇒ 单领/整盒）。
+    pub fn requires_variants(&self) -> bool {
+        matches!(self, ItemCategory::Group | ItemCategory::Gift)
+    }
+}
+
+impl ItemConfig {
+    /// 种类（由 `kind` 解析；旧值 `split`/`single`/`gift` 与中文/英文种类均识别）。
+    pub fn category(&self) -> Option<ItemCategory> {
+        ItemCategory::parse(&self.kind)
+    }
+
+    pub fn has_variants(&self) -> bool {
+        !self.variants.is_empty()
+    }
+
+    /// `class` 自动推导（U6）：有变体 ⇒ A（阶段受限）；无变体 ⇒ B。
+    pub fn derived_class(&self) -> ItemClass {
+        if self.has_variants() {
+            ItemClass::A
+        } else {
+            ItemClass::B
+        }
+    }
+}
+
 impl RoundSettings {
-    /// 商品类别；未配置或非法值按 `B`（不限制）处理。
+    /// 商品类别：**优先自动推导**（有变体 ⇒ A，无变体 ⇒ B；U6），
+    /// 显式 `class` 存在且合法时可覆盖推导；商品未配置时按 `B`（不限制）处理。
     pub fn item_class(&self, item_id: &str) -> ItemClass {
-        self.items
-            .iter()
-            .find(|it| it.item_id == item_id)
-            .and_then(|it| it.class.as_deref())
-            .and_then(ItemClass::parse)
-            .unwrap_or(ItemClass::B)
+        match self.items.iter().find(|it| it.item_id == item_id) {
+            Some(it) => it
+                .class
+                .as_deref()
+                .and_then(ItemClass::parse)
+                .unwrap_or_else(|| it.derived_class()),
+            None => ItemClass::B,
+        }
     }
 
     pub fn to_items(&self) -> Vec<Item> {
@@ -158,15 +234,22 @@ impl RoundSettings {
                 item_id: ItemId(it.item_id.clone()),
                 round_id: round_id.clone(),
                 name: it.name.clone(),
-                kind: match it.kind.as_str() {
-                    "single" => ItemKind::Single,
-                    "gift" => ItemKind::Gift,
-                    "shipping" => ItemKind::Shipping,
-                    "adjustment" => ItemKind::Adjustment,
-                    _ => ItemKind::Split,
+                kind: match it.category() {
+                    Some(ItemCategory::Single) => ItemKind::Single,
+                    // §U8：整盒是独立种类，引擎默认路由到单领队列。
+                    Some(ItemCategory::Box) => ItemKind::WholeBox,
+                    Some(ItemCategory::Gift) => ItemKind::Gift,
+                    Some(ItemCategory::Group) => ItemKind::Split,
+                    // 兼容旧/非目录值：shipping/adjustment 保留，其余按拼团。
+                    None => match it.kind.as_str() {
+                        "shipping" => ItemKind::Shipping,
+                        "adjustment" => ItemKind::Adjustment,
+                        _ => ItemKind::Split,
+                    },
                 },
                 unit_price: MoneyCents(it.unit_price_cents),
-                box_size: it.box_size,
+                // §U6：整盒改由「种类=整盒」表达，配置侧不再有 `box_size`。
+                box_size: None,
                 max_quantity: it.max_quantity,
                 is_blind: false,
                 is_proxy_card: false,
@@ -245,10 +328,79 @@ pub struct MembersSettings {
     pub cache_path: String,
     #[serde(default = "default_pull_at")]
     pub daily_pull_at: String,
+    /// 成员具体名（CN）覆盖：`user_id → CN/别名`（U4）。
+    #[serde(default)]
+    pub cn_overrides: Vec<CnOverride>,
 }
 
 fn default_pull_at() -> String {
     "19:00".to_string()
+}
+
+/// 成员具体名（CN）：绑定 QQ(user_id)，可带别名（U4）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CnOverride {
+    pub user_id: String,
+    pub cn: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
+
+/// 解析展示用人名（U4）：**CN → 归一化昵称 → user_id**。
+///
+/// CN 按 `user_id` 绑定；无覆盖时回退到 `clean_nickname` 的 `identity`（归一化昵称），
+/// 再回退 `user_id`；三者皆空返回 `None`。
+pub fn resolve_cn(cfg: &AppConfig, user_id: &str, raw_or_clean_nickname: &str) -> Option<String> {
+    if let Some(over) = cfg
+        .members
+        .cn_overrides
+        .iter()
+        .find(|o| o.user_id == user_id)
+    {
+        let cn = over.cn.trim();
+        if !cn.is_empty() {
+            return Some(cn.to_string());
+        }
+    }
+    let (identity, display) = crate::parser::normalize::clean_nickname(raw_or_clean_nickname);
+    if !identity.trim().is_empty() {
+        return Some(identity);
+    }
+    if !display.trim().is_empty() {
+        return Some(display);
+    }
+    let uid = user_id.trim();
+    (!uid.is_empty()).then(|| uid.to_string())
+}
+
+/// 优先用户判定候选串（U4）：`user_id`/昵称/归一化昵称，并加入 CN 与别名。
+#[allow(dead_code)] // 供 pipeline/replay 后续接线（当前仅测试与 helper 内部使用）
+pub fn priority_candidates(cfg: &AppConfig, user_id: &str, raw_nickname: &str) -> Vec<String> {
+    let mut out = vec![user_id.to_string(), raw_nickname.to_string()];
+    let (identity, display) = crate::parser::normalize::clean_nickname(raw_nickname);
+    out.push(identity);
+    out.push(display);
+    if let Some(over) = cfg
+        .members
+        .cn_overrides
+        .iter()
+        .find(|o| o.user_id == user_id)
+    {
+        out.push(over.cn.clone());
+        out.extend(over.aliases.iter().cloned());
+    }
+    out.retain(|s| !s.trim().is_empty());
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// 优先用户判定（U4 版）：候选集含 CN/别名，避免替换 `policy::is_priority` 的调用点。
+#[allow(dead_code)] // 供 pipeline/replay 后续接线
+pub fn is_priority_with_cn(cfg: &AppConfig, user_id: &str, raw_nickname: &str) -> bool {
+    let owned = priority_candidates(cfg, user_id, raw_nickname);
+    let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+    is_priority_user(&cfg.round.priority_users, &refs)
 }
 
 pub fn default_config() -> AppConfig {
@@ -287,7 +439,7 @@ pub struct ConfigStore {
 impl ConfigStore {
     pub fn load(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
         let path = path.into();
-        let cfg = if path.exists() {
+        let mut cfg = if path.exists() {
             let raw = std::fs::read_to_string(&path)
                 .with_context(|| format!("read config {}", path.display()))?;
             serde_json::from_str(&raw)
@@ -304,6 +456,14 @@ impl ConfigStore {
             }
             cfg
         };
+        // U3：启动解析激活轮次（存在则覆盖 round；缺失则落盘当前 round）。
+        if rounds::resolve_active(&mut cfg) {
+            if let Ok(raw) = serde_json::to_string_pretty(&cfg) {
+                if let Err(e) = std::fs::write(&path, raw) {
+                    tracing::warn!("write config {} failed: {e}", path.display());
+                }
+            }
+        }
         Ok(Self {
             path,
             inner: RwLock::new(cfg),
@@ -323,6 +483,15 @@ impl ConfigStore {
             });
         }
         cfg.revision = expected + 1;
+        // U3：任何改变 round 的写入都同步落盘到 data/rounds/<round_id>.json。
+        if rounds::is_valid_round_id(&cfg.round.round_id) {
+            cfg.active_round_id = Some(cfg.round.round_id.clone());
+            if let Err(e) = rounds::write_round(&cfg.round) {
+                tracing::warn!("轮次落盘失败: {e}");
+            }
+        } else {
+            tracing::warn!("非法 round_id，跳过轮次落盘: {}", cfg.round.round_id);
+        }
         let revision = cfg.revision;
         let raw = serde_json::to_string_pretty(&cfg).map_err(ConfigError::Json)?;
         std::fs::write(&self.path, raw).map_err(ConfigError::Io)?;
@@ -334,11 +503,20 @@ impl ConfigStore {
         let raw = std::fs::read_to_string(&self.path)?;
         let mut cfg: AppConfig = serde_json::from_str(&raw)?;
         let mut guard = self.inner.write().await;
+        // U3：热载同样解析激活轮次（以轮次文件为准）。
+        let persist = rounds::resolve_active(&mut cfg);
         if cfg.revision <= guard.revision {
             cfg.revision = guard.revision + 1;
         }
         let revision = cfg.revision;
+        let snapshot = cfg.clone();
         *guard = cfg;
+        drop(guard);
+        if persist {
+            if let Ok(text) = serde_json::to_string_pretty(&snapshot) {
+                let _ = std::fs::write(&self.path, text);
+            }
+        }
         Ok(revision)
     }
 

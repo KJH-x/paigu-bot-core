@@ -1,9 +1,11 @@
 pub mod board_routes;
 pub mod config_routes;
 pub mod display_routes;
+pub mod item_routes;
 pub mod member_routes;
 pub mod message_routes;
 pub mod replay_routes;
+pub mod rounds_routes;
 pub mod settlement_routes;
 pub mod sim_routes;
 
@@ -85,21 +87,27 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
     let sim_page = ServeFile::new(web.join("sim.html"));
     let replay_page = ServeFile::new(web.join("replay.html"));
     let settlement_page = ServeFile::new(web.join("settlement.html"));
+    let round_page = ServeFile::new(web.join("round.html"));
+    let settings_page = ServeFile::new(web.join("settings.html"));
 
     Router::new()
         .merge(config_routes::routes())
         .merge(board_routes::routes())
         .merge(display_routes::routes())
+        .merge(item_routes::routes())
         .merge(sim_routes::routes())
         .merge(member_routes::routes())
         .merge(message_routes::routes())
         .merge(replay_routes::routes())
+        .merge(rounds_routes::routes())
         .merge(settlement_routes::routes())
         .route("/", get_service(display_page))
         .route("/admin", get_service(admin_page))
         .route("/sim", get_service(sim_page))
         .route("/replay", get_service(replay_page))
         .route("/settlement", get_service(settlement_page))
+        .route("/round", get_service(round_page))
+        .route("/settings", get_service(settings_page))
         .nest_service("/web", ServeDir::new(web.clone()))
         .fallback_service(ServeDir::new(web))
         .with_state(state)
