@@ -226,11 +226,31 @@
 
   function scheduleWsReconnect() {
     if (state.wsTimer) return;
+    // 有限重试：失败过多则停止自动重连，避免控制台噪声，改为提示手动「重连 WS」
+    if (state.wsRetry >= 3) {
+      setWs('bad', 'WS 未连接（已停止自动重连）');
+      showBanner('WS 未连接：' + state.wsUrl + '。请确认网关在线，或点击「重连 WS」。', true);
+      return;
+    }
     var delay = Math.min(8000, 1000 * (state.wsRetry++));
     state.wsTimer = window.setTimeout(function () {
       state.wsTimer = null;
       connectWs();
     }, delay);
+  }
+
+  /** 解析 WS 目标：网关绑定在主机网卡（常非 127.0.0.1），优先采用后端实际 bind 地址。 */
+  function resolveWsTarget() {
+    if (P.qs('ws') || P.INLINE.wsUrl) return Promise.resolve();
+    return P.get('/api/workflow')
+      .then(function (wf) {
+        var bound = wf && wf.gateway && wf.gateway.bound_addr;
+        if (bound && bound.indexOf(':') > 0 && bound.indexOf('0.0.0.0') !== 0) {
+          state.wsUrl = 'ws://' + bound;
+          if ($('ws')) $('ws').value = state.wsUrl;
+        }
+      })
+      .catch(function () { /* 接口不可用时沿用默认 */ });
   }
 
   function connectWs() {
@@ -349,7 +369,7 @@
       user_id: state.identity.user_id,
       nickname: state.identity.nickname,
       is_admin: state.identity.is_admin,
-      priority: state.identity.priority,
+      priority: state.identity.priority ? 10 : 0,
       priority_level: state.identity.priority_level
     }).catch(function () { /* identity record is optional */ });
   }
@@ -542,7 +562,7 @@
     });
 
     updateOffsetHint();
-    connectWs();
+    resolveWsTarget().then(connectWs);
     loadConfig().then(loadMembers).then(function () {
       if (state.members.length) {
         $('identity-select').value = state.members[0].user_id;

@@ -4,50 +4,76 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>排谷结算 · 下单表</title>
-  <link rel="stylesheet" href="display.css" />
-  <link rel="stylesheet" href="settlement.css" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="./settlement.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
-  <script defer src="common.js"></script>
-  <script defer src="settlement.js"></script>
+  <script defer src="./common.js"></script>
+  <script defer src="shell.js"></script>
+  <script defer src="./settlement.js"></script>
 </head>
-<body>
+<body data-page="settlement">
   <div class="page">
-    <div class="topbar">
-      <span class="brand">排谷结算 · 下单表</span>
-      <span id="rev-badge" class="status-badge">revision —</span>
-      <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
-      <span class="spacer"></span>
-      <label class="row tight">
-        <span class="hint">API</span>
-        <input id="api" size="26" />
-      </label>
-      <button id="load" class="small">重新载入</button>
-      <button id="save" class="primary">保存结算配置</button>
-      <span class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="display.html">展示</a>
-        <a href="admin.html">管理</a>
-        <a href="sim.html">模拟器</a>
-      </span>
-    </div>
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>结算 · 下单表</b><small>工作流向导 · ③ 结算 / ④ 下单</small></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">API</span>
+          <input id="api" size="26" />
+        </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
+      </div>
+      <div class="tools-row">
+        <span id="rev-badge" class="status-badge">revision —</span>
+        <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
+        <span class="spacer"></span>
+        <button id="load" class="small">重新载入</button>
+        <button id="save" class="primary">保存结算配置</button>
+        <span class="nav-links">
+          <a href="index.html">首页</a>
+          <a href="display.html">展示</a>
+          <a href="admin.html">管理</a>
+          <a href="sim.html">模拟器</a>
+        </span>
+      </div>
+    </header>
 
     <div id="banner" class="banner"></div>
+
+    <nav class="section-nav">
+      <a href="#sec-pricing">调价</a>
+      <a href="#sec-discount">折扣</a>
+      <a href="#sec-tier">特典</a>
+      <a href="#sec-reduce">减均</a>
+      <a href="#order">下单表</a>
+      <a href="#sec-result">结果</a>
+      <a href="#sec-plans">策略</a>
+    </nav>
 
     <datalist id="item-ids"></datalist>
     <datalist id="variant-ids"></datalist>
 
     <div class="layout">
-      <section class="panel">
+      <section class="panel" id="settle">
         <div class="panel-head">
           <span>结算配置</span>
           <span class="spacer"></span>
           <span id="cfg-hint" class="hint"></span>
         </div>
         <div class="panel-body">
-          <div class="card">
+          <div class="card step-card" id="sec-pricing">
             <div class="card-head">
+              <span class="step-mark">1</span>
               <span>调价（pricing）</span>
               <span class="spacer"></span>
               <label class="row tight"><span class="hint">新模式</span>
@@ -62,8 +88,9 @@
             <div id="pricing-list" class="rows"></div>
           </div>
 
-          <div class="card">
+          <div class="card step-card" id="sec-discount">
             <div class="card-head">
+              <span class="step-mark">2</span>
               <span>折扣（discounts）</span>
               <span class="spacer"></span>
               <button id="disc-add" class="small">添加折扣</button>
@@ -78,18 +105,22 @@
             <div id="discount-list" class="rows"></div>
           </div>
 
-          <div class="card">
+          <div class="card step-card" id="sec-tier">
             <div class="card-head">
+              <span class="step-mark">3</span>
               <span>特典档位（gift_tiers）</span>
               <span class="spacer"></span>
               <button id="tier-add" class="small">添加档位</button>
             </div>
-            <div class="hint">每个下单包金额满门槛即附赠；多档叠加、单包独立、不跨包累计；各档可设各自价格。</div>
+            <div class="hint">每个下单包金额满门槛即附赠；多档叠加、单包独立、不跨包累计；各档可设各自价格。已认购特典会显示 <span class="mono">claimed</span> 状态。</div>
             <div id="tier-list" class="rows"></div>
           </div>
 
-          <div class="card">
-            <div class="card-head"><span>减均（reduce_average）</span></div>
+          <div class="card step-card" id="sec-reduce">
+            <div class="card-head">
+              <span class="step-mark">4</span>
+              <span>减均（reduce_average）</span>
+            </div>
             <label class="row tight">
               <input id="reduce-include" type="checkbox" style="width:auto" />
               <span>减均范围包含特典价格（不勾选＝只对实购商品减均）</span>
@@ -98,14 +129,15 @@
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="order">
         <div class="panel-head">
+          <span class="step-mark">5</span>
           <span>下单表（拖拽 item → 包）</span>
           <span class="spacer"></span>
           <button id="load-allocation" class="small">从当前排位生成</button>
           <button id="load-sample" class="small">载入占位示例</button>
           <button id="pkg-add" class="small">添加包</button>
-          <button id="evaluate" class="primary">试算</button>
+          <span class="mobile-sticky"><button id="evaluate" class="primary">试算</button></span>
         </div>
         <div class="panel-body">
           <div id="order-table" class="order-table"></div>
@@ -114,7 +146,7 @@
       </section>
     </div>
 
-    <section class="panel" style="margin-top:12px">
+    <section class="panel" id="sec-result" style="margin-top:12px">
       <div class="panel-head">
         <span>试算结果</span>
         <span class="spacer"></span>
@@ -154,7 +186,7 @@
       </div>
     </section>
 
-    <section class="panel" style="margin-top:12px">
+    <section class="panel" id="sec-plans" style="margin-top:12px">
       <div class="panel-head">
         <span>两策略对比</span>
         <span class="spacer"></span>

@@ -3,55 +3,135 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>排谷机器人</title>
-  <link rel="stylesheet" href="display.css" />
+  <title>排谷机器人 · 工作流总览</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="app.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
-  <script defer src="common.js"></script>
+  <script defer src="./common.js"></script>
+  <script defer src="shell.js"></script>
 </head>
-<body>
+<body data-page="index">
   <div class="page">
-    <div class="topbar">
-      <span class="brand">排谷机器人 · 前端</span>
-      <span id="health" class="status-badge"><span class="dot"></span>检查中…</span>
-      <span class="spacer"></span>
-      <label class="row tight">
-        <span class="hint">API</span>
-        <input id="api" size="26" />
-      </label>
-      <button id="check" class="small">健康检查</button>
-    </div>
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>排谷机器人</b><small>工作流向导</small></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight api-field">
+          <span class="hint">API</span>
+          <input id="api" size="26" />
+        </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
+      </div>
+      <div class="tools-row">
+        <span id="health" class="status-badge"><span class="dot"></span>检查中…</span>
+        <button id="check" class="small">健康检查</button>
+        <span class="spacer"></span>
+        <span class="hint">当前阶段：<b id="kpi-phase-inline">—</b></span>
+      </div>
+    </header>
 
     <div id="banner" class="banner"></div>
 
+    <div class="kpis">
+      <div class="kpi accent">
+        <div class="k">版本 version</div>
+        <div class="v" id="kpi-version">—</div>
+      </div>
+      <div class="kpi">
+        <div class="k">认购 claims</div>
+        <div class="v" id="kpi-claims">—</div>
+      </div>
+      <div class="kpi ok">
+        <div class="k">在线 clients</div>
+        <div class="v" id="kpi-clients">—</div>
+      </div>
+      <div class="kpi">
+        <div class="k">成员 members_cached</div>
+        <div class="v" id="kpi-members">—</div>
+      </div>
+      <div class="kpi">
+        <div class="k">阶段 phase</div>
+        <div class="v sm" id="kpi-phase">—</div>
+      </div>
+    </div>
+
+    <div class="section-title">流程入口<span class="line"></span></div>
     <div class="nav-cards">
-      <a class="nav-card" href="display.html">
-        <h2>展示页</h2>
-        <p>排位表 + 消息流 + who-whats + 状态。5s 增量轮询、keyed diff、smart-scroll，不打断划词/点击/滚动。支持 local / remote 数据源。</p>
-      </a>
       <a class="nav-card" href="admin.html">
-        <h2>管理面板</h2>
-        <p>编辑 config：LLM prompt、商品目录（items/variants）、预存用户、时段窗口、白名单、展示参数。revision 乐观并发 + 409 冲突提示；拉取群成员。</p>
+        <span class="step-badge">1</span>
+        <h2>开团 · 配置</h2>
+        <p>编辑轮次、商品目录、阶段时间窗、成员缓存与 gateway 接入；revision 乐观并发，409 冲突显著提示。</p>
+        <em>phase0 → admin</em>
+      </a>
+      <a class="nav-card" href="display.html">
+        <span class="step-badge">2</span>
+        <h2>排谷 · 展示</h2>
+        <p>排位板键控 diff 高亮、消息流 smart-scroll、Who-Whats 认领明细、状态面板；三栏可折叠。</p>
+        <em>phase1-3 → display</em>
       </a>
       <a class="nav-card" href="sim.html">
-        <h2>模拟器</h2>
-        <p>真实群成员身份切换/新建、时间偏移 ±DD HH MM SS、发送消息、转录与实时排位。走与真实链路完全相同的流水线。</p>
-      </a>
-      <a class="nav-card" href="replay.html">
-        <h2>重放步进</h2>
-        <p>逐条消息回放排谷：步进/播放、累积排位表与状态差异高亮（新增/释放/前移/包尾/管理员）、列视图、Mermaid 视图、who-whats、核对条与单元格↔消息双向联动。</p>
+        <span class="step-badge">2</span>
+        <h2>排谷 · 模拟</h2>
+        <p>切换占位身份与时间偏移发送消息，走与真实链路一致的流水线，实时排位与转录。</p>
+        <em>phase1-3 → sim</em>
       </a>
       <a class="nav-card" href="settlement.html">
-        <h2>结算 · 下单表</h2>
-        <p>调价（加减/直设）、折扣（满减/全单、份数 n/-1、A/B 范围）、特典档位（多档各自价格）、减均选项；试算结果表 + 特典清单；拖拽 item → 包手动调整并即时试算；特典最多化 vs 折扣最大化并排对比。</p>
+        <span class="step-badge">3</span>
+        <h2>结算 · 试算</h2>
+        <p>调价 → 折扣 → 特典 → 减均，试算结果 C/B/G/D 与校验式、lines 逐行明细。</p>
+        <em>settling → settlement</em>
+      </a>
+      <a class="nav-card" href="settlement.html#order">
+        <span class="step-badge">4</span>
+        <h2>下单 · 锁定</h2>
+        <p>拖拽 item → 包手动调整，从排位生成下单表，即时试算并对比两策略。</p>
+        <em>locked → settlement#order</em>
+      </a>
+      <a class="nav-card" href="replay.html">
+        <span class="step-badge">5</span>
+        <h2>复盘 · 重放</h2>
+        <p>步进/播放时间轴，表格 / Mermaid 双视图与底部 Who-Whats，PASS/FAIL 核对。</p>
+        <em>replay</em>
       </a>
     </div>
 
+    <div class="section-title">API 健康<span class="line"></span></div>
+    <div class="grid-2 layout">
+      <section class="panel">
+        <div class="panel-head">
+          <span>连接状态</span>
+          <span class="spacer"></span>
+          <span class="hint mono">/api/workflow</span>
+        </div>
+        <div class="panel-body">
+          <div id="health-detail" class="kv"></div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head">
+          <span>原始工作流快照</span>
+          <span class="spacer"></span>
+          <span class="hint">只读</span>
+        </div>
+        <div class="panel-body">
+          <pre id="wf-raw" class="mono hint" style="margin:0;max-height:42vh;overflow:auto">—</pre>
+        </div>
+      </section>
+    </div>
+
     <p class="hint" style="margin-top:16px">
-      API 契约见 <span class="mono">docs/DESIGN.md §5</span>（默认 <span class="mono">http://127.0.0.1:21081</span>）。
-      可用 <span class="mono">?api=&lt;base&gt;</span> 或页面内联 <span class="mono">window.PAIGU_WEB</span> 覆盖。
-      建议用 <span class="mono">python -m http.server</span> 从 <span class="mono">127.0.0.1</span> 打开（CORS 允许 <span class="mono">http://127.0.0.1:*</span>）。
+      默认 API <span class="mono">http://127.0.0.1:21081</span>，可用 <span class="mono">?api=&lt;base&gt;</span>
+      或页面内联 <span class="mono">window.PAIGU_WEB</span> 覆盖。工作流状态每 5 秒从
+      <span class="mono">/api/workflow</span> 刷新；不可用时自动降级为「未连接」，页面功能不受阻塞。
     </p>
   </div>
 
@@ -59,7 +139,10 @@
     (function () {
       function start() {
         var P = window.PAIGU;
+        var SHELL = window.PAIGU_SHELL;
         function $(id) { return document.getElementById(id); }
+        function set(id, v) { var el = $(id); if (el) el.textContent = v == null ? '—' : String(v); }
+
         var base = P.resolveApiBase();
         if (!P.qs('api')) {
           try {
@@ -72,7 +155,7 @@
         function check() {
           $('health').className = 'status-badge';
           $('health').innerHTML = '<span class="dot"></span>检查中…';
-          P.get('/api/health').then(function (data) {
+          P.get('/api/health').then(function () {
             $('health').className = 'status-badge ok';
             $('health').innerHTML = '<span class="dot"></span>API 正常';
             $('banner').className = 'banner';
@@ -80,10 +163,64 @@
             $('health').className = 'status-badge bad';
             $('health').innerHTML = '<span class="dot"></span>API 不可用';
             var b = $('banner');
-            b.textContent = '无法连接 ' + base + '：' + P.errorText(err) + '。静态页仍可打开；展示页可切换到 remote 数据源查看已发布快照。';
+            b.textContent = '无法连接 ' + base + '：' + P.errorText(err) + '。静态页仍可打开；工作流徽标会显示「未连接」。';
             b.className = 'banner show bad';
           });
         }
+
+        function renderDetail(wf) {
+          if (!wf) {
+            $('health-detail').textContent = '暂无数据';
+            $('wf-raw').textContent = '—';
+            return;
+          }
+          var gw = wf.gateway || {};
+          var rows = [
+            ['round_id', wf.round_id],
+            ['title', wf.title],
+            ['group_id', wf.group_id],
+            ['phase', wf.phase == null ? '阶段未配置' : (wf.phase_label || wf.phase)],
+            ['phases_configured', wf.phases_configured],
+            ['settlement_configured', wf.settlement_configured],
+            ['priority_window', wf.priority_window ? JSON.stringify(wf.priority_window) : '—'],
+            ['gateway.listening', gw.listening],
+            ['gateway.clients', gw.clients],
+            ['gateway.bound_addr', gw.bound_addr],
+            ['locked', wf.locked],
+            ['updated_at', wf.updated_at]
+          ];
+          var html = '';
+          for (var i = 0; i < rows.length; i++) {
+            html += '<div class="k">' + P.esc(rows[i][0]) + '</div><div class="v">' +
+              P.esc(rows[i][1] == null ? '—' : rows[i][1]) + '</div>';
+          }
+          $('health-detail').innerHTML = html;
+          $('wf-raw').textContent = JSON.stringify(wf, null, 2);
+        }
+
+        function renderKpis(wf) {
+          if (!wf) {
+            set('kpi-version', '—');
+            set('kpi-claims', '—');
+            set('kpi-clients', '—');
+            set('kpi-members', '—');
+            set('kpi-phase', '未连接');
+            set('kpi-phase-inline', '未连接');
+            renderDetail(null);
+            return;
+          }
+          var gw = wf.gateway || {};
+          set('kpi-version', 'v' + (wf.version != null ? wf.version : '—'));
+          set('kpi-claims', wf.claims);
+          set('kpi-clients', gw.clients);
+          set('kpi-members', wf.members_cached);
+          var ph = wf.phase == null ? '未配置' : (wf.phase_label || wf.phase);
+          set('kpi-phase', ph);
+          set('kpi-phase-inline', ph);
+          renderDetail(wf);
+        }
+
+        if (SHELL && SHELL.onWorkflow) SHELL.onWorkflow(renderKpis);
 
         $('check').addEventListener('click', check);
         $('api').addEventListener('change', function (e) {

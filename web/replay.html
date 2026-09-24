@@ -4,49 +4,67 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>排谷重放步进查看器</title>
-  <link rel="stylesheet" href="display.css" />
-  <link rel="stylesheet" href="replay.css" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="./replay.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
-  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script defer src="common.js"></script>
-  <script defer src="replay.js"></script>
+  <script defer src="./common.js"></script>
+  <script defer src="shell.js"></script>
+  <script defer src="./replay.js"></script>
 </head>
-<body>
+<body data-page="replay">
   <div class="page replay">
-    <div class="topbar">
-      <span class="brand">排谷重放</span>
-      <div class="title-block">
-        <span id="replay-title" class="title">重放步进查看器</span>
-        <span id="step-info" class="meta">未加载数据</span>
-      </div>
-      <span class="spacer"></span>
-      <div class="replay-controls">
-        <button id="btn-first" title="跳到首步 (Home)">⏮ 首步</button>
-        <button id="btn-prev" title="上一步 (←)">◀ 上一步</button>
-        <button id="btn-play" title="播放/暂停 (空格)">▶ 播放</button>
-        <button id="btn-next" title="下一步 (→)">下一步 ▶</button>
-        <button id="btn-last" title="跳到末步 (End)">末步 ⏭</button>
-        <select id="speed" title="播放速度">
-          <option value="0.5">0.5x</option>
-          <option value="1" selected>1x</option>
-          <option value="2">2x</option>
-          <option value="4">4x</option>
-        </select>
-        <label class="file-label" title="载入任意 replay_view.json">
-          载入 JSON
-          <input type="file" id="file-input" accept=".json,application/json" />
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>排谷重放</b><small>工作流向导 · ⑤ 复盘</small></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">API</span>
+          <input id="api" size="24" />
         </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
       </div>
-      <span class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="display.html">展示</a>
-        <a href="admin.html">管理</a>
-        <a href="sim.html">模拟器</a>
-      </span>
-      <span id="source-info" class="meta"></span>
-    </div>
+      <div class="tools-row">
+        <div class="title-block">
+          <span id="replay-title" class="title">重放步进查看器</span>
+          <span id="step-info" class="meta">未加载数据</span>
+        </div>
+        <span class="spacer"></span>
+        <div class="replay-controls">
+          <button id="btn-first" title="跳到首步 (Home)">⏮ 首步</button>
+          <button id="btn-prev" title="上一步 (←)">◀ 上一步</button>
+          <button id="btn-play" title="播放/暂停 (空格)">▶ 播放</button>
+          <button id="btn-next" title="下一步 (→)">下一步 ▶</button>
+          <button id="btn-last" title="跳到末步 (End)">末步 ⏭</button>
+          <select id="speed" title="播放速度">
+            <option value="0.5">0.5x</option>
+            <option value="1" selected>1x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+          </select>
+          <label class="file-label" title="载入任意 replay_view.json">
+            载入 JSON
+            <input type="file" id="file-input" accept=".json,application/json" />
+          </label>
+        </div>
+        <span class="nav-links">
+          <a href="index.html">首页</a>
+          <a href="display.html">展示</a>
+          <a href="admin.html">管理</a>
+          <a href="sim.html">模拟器</a>
+        </span>
+        <span id="source-info" class="meta"></span>
+      </div>
+    </header>
 
     <div id="check-bar" class="check-bar hidden"></div>
 

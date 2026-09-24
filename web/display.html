@@ -4,53 +4,77 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>排谷展示</title>
-  <link rel="stylesheet" href="display.css" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="app.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081", remoteBaseUrl: "", refreshMs: 5000 };
   </script>
-  <script defer src="common.js"></script>
-  <script defer src="display.js"></script>
+  <script defer src="./common.js"></script>
+  <script defer src="shell.js"></script>
+  <script defer src="./display.js"></script>
 </head>
-<body>
+<body data-page="display">
   <div class="page">
-    <div class="topbar">
-      <span class="brand">排谷展示</span>
-      <span id="round-title" class="meta"></span>
-      <span id="conn-badge" class="status-badge"><span class="dot"></span>连接中…</span>
-      <span id="version-badge" class="status-badge">版本 —</span>
-      <span class="spacer"></span>
-      <label class="row tight">
-        <span class="hint">数据源</span>
-        <select id="source">
-          <option value="local">local · 本机 API</option>
-          <option value="remote">remote · 静态快照</option>
-        </select>
-      </label>
-      <label class="row tight" id="api-wrap">
-        <span class="hint">API</span>
-        <input id="api" size="26" placeholder="http://127.0.0.1:21081" />
-      </label>
-      <label class="row tight hidden" id="remote-wrap">
-        <span class="hint">Remote</span>
-        <input id="remote" size="26" placeholder="https://…/rounds/xxx" />
-      </label>
-      <button id="refresh" class="small">立即刷新</button>
-      <span class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="admin.html">管理</a>
-        <a href="sim.html">模拟器</a>
-      </span>
-    </div>
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>排谷展示</b><small>工作流向导</small></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight" id="api-wrap">
+          <span class="hint">API</span>
+          <input id="api" size="26" placeholder="http://127.0.0.1:21081" />
+        </label>
+        <label class="row tight hidden" id="remote-wrap">
+          <span class="hint">Remote</span>
+          <input id="remote" size="26" placeholder="https://…/rounds/xxx" />
+        </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
+      </div>
+      <div class="tools-row">
+        <span id="conn-badge" class="status-badge"><span class="dot"></span>连接中…</span>
+        <span id="version-badge" class="status-badge">版本 —</span>
+        <span id="round-title" class="meta"></span>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">数据源</span>
+          <select id="source">
+            <option value="local">local · 本机 API</option>
+            <option value="remote">remote · 静态快照</option>
+          </select>
+        </label>
+        <button id="refresh" class="small">立即刷新</button>
+        <span class="nav-links">
+          <a href="index.html">首页</a>
+          <a href="admin.html">管理</a>
+          <a href="sim.html">模拟器</a>
+        </span>
+      </div>
+    </header>
 
     <div id="banner" class="banner"></div>
 
-    <div class="layout">
-      <section class="panel">
+    <div class="col-tabs">
+      <button type="button" data-col-target="board">排位表</button>
+      <button type="button" data-col-target="messages">消息流</button>
+      <button type="button" data-col-target="who">名单 / 状态</button>
+    </div>
+
+    <div class="grid-3 layout">
+      <section class="panel" data-col="board">
         <div class="panel-head">
           <span>排位表</span>
           <span id="board-count" class="hint"></span>
           <span class="spacer"></span>
           <span id="board-updated" class="hint"></span>
+          <button class="collapse-btn" data-collapse type="button" aria-expanded="true" title="折叠">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
         </div>
         <div class="panel-body">
           <div id="board" class="board"></div>
@@ -58,38 +82,52 @@
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel" data-col="messages">
         <div class="panel-head">
           <span>消息流</span>
           <span id="msg-count" class="hint"></span>
           <span class="spacer"></span>
           <span class="hint">仅在贴近底部时自动跟随</span>
+          <button class="collapse-btn" data-collapse type="button" aria-expanded="true" title="折叠">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
         </div>
         <div class="panel-body flush">
           <div id="messages" class="messages"></div>
           <button id="new-content" class="new-content" hidden></button>
         </div>
       </section>
-    </div>
 
-    <div class="layout" style="margin-top:12px">
-      <section class="panel">
-        <div class="panel-head"><span>Who-Whats</span><span id="ww-count" class="hint"></span></div>
-        <div class="panel-body flush" style="max-height:40vh;overflow:auto">
-          <table class="who-whats">
-            <thead><tr><th>display</th><th>身份</th><th>明细</th></tr></thead>
-            <tbody id="who-whats"></tbody>
-          </table>
-          <div id="ww-empty" class="empty">暂无认领记录</div>
-        </div>
-      </section>
+      <div class="side-stack col-span-2" data-col="who">
+        <section class="panel">
+          <div class="panel-head">
+            <span>Who-Whats</span>
+            <span id="ww-count" class="hint"></span>
+            <span class="spacer"></span>
+            <button class="collapse-btn" data-collapse type="button" aria-expanded="true" title="折叠">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+          <div class="panel-body flush" style="max-height:40vh;overflow:auto">
+            <table class="who-whats">
+              <thead><tr><th>display</th><th>身份</th><th>明细</th></tr></thead>
+              <tbody id="who-whats"></tbody>
+            </table>
+            <div id="ww-empty" class="empty">暂无认领记录</div>
+          </div>
+        </section>
 
-      <section class="panel">
-        <div class="panel-head"><span>状态</span><span class="spacer"></span><span id="poll-info" class="hint"></span></div>
-        <div class="panel-body">
-          <div id="status" class="kv"></div>
-        </div>
-      </section>
+        <section class="panel">
+          <div class="panel-head">
+            <span>状态</span>
+            <span class="spacer"></span>
+            <span id="poll-info" class="hint"></span>
+          </div>
+          <div class="panel-body">
+            <div id="status" class="kv"></div>
+          </div>
+        </section>
+      </div>
     </div>
   </div>
 </body>

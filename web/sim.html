@@ -4,37 +4,52 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>排谷模拟器</title>
-  <link rel="stylesheet" href="display.css" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="app.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081", refreshMs: 3000 };
   </script>
-  <script defer src="common.js"></script>
-  <script defer src="sim.js"></script>
+  <script defer src="./common.js"></script>
+  <script defer src="shell.js"></script>
+  <script defer src="./sim.js"></script>
 </head>
-<body>
+<body data-page="sim">
   <div class="page">
-    <div class="topbar">
-      <span class="brand">排谷模拟器</span>
-      <span id="conn-badge" class="status-badge"><span class="dot"></span>未连接</span>
-      <span id="ws-badge" class="status-badge"><span class="dot"></span>WS 未连接</span>
-      <span id="version-badge" class="status-badge">版本 —</span>
-      <span class="spacer"></span>
-      <label class="row tight">
-        <span class="hint">API</span>
-        <input id="api" size="24" />
-      </label>
-      <label class="row tight">
-        <span class="hint">WS</span>
-        <input id="ws" size="24" />
-      </label>
-      <button id="ws-reconnect" class="small">重连 WS</button>
-      <button id="reset" class="danger small">重置模拟会话</button>
-      <span class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="display.html">展示</a>
-        <a href="admin.html">管理</a>
-      </span>
-    </div>
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>模拟器</b><small>工作流向导 · ② 排谷</small></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">API</span>
+          <input id="api" size="24" />
+        </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
+      </div>
+      <div class="tools-row">
+        <span id="conn-badge" class="status-badge"><span class="dot"></span>未连接</span>
+        <span id="ws-badge" class="status-badge"><span class="dot"></span>WS 未连接</span>
+        <span id="version-badge" class="status-badge">版本 —</span>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">WS</span>
+          <input id="ws" size="24" />
+        </label>
+        <button id="ws-reconnect" class="small">重连 WS</button>
+        <button id="reset" class="danger small">重置模拟会话</button>
+        <span class="nav-links">
+          <a href="index.html">首页</a>
+          <a href="display.html">展示</a>
+          <a href="admin.html">管理</a>
+        </span>
+      </div>
+    </header>
 
     <div id="banner" class="banner"></div>
 
@@ -73,7 +88,7 @@
           <label class="field"><span>消息内容</span><textarea id="text" rows="3" placeholder="例如：排通行证SP结城理1"></textarea></label>
 
           <div class="row">
-            <button id="send" class="primary">发送</button>
+            <span class="mobile-sticky"><button id="send" class="primary">发送</button></span>
             <span id="send-hint" class="hint"></span>
           </div>
           <div id="ws-replies" class="hint" style="margin-top:6px"></div>

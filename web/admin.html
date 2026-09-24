@@ -4,41 +4,66 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>排谷管理面板</title>
-  <link rel="stylesheet" href="display.css" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="app.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
-  <script defer src="common.js"></script>
-  <script defer src="admin.js"></script>
+  <script defer src="./common.js"></script>
+  <script defer src="shell.js"></script>
+  <script defer src="./admin.js"></script>
 </head>
-<body>
+<body data-page="admin">
   <div class="page">
-    <div class="topbar">
-      <span class="brand">排谷管理面板</span>
-      <span id="rev-badge" class="status-badge">revision —</span>
-      <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
-      <span class="spacer"></span>
-      <label class="row tight">
-        <span class="hint">API</span>
-        <input id="api" size="26" />
-      </label>
-      <button id="load" class="small">重新载入</button>
-      <button id="reload" class="small">从磁盘重载</button>
-      <button id="save" class="primary">保存配置</button>
-      <span class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="display.html">展示</a>
-        <a href="settlement.html">结算</a>
-        <a href="replay.html">回放</a>
-        <a href="sim.html">模拟器</a>
-      </span>
-    </div>
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>管理面板</b><small>工作流向导 · ① 开团</small></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">API</span>
+          <input id="api" size="26" />
+        </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
+      </div>
+      <div class="tools-row">
+        <span id="rev-badge" class="status-badge">revision —</span>
+        <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
+        <span class="spacer"></span>
+        <button id="load" class="small">重新载入</button>
+        <button id="reload" class="small">从磁盘重载</button>
+        <button id="save" class="primary">保存配置</button>
+        <span class="nav-links">
+          <a href="index.html">首页</a>
+          <a href="display.html">展示</a>
+          <a href="settlement.html">结算</a>
+          <a href="replay.html">回放</a>
+          <a href="sim.html">模拟器</a>
+        </span>
+      </div>
+    </header>
 
     <div id="banner" class="banner"></div>
 
+    <nav class="section-nav">
+      <a href="#sec-gateway">接入</a>
+      <a href="#sec-display">展示</a>
+      <a href="#sec-llm">LLM</a>
+      <a href="#sec-members">成员</a>
+      <a href="#sec-round">轮次与商品</a>
+      <a href="#sec-messages">消息日志</a>
+      <a href="#sec-snapshot">快照</a>
+    </nav>
+
     <div id="form" class="hidden">
       <div class="layout">
-        <section class="panel">
+        <section class="panel admin-section" id="sec-gateway">
           <div class="panel-head"><span>接入（gateway）</span></div>
           <div class="panel-body">
             <label class="field"><span>bind</span><input id="gw-bind" /></label>
@@ -58,7 +83,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel admin-section" id="sec-display">
           <div class="panel-head"><span>展示（display）</span></div>
           <div class="panel-body">
             <div class="split">
@@ -73,7 +98,7 @@
       </div>
 
       <div class="layout" style="margin-top:12px">
-        <section class="panel">
+        <section class="panel admin-section" id="sec-llm">
           <div class="panel-head"><span>LLM（llm）</span></div>
           <div class="panel-body">
             <div class="split">
@@ -90,7 +115,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel admin-section" id="sec-members">
           <div class="panel-head"><span>成员（members）</span></div>
           <div class="panel-body">
             <div class="split">
@@ -102,7 +127,7 @@
               <button id="members-refresh" class="small">拉取群成员</button>
               <span id="members-info" class="hint"></span>
             </div>
-            <div style="max-height:34vh;overflow:auto;margin-top:8px">
+            <div class="table-scroll" style="max-height:34vh;margin-top:8px">
               <table class="grid">
                 <thead><tr><th>user_id</th><th>昵称（清洗后）</th><th>原始</th><th>角色</th></tr></thead>
                 <tbody id="members-body"></tbody>
@@ -113,7 +138,7 @@
         </section>
       </div>
 
-      <section class="panel" style="margin-top:12px">
+      <section class="panel admin-section" id="sec-round" style="margin-top:12px">
         <div class="panel-head">
           <span>轮次与商品（round）</span>
           <span class="spacer"></span>
@@ -147,7 +172,7 @@
       </section>
 
       <div class="layout" style="margin-top:12px">
-        <section class="panel">
+        <section class="panel admin-section" id="sec-messages">
           <div class="panel-head">
             <span>消息日志编辑器（C4）</span>
             <span class="spacer"></span>
@@ -166,7 +191,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel admin-section" id="sec-snapshot">
           <div class="panel-head"><span>快照导出 / 导入（C4）</span></div>
           <div class="panel-body">
             <div class="row">
