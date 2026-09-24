@@ -10,6 +10,32 @@ pub enum RoundPhase {
     Locked,
 }
 
+impl RoundPhase {
+    /// 稳定的机器可读标识（供 API/前端使用）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RoundPhase::Phase0 => "phase0",
+            RoundPhase::PhaseI => "phase1",
+            RoundPhase::PhaseII => "phase2",
+            RoundPhase::PhaseIII => "phase3",
+            RoundPhase::Settling => "settling",
+            RoundPhase::Locked => "locked",
+        }
+    }
+
+    /// 展示用中文标签。
+    pub fn label(&self) -> &'static str {
+        match self {
+            RoundPhase::Phase0 => "开团前",
+            RoundPhase::PhaseI => "全量排谷",
+            RoundPhase::PhaseII => "优先排谷",
+            RoundPhase::PhaseIII => "全员可改",
+            RoundPhase::Settling => "结算中",
+            RoundPhase::Locked => "已锁定",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseWindow {
     pub phase: RoundPhase,

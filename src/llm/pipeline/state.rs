@@ -104,4 +104,29 @@ impl Pipeline {
             })
             .collect()
     }
+
+    /// 工作流只读快照（供 `GET /api/workflow` 与前端 Stepper）。
+    pub async fn workflow(&self) -> Value {
+        let state = self.state.lock().await;
+        let claims: u64 = state
+            .snapshot
+            .as_ref()
+            .map(|snapshot| {
+                snapshot
+                    .user_summaries
+                    .iter()
+                    .flat_map(|summary| summary.items.iter())
+                    .map(|item| item.quantity as u64)
+                    .sum()
+            })
+            .unwrap_or(0);
+        json!({
+            "locked": state.locked,
+            "version": state.version,
+            "events": state.events.len(),
+            "messages": state.messages.len(),
+            "claims": claims,
+            "eligibilities": state.eligibilities.len(),
+        })
+    }
 }

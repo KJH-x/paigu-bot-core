@@ -54,3 +54,6 @@ REPLAY_SIMULATION_ADDENDUM.md
 # ---------- 部署产物（运行时） ----------
 /deploy/bin/
 /deploy/logs/
+
+# ---------- Web 设计探索稿（临时） ----------
+/web/_designs/

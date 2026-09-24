@@ -10,6 +10,9 @@ pub mod replay;
 pub mod settlement;
 pub mod snapshot;
 
+/// 工作流只读快照（Stepper 用）。
+pub mod workflow;
+
 use crate::api::{api_bad_request, api_internal, api_not_found, api_stale_revision, ApiError};
 
 /// 服务层错误：由路由映射为与重构前一致的 HTTP 错误响应。
