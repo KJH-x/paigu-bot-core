@@ -366,3 +366,10 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `POST /api/config/admin-commands` | 热切换 gateway.admin_commands_enabled（D-1） |
 | `Pipeline::run_admin_command` | /开团 /锁位 /结团 /状态 /导出；锁定后拒绝排/撤/改 |
 | `ParsedIntent::Modify` | 改单：撤销本人该商品既有认购 + 重新认购（cancel_for_modify） |
+
+### 8.6 工作流（`src/services/workflow.rs`、`src/api/board_routes.rs`）
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/workflow` | **只读**快照：`round_id/title/group_id/phase/phase_label/phases_configured/priority_window/items/settlement_configured/members_cached/reply_enabled/admin_commands_enabled/revision/gateway/locked/version/events/messages/claims/eligibilities/updated_at` |
+| `RoundPhase::{as_str,label}` | 稳定标识与中文标签（`src/round/mod.rs`），供 Stepper 使用 |

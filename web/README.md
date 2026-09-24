@@ -76,3 +76,19 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 - 所有 `fetch` 带 8s 超时与错误分类（网络 / HTTP 状态）。
 - 配置、成员、展示数据任一失败都不抛到控制台导致崩溃；页面显示中文横幅并自动重试。
 - `web/**` 仅前端；不修改 `src/llm/**`、`src/gateway/**`、`src/settings.rs`、`simulation-corpus/**`；`/replay` 静态路由由 `src/api/mod.rs` 提供。
+
+## 工作流外壳与双色主题（2026-09-24 重做）
+
+新增三个共享文件（6 页统一）：
+
+| 文件 | 说明 |
+|---|---|
+| `theme.css` | 设计 token：`:root`（浅色） + `[data-theme="dark"]`（深色），并覆盖 display/replay/settlement 中的硬编码浅色 |
+| `app.css` | 外壳/Stepper/KPI/响应式与组件皮肤 |
+| `shell.js` | 统一外壳：品牌 + **工作流 Stepper** + 状态徽标（API / NapCat `clients` / `version` / `locked` / 阶段）+ 主题切换（持久化 `paigu.theme`，首绘前生效防闪烁）+ `/api/workflow` 轮询（5s）+ 移动端底部阶段 Tab + 面板切换 |
+
+- **流程来源**：只读 `GET /api/workflow`（阶段 `phase`/`phase_label`、`locked`、`version`、`claims`、`gateway.bound_addr`、`settlement_configured`、`priority_window`）。
+- **Stepper 五步**：`开团→admin` · `排谷→/ 与 sim` · `结算→settlement` · `下单/锁定→settlement#order` · `复盘→replay`；`phase=null`（未配置阶段）时显示「阶段未配置」并高亮「排谷」。
+- **响应式**：`≥1200` 桌面多列；`768–1199` 平板（Stepper 可横滚）；`<768` 移动（底部阶段 Tab + 单列 + 吸附操作条）。
+- **图标**：全部内联 SVG；**零新增依赖**（replay 的 Mermaid 视图由 `shell.js` 内置的 Mermaid-lite 渲染，不再依赖 CDN）。
+- 页面脚本（`display.js`/`admin.js`/`sim.js`/`replay.js`/`settlement.js`）**未改数据契约**，所有既有 `id`/`class` 保留。
