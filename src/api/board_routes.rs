@@ -12,10 +12,16 @@ pub fn routes() -> Router<Arc<ApiState>> {
         .route("/api/health", get(health))
         .route("/api/board", get(get_board))
         .route("/api/gateway/status", get(gateway_status))
+        .route("/api/workflow", get(workflow))
 }
 
 async fn health() -> Json<Value> {
     Json(json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
+}
+
+/// 工作流只读快照：阶段/锁定/网关/配置进度（供前端 Stepper，加性接口）。
+async fn workflow(State(state): State<Arc<ApiState>>) -> Json<Value> {
+    Json(crate::services::workflow::snapshot(&state).await)
 }
 
 async fn get_board(State(state): State<Arc<ApiState>>) -> Json<Value> {

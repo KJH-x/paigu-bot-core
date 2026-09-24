@@ -514,6 +514,20 @@ function buildCases() {
       },
     },
     {
+      name: '/api/workflow 工作流快照',
+      fn: async (page, ctx) => {
+        const res = await fetch(ctx.base + '/api/workflow', {
+          signal: AbortSignal.timeout(10000),
+        }).then((r) => r.json());
+        assertEq(res.round_id, '月行水上', '轮次');
+        assert('locked' in res, '应含 locked 字段');
+        assert('phase' in res, '应含 phase 字段');
+        assert(typeof res.version === 'number', 'version 应为数字');
+        assert(typeof res.gateway === 'object' && res.gateway !== null, '应含 gateway 快照');
+        assertEq(res.reply_enabled, false, 'reply_enabled 默认 false');
+      },
+    },
+    {
       name: '/api/members 回退 example',
       fn: async (page, ctx) => {
         const res = await fetch(ctx.base + '/api/members', {
