@@ -17,11 +17,11 @@
   };
 
   var STEPS = [
-    { n: 1, label: '开团', href: 'admin.html', icon: 'flag' },
-    { n: 2, label: '排谷', href: 'display.html', icon: 'grid' },
-    { n: 3, label: '结算', href: 'settlement.html', icon: 'calc' },
-    { n: 4, label: '下单', href: 'settlement.html#order', icon: 'cart' },
-    { n: 5, label: '复盘', href: 'replay.html', icon: 'replay' }
+    { n: 1, label: '开团', href: 'admin.html#sec-round', icon: 'flag', title: '开团 · 轮次与商品（round）' },
+    { n: 2, label: '排谷', href: 'display.html', icon: 'grid', title: '排谷 · 排位/消息/名单' },
+    { n: 3, label: '结算', href: 'settlement.html', icon: 'calc', title: '结算 · 试算' },
+    { n: 4, label: '下单', href: 'settlement.html#order', icon: 'cart', title: '下单 / 锁定' },
+    { n: 5, label: '复盘', href: 'replay.html', icon: 'replay', title: '复盘 · 重放' }
   ];
 
   var PAGE_DEFAULT = { index: 2, display: 2, sim: 2, admin: 1, settlement: 3, replay: 5 };
@@ -122,7 +122,8 @@
       phase;
   }
 
-  function stepFromWorkflow(wf) {
+  /** 流程进度（弱标记）：由 /api/workflow 的 phase/locked 推导，**不**决定「当前模块」高亮。 */
+  function phaseStep(wf) {
     if (!wf) return null;
     if (wf.locked === true) return 4;
     var p = String(wf.phase == null ? '' : wf.phase).toLowerCase();
@@ -131,24 +132,31 @@
     if (p === 'phasei' || p === 'phase1' || p === 'phaseii' || p === 'phase2' ||
         p === 'phaseiii' || p === 'phase3') return 2;
     if (p === 'phase0') return 1;
-    return 2;
+    return null;
   }
 
+  /** 「当前模块」高亮（唯一的强样式）。 */
   function setActiveStep(n) {
     if (n == null) return;
     state.step = n;
     var i;
     var steps = document.querySelectorAll('#wf-stepper .step');
     for (i = 0; i < steps.length; i++) {
-      var sn = +steps[i].getAttribute('data-step');
-      steps[i].classList.toggle('active', sn === n);
-      steps[i].classList.toggle('done', sn < n);
+      steps[i].classList.toggle('active', +steps[i].getAttribute('data-step') === n);
     }
     var tabs = document.querySelectorAll('.mobile-tabs .mtab');
     for (i = 0; i < tabs.length; i++) {
-      var tn = +tabs[i].getAttribute('data-step');
-      tabs[i].classList.toggle('active', tn === n);
-      tabs[i].classList.toggle('done', tn < n);
+      tabs[i].classList.toggle('active', +tabs[i].getAttribute('data-step') === n);
+    }
+  }
+
+  /** 阶段进度（弱元素）：细下划线 + 小圆点，避免与 hover / active 争抢注意力。 */
+  function setPhaseProgress(n) {
+    var steps = document.querySelectorAll('#wf-stepper .step');
+    for (var i = 0; i < steps.length; i++) {
+      var sn = +steps[i].getAttribute('data-step');
+      steps[i].classList.toggle('phase-now', n != null && sn === n);
+      steps[i].classList.toggle('phase-done', n != null && sn < n);
     }
   }
 
@@ -166,13 +174,13 @@
       state.workflow = wf;
       state.ok = true;
       renderBadges(wf, false);
-      setActiveStep(stepFromWorkflow(wf));
+      setPhaseProgress(phaseStep(wf));
       emit();
     }).catch(function () {
       state.workflow = null;
       state.ok = false;
       renderBadges(null, true);
-      setActiveStep(pageDefault());
+      setPhaseProgress(null);
       emit();
     });
   }
@@ -191,7 +199,7 @@
     var html = '';
     for (var i = 0; i < STEPS.length; i++) {
       var s = STEPS[i];
-      html += '<a class="step" data-step="' + s.n + '" href="' + s.href + '" title="' + esc(s.label) + '">' +
+      html += '<a class="step" data-step="' + s.n + '" href="' + s.href + '" title="' + esc(s.title || s.label) + '">' +
         '<span class="num">' + s.n + '</span>' +
         '<span class="lbl">' + esc(s.label) + '</span>' +
         '</a>';
@@ -472,12 +480,39 @@
     else window.addEventListener('load', applyHash);
   }
 
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /**
+   * 相对日提示：`周几 + 前天/昨天/今天/明天/后天`（仅这几种），
+   * 其他情况显示 `X 天前 / X 天后`；附带 HH:MM。
+   */
+  function relDay(ms) {
+    var t = Number(ms);
+    if (!isFinite(t) || t <= 0) return '';
+    var d = new Date(t);
+    var now = new Date();
+    var a = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    var b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var diff = Math.round((a - b) / 86400000);
+    var rel;
+    if (diff === -2) rel = '前天';
+    else if (diff === -1) rel = '昨天';
+    else if (diff === 0) rel = '今天';
+    else if (diff === 1) rel = '明天';
+    else if (diff === 2) rel = '后天';
+    else rel = Math.abs(diff) + ' 天' + (diff < 0 ? '前' : '后');
+    var wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
+    return wd + ' ' + rel + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+
   window.PAIGU_SHELL = {
     refresh: fetchWorkflow,
     getState: function () {
       return { ok: state.ok, workflow: state.workflow, step: state.step };
     },
     setActiveStep: setActiveStep,
+    setPhaseProgress: setPhaseProgress,
+    relDay: relDay,
     onWorkflow: function (fn) {
       if (typeof fn !== 'function') return function () {};
       listeners.push(fn);
