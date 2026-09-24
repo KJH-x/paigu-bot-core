@@ -1,4 +1,4 @@
-# 工程待办（TODOS）
+﻿# 工程待办（TODOS）
 
 > 每条：ID / 优先级(P0>P1>P2) / 状态 / 依赖 / 验收。
 > 状态：`todo` · `doing` · `blocked` · `done`。决策依据见 [DECISIONS.md](./DECISIONS.md)。
@@ -23,13 +23,39 @@
 | W1-5 | **planner 聚合（A-3）**：原子去 `owner`、标价取目录 canonical、merge key 去价 | ✅ |
 | W1-6 | **排包完成校验**：`check_completeness` + `/api/settlement/completeness`；evaluate 遇未完成拒绝计算 | ✅ |
 
+## 已完成（Wave G / SPEC-UPDATE U1–U9，2026-09-24）
+
+| ID | 任务 | 验收 |
+|---|---|---|
+| G-01 | **轮次库（U3）**：`active_round_id` + `data/rounds/<id>.json`；`GET/POST /api/rounds`、`activate`（`continue`/`fresh`/`replay`）、`check`、`DELETE`；`resolve_active` 热载 | ✅ `settings/rounds` + `services/rounds` 单测 |
+| G-02 | **导航/流程语义（U1）**：Stepper 高亮=当前模块 + 弱阶段进度；`/round`（开团）与 `/settings` 分流 | ✅ `GET /api/workflow.phases` + 前端 shell |
+| G-03 | **商品模型/编辑器（U6）**：4 种类、`class` 自动推导、变体 A±B=C 三格联动、别名本地词切+锁定+冲突校验、末尾虚线卡/缝隙「+」、单领多行、整盒独立种类、消息日志折叠面板 | ✅ `web/round.*`；`check` 覆盖跨商品冲突（`adjust_cents` 落库见 W-G2-01） |
+| G-04 | **成员 CN（U4）**：`cn_overrides`；回退 CN→归一化昵称→user_id；`/api/members` 附 `cn/resolved`；展示层 who_whats 覆盖 | ✅ `services/members` 单测 |
+| G-05 | **first-match + 失败澄清（U7）**：目录序第一个可拼团；全 fail→LLM 澄清→`ParseOverride` 持久化 + 重放消费 | ✅ `llm/pipeline/tests` 实时==重放 |
+| G-06 | **整盒/包尾（U8）**：整盒→单领队列；包尾锁定列=最大列序+1；结算强制成盒 + 自动滑入 | ✅ `domain/allocation` + `allocation_engine` 单测 |
+| G-07 | **时间窗相对日（U5）**：`周几+今天/明天/后天/X天前后` | ✅ 前端 `shell.js` |
+
+## 本轮遗留（Wave G2，2026-09-24）
+
+> 正文已按现行口径更新；以下为实现与文档的**已知差距/待办**（P1>P2）。
+
+| ID | 优先级 | 状态 | 任务 | 验收 |
+|---|---|---|---|---|
+| W-G2-01 | P1 | **done** ✅ | **`VariantConfig.adjust_cents` 落库**：Rust 声明该字段 + `to_unit_prices`/结算取价接线；当前仅 `web/round.js` 前端契约（保存时被 serde 忽略、不落 `data/rounds/*.json`） | `/round` 保存 A/B 后重载仍存在，结算见调后价 |
+| W-G2-02 | P1 | **done** ✅ | **`POST /api/items/suggest-aliases` 后端实现**（LLM 别名建议，返回 `{suggestions:[{item_id,verdict?,aliases?}]}`）；前端已接入并对 404/405/501 兜底 | 按钮返回建议/「是最佳」 |
+| W-G2-03 | P2 | **done** ✅ | **`GET /round`、`GET /settings` 短路由**（如需）：当前仅静态文件 `/round.html`、`/settings.html` | 短路由可直接访问 |
+| W-G2-04 | P2 | **done** ✅ | **清理 `box_size`/`variants[].pieces` 残留**：Rust `ItemConfig.box_size`/`VariantConfig.pieces` 字段、`to_items` 透传、`config.example.json` 旧值 | 代码/配置不再含该字段且回归全绿 |
+| W-G2-05 | P2 | todo | **重放快照的 CN**：`replay_engine::to_allocation_snapshot`（及 `replay/session`）产出的 `user_summaries.display_name` 未走 CN | 重放人名与 `/api/display` 一致 |
+| W-G2-06 | P2 | todo | **`SlotPolicy::ColumnLocked` 语义未定义**：`allocation_engine` 当前按 `normal` 处理；需明确「锁列」含义或移除 | 语义有文档与单测 |
+| W-G2-07 | P2 | todo | **`check` 跨商品规则细化**：变体名跨商品重名（角色名）当前不报错、`class_derived_mismatch` 为 warn；按需分级/扩展 | 规则有单测 |
+
 ## 待办
 
 ### P1
 
 | ID | 状态 | 任务 | 依赖 | 验收 |
 |---|---|---|---|---|
-| T-13 | doing | **阶段权限接入实时链路**：主体已实现（实时+重放均按 `phase_at` 拒绝越权）；仅缺 A/B 分类 UI 与来源回填（现依赖 `round.items[].class` 配置） | A-5 | 越权 Reject 的 e2e + 分类回填 |
+| T-13 | done | **阶段权限接入实时链路**：实时+重放均按 `phase_at` 拒绝越权；A/B 分类由 `class` **自动推导**（有变体⇒A/无变体⇒B，`RoundSettings::item_class`）+ `/round` 编辑器设置 `kind` | A-5 | ✅ 越权实时==重放单测；分类自动推导单测 |
 | T-14 | todo | **管理员改单目标语法**：`/改单 <目标> ...`（管理员改群内任意指定人）；需把目标昵称解析为 user_id（可用 `state.display/identity`） | D-2 | 管理员改他单用例 |
 | T-15 | todo | **`MessageLog::update` 接线**：`PUT /api/messages/:seq` 仍走 read_all+replace_all，改用细粒度 `update` | — | 不再全量重写 |
 | T-16 | todo | **快照导出/导入前端入口**：`web/admin` 按钮 + 下载（含 `format=file`） | T-06 | admin 可操作 |

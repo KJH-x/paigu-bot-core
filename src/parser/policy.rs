@@ -40,9 +40,9 @@ pub fn priority_window(cfg: &AppConfig) -> Option<(i64, i64)> {
         .map(|w| (w.start_ms, w.end_ms))
 }
 
-/// 优先用户判定：候选串为 `[user_id, nickname, identity, display]`。
-pub fn is_priority(cfg: &AppConfig, candidates: &[&str]) -> bool {
-    is_priority_user(&cfg.round.priority_users, candidates)
+/// 优先用户判定（U4）：候选含 `user_id`/昵称/归一化昵称 **以及 CN/别名**。
+pub fn is_priority(cfg: &AppConfig, user_id: &str, nickname: &str) -> bool {
+    crate::settings::is_priority_with_cn(cfg, user_id, nickname)
 }
 
 /// 当前时间是否落在优先时段内。
@@ -138,8 +138,9 @@ mod tests {
     #[test]
     fn is_priority_matches_any_candidate() {
         let cfg = cfg_with(|c| c.round.priority_users = vec!["u2".to_string()]);
-        assert!(is_priority(&cfg, &["u1", "u2", "u2", "u2"]));
-        assert!(!is_priority(&cfg, &["u1", "u1", "u1", "u1"]));
+        assert!(is_priority(&cfg, "u2", "任意"));
+        assert!(is_priority(&cfg, "u1", "u2"));
+        assert!(!is_priority(&cfg, "u1", "u1"));
     }
 
     #[test]
@@ -187,6 +188,27 @@ mod tests {
             }),
             status: crate::domain::event::EventStatus::Active,
         }
+    }
+
+    #[test]
+    fn phase_ii_derived_class_a_requires_priority() {
+        // U6：未显式配置 class 时，有变体的商品应推导为 A 并受阶段限制。
+        let cfg = cfg_with(|c| {
+            c.round.phases = vec![PhaseWindow {
+                phase: RoundPhase::PhaseII,
+                start_ms: 0,
+                end_ms: i64::MAX,
+            }];
+            for it in &mut c.round.items {
+                if it.item_id == "pass_sp" {
+                    it.class = None;
+                }
+            }
+        });
+        assert_eq!(cfg.round.item_class("pass_sp"), ItemClass::A);
+        let event = cancelled_event("pass_sp");
+        assert!(phase_rejection(&cfg, &event, RoundPhase::PhaseII, false).is_some());
+        assert!(phase_rejection(&cfg, &event, RoundPhase::PhaseII, true).is_none());
     }
 
     #[test]

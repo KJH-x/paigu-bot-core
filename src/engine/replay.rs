@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use crate::domain::claim::{Claim, EffectiveClaimLine, Eligibility};
 use crate::domain::event::{compare_event_order, DomainEvent, EventEnvelope};
-use crate::domain::ids::RoundId;
+use crate::domain::ids::{RoundId, UserId};
 use crate::domain::item::Item;
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::allocation_engine::AllocationEngine;
@@ -145,11 +147,12 @@ pub fn rebuild_allocation_snapshot(
     items: &[Item],
     events: &[EventEnvelope],
     eligibilities: &[Eligibility],
+    display_names: &HashMap<UserId, String>,
 ) -> AllocationSnapshot {
     let mut sorted = events.to_vec();
     sorted.sort_by(compare_event_order);
     let lines = collect_effective_claims(&sorted, eligibilities);
-    match AllocationEngine::new().allocate(items, &lines, &sorted) {
+    match AllocationEngine::new().allocate_with_names(items, &lines, &sorted, display_names) {
         Ok(mut snapshot) => {
             snapshot.version = sorted.len() as i64;
             snapshot

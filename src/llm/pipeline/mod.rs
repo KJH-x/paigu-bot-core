@@ -29,6 +29,7 @@ mod state;
 mod tests;
 
 use admin::{cancel_for_modify, priority_eligibility};
+use llm_parse::BareVariantOutcome;
 use state::{MessageRecord, State};
 
 const RULE_CONFIDENCE: f32 = 0.9;
@@ -90,6 +91,11 @@ impl Pipeline {
     #[allow(dead_code)]
     pub fn messages(&self) -> Arc<MessageLog> {
         self.messages.clone()
+    }
+
+    /// 注入式 LLM 客户端句柄（API 的别名建议等处复用；便于 Mock 测试）。
+    pub fn llm_client(&self) -> Arc<dyn LlmClient> {
+        self.llm.clone()
     }
 
     pub async fn process(&self, ev: IncomingEvent) -> PipelineOutcome {
@@ -243,6 +249,35 @@ impl Pipeline {
             items: items.clone(),
         }];
         let now = DateTime::<Utc>::from_timestamp_millis(ev.timestamp_ms).unwrap_or_else(Utc::now);
+
+        // §U7 first-match：只报角色名/变体名时按目录顺序取第一个可拼团商品；
+        // 全部 fail → LLM 澄清（成功后写 ParseOverride 事件）。
+        if parsed.intent == ParsedIntent::Claim {
+            match self
+                .resolve_bare_variant_claims(&cfg, &ev, parsed, &round_contexts, now, seq)
+                .await
+            {
+                BareVariantOutcome::Resolved(p) => parsed = p,
+                BareVariantOutcome::FallbackIgnore => {
+                    return self
+                        .finish(&ev, &display, seq, "Ignored", "商品未能 first-match，未记录", None)
+                        .await;
+                }
+                BareVariantOutcome::FallbackReject => {
+                    return self
+                        .finish(
+                            &ev,
+                            &display,
+                            seq,
+                            "Rejected",
+                            "没识别成功",
+                            Some("没识别成功".to_string()),
+                        )
+                        .await;
+                }
+            }
+        }
+
         let user_id = UserId(ev.user_id.clone());
         let validator = EventValidator::new(CONFIDENCE_THRESHOLD);
 
@@ -292,15 +327,8 @@ impl Pipeline {
             }
         };
 
-        let is_priority = policy::is_priority(
-            &cfg,
-            &[
-                ev.user_id.as_str(),
-                ev.nickname.as_str(),
-                identity.as_str(),
-                display.as_str(),
-            ],
-        );
+        // U4：优先用户候选含 CN/别名。
+        let is_priority = policy::is_priority(&cfg, &ev.user_id, &ev.nickname);
         if policy::in_priority_at(&cfg, ev.timestamp_ms) && !is_priority {
             return self
                 .finish(
@@ -369,7 +397,22 @@ impl Pipeline {
                 }
             }
             state.events.push(event);
-            let snapshot = rebuild_allocation_snapshot(&items, &state.events, &state.eligibilities);
+            // U4：为分配展示名解析 CN（回退归一化昵称 → user_id）。
+            let display_names: std::collections::HashMap<crate::domain::ids::UserId, String> =
+                state
+                    .display
+                    .iter()
+                    .filter_map(|(uid, raw)| {
+                        crate::settings::resolve_cn(&cfg, uid, raw)
+                            .map(|name| (crate::domain::ids::UserId(uid.clone()), name))
+                    })
+                    .collect();
+            let snapshot = rebuild_allocation_snapshot(
+                &items,
+                &state.events,
+                &state.eligibilities,
+                &display_names,
+            );
             let version = snapshot.version;
             let snapshot_value = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
             state.version = version;

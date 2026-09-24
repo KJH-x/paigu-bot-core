@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::allocation::{
-    BoxAllocation, ItemAllocation, SingleAllocation, SlotAllocation, SlotStatus,
+    resolve_tail_boxes, BoxAllocation, ItemAllocation, SingleAllocation, SlotAllocation, SlotStatus,
     UserAllocationSummary, UserItemAllocation, WaitingLine,
 };
 use crate::domain::claim::{ClaimType, EffectiveClaimLine, SlotPolicy};
 use crate::domain::event::{AdminAllocationAction, DomainEvent, EventEnvelope};
 use crate::domain::ids::{ItemId, UserId};
-use crate::domain::item::Item;
+use crate::domain::item::{Item, ItemKind};
 use crate::domain::money::MoneyCents;
 use crate::domain::snapshot::AllocationSnapshot;
 
@@ -23,6 +23,18 @@ impl AllocationEngine {
         items: &[Item],
         claim_lines: &[EffectiveClaimLine],
         events: &[EventEnvelope],
+    ) -> anyhow::Result<AllocationSnapshot> {
+        self.allocate_with_names(items, claim_lines, events, &HashMap::new())
+    }
+
+    /// 与 [`AllocationEngine::allocate`] 相同，但可传入 `user_id → 展示名（CN）` 映射。
+    /// 未命中映射时 `display_name` 保持为空串（向后兼容）。
+    pub fn allocate_with_names(
+        &self,
+        items: &[Item],
+        claim_lines: &[EffectiveClaimLine],
+        events: &[EventEnvelope],
+        display_names: &HashMap<UserId, String>,
     ) -> anyhow::Result<AllocationSnapshot> {
         let now = chrono::Utc::now();
         let round_id = items
@@ -51,6 +63,15 @@ impl AllocationEngine {
             }
         }
 
+        // §U8：含「变体包尾」的 base item 采用**共享列**模型——每个变体同一列至多占一个槽，
+        // 故把该变体的盒规设为 1（一条认购 = 一列）。其余情形维持原有盒规，保证既有回归不变。
+        let mut variant_tail_items: HashSet<ItemId> = HashSet::new();
+        for line in &sorted_lines {
+            if line.slot_policy == SlotPolicy::TailLocked && line.variant_id.is_some() {
+                variant_tail_items.insert(line.item_id.clone());
+            }
+        }
+
         for item in items {
             if item.variants.is_empty() {
                 item_states.insert(
@@ -59,7 +80,11 @@ impl AllocationEngine {
                 );
             } else {
                 for variant in &item.variants {
-                    let box_size = variant.capacity.or(item.box_size);
+                    let box_size = if variant_tail_items.contains(&item.item_id) {
+                        Some(1)
+                    } else {
+                        variant.capacity.or(item.box_size)
+                    };
                     item_states.insert(
                         (item.item_id.clone(), Some(variant.variant_id.clone())),
                         ItemWorkingState::new(box_size),
@@ -79,6 +104,17 @@ impl AllocationEngine {
         for line in &sorted_lines {
             let key = (line.item_id.clone(), line.variant_id.clone());
             if let Some(state) = item_states.get_mut(&key) {
+                // §U8：变体包尾延后到 `resolve_tail_boxes`（需要跨变体共享列）。
+                if line.slot_policy == SlotPolicy::TailLocked && line.variant_id.is_some() {
+                    continue;
+                }
+                let item = item_map.get(&line.item_id);
+                // §U8：**整盒**是独立种类，默认进入**单领队列**，不参与拼团成盒。
+                if item.map(|i| i.kind == ItemKind::WholeBox).unwrap_or(false) {
+                    let max_qty = item.and_then(|i| i.max_quantity);
+                    state.allocate_single(line, max_qty);
+                    continue;
+                }
                 match line.claim_type {
                     ClaimType::Split | ClaimType::GiftClaim => {
                         self.allocate_split_line(state, line);
@@ -90,6 +126,20 @@ impl AllocationEngine {
                         state.allocate_single(line, max_qty);
                     }
                 }
+            }
+        }
+
+        // §U8：为变体包尾放置临时槽（列序不确定，由 `resolve_tail_boxes` 统一锁定/滑入）。
+        for line in &sorted_lines {
+            if line.slot_policy != SlotPolicy::TailLocked || line.variant_id.is_none() {
+                continue;
+            }
+            let key = (line.item_id.clone(), line.variant_id.clone());
+            if let Some(state) = item_states.get_mut(&key) {
+                let box_idx = state.next_box_index();
+                let segment = format!("tail:{}:{}", line.user_id.0, line.claim_id.0);
+                state.ensure_slot_exists(box_idx, 1);
+                state.fill_slot(box_idx, 1, line, SlotPolicy::TailLocked, Some(segment));
             }
         }
 
@@ -180,21 +230,23 @@ impl AllocationEngine {
         let mut user_summaries: Vec<UserAllocationSummary> = user_summaries_map
             .into_iter()
             .map(|(uid, items)| UserAllocationSummary {
+                display_name: display_names.get(&uid).cloned().unwrap_or_default(),
                 user_id: uid,
-                display_name: String::new(),
                 items,
             })
             .collect();
         user_summaries.sort_by(|a, b| a.user_id.0.cmp(&b.user_id.0));
 
-        Ok(AllocationSnapshot {
+        let snapshot = AllocationSnapshot {
             round_id,
             version,
             generated_at: now,
             item_allocations,
             user_summaries,
             warnings,
-        })
+        };
+        // §U8：统一执行「强制成盒 + 自动滑入」（幂等）。
+        Ok(resolve_tail_boxes(&snapshot))
     }
 
     fn allocate_split_line(&self, state: &mut ItemWorkingState, line: &EffectiveClaimLine) {
@@ -217,37 +269,79 @@ impl AllocationEngine {
         }
     }
 
+    /// §U8 包盒（拼团策略）：一人占走某盒剩余槽。
+    ///
+    /// 先填满已有盒的空槽（升序）；仍有数量则开新盒占满，最后一盒的空余槽锁空。
     fn allocate_full_box(&self, state: &mut ItemWorkingState, line: &EffectiveClaimLine) {
-        let box_size = state.box_size.unwrap_or_else(|| line.quantity.max(1));
-        let box_idx = state.next_box_index();
-        let take = if line.quantity == 0 {
-            box_size
-        } else {
-            line.quantity.min(box_size)
-        };
+        let box_size = state
+            .box_size
+            .unwrap_or_else(|| line.quantity.max(1))
+            .max(1);
         let segment_id = format!(
             "fullbox:{}:{}:{}",
             line.user_id.0, line.claim_id.0, line.line_index
         );
+        let mut remaining = if line.quantity == 0 {
+            box_size
+        } else {
+            line.quantity
+        };
 
-        for slot_idx in 1..=take {
-            state.ensure_slot_exists(box_idx, slot_idx);
-            state.fill_slot(
-                box_idx,
-                slot_idx,
-                line,
-                SlotPolicy::FullBox,
-                Some(segment_id.clone()),
-            );
+        let mut existing: Vec<u32> = state.boxes.keys().copied().collect();
+        existing.sort();
+        for bi in existing {
+            if remaining == 0 {
+                break;
+            }
+            let fillable: Vec<u32> = state
+                .boxes
+                .get(&bi)
+                .map(|b| {
+                    b.slots
+                        .iter()
+                        .filter(|s| s.is_fillable())
+                        .map(|s| s.slot_index)
+                        .collect()
+                })
+                .unwrap_or_default();
+            for slot_idx in fillable {
+                if remaining == 0 {
+                    break;
+                }
+                state.fill_slot(
+                    bi,
+                    slot_idx,
+                    line,
+                    SlotPolicy::FullBox,
+                    Some(segment_id.clone()),
+                );
+                remaining -= 1;
+            }
         }
-        for slot_idx in (take + 1)..=box_size {
-            state.ensure_slot_exists(box_idx, slot_idx);
-            state.mark_locked_empty(
-                box_idx,
-                slot_idx,
-                SlotPolicy::FullBox,
-                Some(segment_id.clone()),
-            );
+
+        while remaining > 0 {
+            let box_idx = state.next_box_index();
+            let take = remaining.min(box_size);
+            for slot_idx in 1..=take {
+                state.ensure_slot_exists(box_idx, slot_idx);
+                state.fill_slot(
+                    box_idx,
+                    slot_idx,
+                    line,
+                    SlotPolicy::FullBox,
+                    Some(segment_id.clone()),
+                );
+            }
+            for slot_idx in (take + 1)..=box_size {
+                state.ensure_slot_exists(box_idx, slot_idx);
+                state.mark_locked_empty(
+                    box_idx,
+                    slot_idx,
+                    SlotPolicy::FullBox,
+                    Some(segment_id.clone()),
+                );
+            }
+            remaining -= take;
         }
     }
 

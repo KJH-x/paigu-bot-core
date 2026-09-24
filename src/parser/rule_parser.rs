@@ -86,7 +86,7 @@ impl RuleParser {
                 .and_then(|vid| item.find_variant_by_id(vid));
             let policy = detect_policy(seg.text);
             let quantity = parse_quantity(seg.text, item, variant, &policy);
-            let claim_type = detect_claim_type(seg.text, item);
+            let claim_type = detect_claim_type(seg.text, item, &policy);
             let is_proxy = seg.text.contains("代牌");
 
             parsed_items.push(ParsedClaimItem {
@@ -372,11 +372,14 @@ fn build_segments<'a>(text: &'a str, mentions: &[Mention]) -> Vec<Segment<'a>> {
 }
 
 fn detect_policy(text: &str) -> String {
+    // §U6/U8：`整盒` 是独立种类（单领队列），与 `包盒`(fullbox 拼团策略) 区分。
+    if contains_any(text, &["整盒", "一整盒", "要整盒"]) && !text.contains('包') {
+        return "WholeBox".to_string();
+    }
     if contains_any(
         text,
         &[
             "包盒",
-            "整盒",
             "包一盒",
             "一盒全包",
             "全包",
@@ -401,8 +404,8 @@ fn detect_policy(text: &str) -> String {
     "Normal".to_string()
 }
 
-fn detect_claim_type(text: &str, item: &Item) -> String {
-    if text.contains("单领") {
+fn detect_claim_type(text: &str, item: &Item, policy: &str) -> String {
+    if policy == "WholeBox" || text.contains("单领") {
         return "Single".to_string();
     }
     match item.kind {
@@ -552,4 +555,67 @@ fn eval_cn(s: &str) -> Option<u32> {
         section += d;
     }
     Some(section)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::ids::{ItemId, RoundId};
+    use crate::domain::money::MoneyCents;
+
+    fn split_item() -> Item {
+        Item {
+            item_id: ItemId("pass_sp".to_string()),
+            round_id: RoundId("r1".to_string()),
+            name: "通行认证SP-月行水上".to_string(),
+            kind: ItemKind::Split,
+            unit_price: MoneyCents(0),
+            box_size: Some(8),
+            max_quantity: None,
+            is_blind: false,
+            is_proxy_card: false,
+            aliases: vec!["通行证".to_string()],
+            sort_order: 0,
+            metadata: serde_json::Value::Null,
+            variants: vec![ItemVariant {
+                variant_id: "v_jcl".to_string(),
+                name: "结城理".to_string(),
+                unit_price: MoneyCents(0),
+                capacity: None,
+                aliases: vec![],
+            }],
+        }
+    }
+
+    #[test]
+    fn detect_policy_distinguishes_whole_box_from_full_box() {
+        assert_eq!(detect_policy("整盒"), "WholeBox");
+        assert_eq!(detect_policy("燐音吧唧整盒"), "WholeBox");
+        assert_eq!(detect_policy("包盒"), "FullBox");
+        assert_eq!(detect_policy("包整盒"), "FullBox");
+        assert_eq!(detect_policy("包尾"), "TailLocked");
+    }
+
+    #[test]
+    fn whole_box_parses_as_single_claim() {
+        let msg = RuleParser::parse("排 通行证 结城理 整盒", &[split_item()], false);
+        assert_eq!(msg.intent, ParsedIntent::Claim);
+        assert_eq!(msg.items.len(), 1);
+        assert_eq!(msg.items[0].claim_type.as_deref(), Some("Single"));
+        assert_eq!(msg.items[0].slot_policy.as_deref(), Some("WholeBox"));
+    }
+
+    #[test]
+    fn full_box_parses_as_split_fullbox() {
+        let msg = RuleParser::parse("排 通行证 结城理 包盒", &[split_item()], false);
+        assert_eq!(msg.items[0].claim_type.as_deref(), Some("Split"));
+        assert_eq!(msg.items[0].slot_policy.as_deref(), Some("FullBox"));
+    }
+
+    #[test]
+    fn tail_parses_as_split_tail_locked() {
+        let msg = RuleParser::parse("排 通行证 结城理 包尾", &[split_item()], false);
+        assert_eq!(msg.items[0].claim_type.as_deref(), Some("Split"));
+        assert_eq!(msg.items[0].slot_policy.as_deref(), Some("TailLocked"));
+    }
 }

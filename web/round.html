@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>开团 · 轮次与商品</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="./manage.css" />
+  <script>
+    window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
+  </script>
+  <script defer src="./common.js"></script>
+  <script defer src="shell.js"></script>
+  <script defer src="./manage.js"></script>
+  <script defer src="./round.js"></script>
+</head>
+<body data-page="round">
+  <div class="page">
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>开团 · 轮次与商品</b><small>工作流向导 · ① 开团</small></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">API</span>
+          <input id="api" size="26" />
+        </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
+      </div>
+      <div class="tools-row">
+        <span id="rev-badge" class="status-badge">revision —</span>
+        <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
+        <span class="spacer"></span>
+        <button id="load" class="small">重新载入</button>
+        <button id="reload" class="small">从磁盘重载</button>
+        <button id="save" class="primary">保存配置</button>
+        <span class="nav-links">
+          <a href="index.html">首页</a>
+          <a href="settings.html">设置</a>
+          <a href="display.html">展示</a>
+          <a href="settlement.html">结算</a>
+          <a href="replay.html">回放</a>
+          <a href="sim.html">模拟器</a>
+        </span>
+      </div>
+    </header>
+
+    <div id="banner" class="banner"></div>
+
+    <nav class="section-nav">
+      <a href="#sec-rounds">轮次管理</a>
+      <a href="#sec-round-basic">轮次设置</a>
+      <a href="#sec-phases">阶段时间窗</a>
+      <a href="#sec-items">商品目录</a>
+    </nav>
+
+    <div id="form" class="hidden">
+      <span id="sec-round" aria-hidden="true"></span>
+      <section class="panel admin-section" id="sec-rounds">
+        <div class="panel-head">
+          <span>轮次管理（U3）</span>
+          <span class="spacer"></span>
+          <span id="rounds-info" class="hint"></span>
+          <button id="rounds-refresh" class="small">刷新轮次</button>
+        </div>
+        <div class="panel-body">
+          <div class="explain">
+            <b>轮次标识 <code>round_id</code> 与展示名 <code>title</code> 可以不同。</b>
+            <code>round_id</code> 是稳定标识：用于消息日志 <code>data/messages/&lt;round_id&gt;.jsonl</code>、
+            快照目录与远程 <code>rounds/&lt;round_id&gt;/current</code>；创建后建议不再改动。
+            <code>title</code> 仅用于界面展示。
+          </div>
+
+          <div class="new-round" style="margin-top:10px">
+            <label class="field"><span>round_id（稳定标识：字母/数字/中文/_-，≤64）</span><input id="rd-new-id" placeholder="例如 月行水上-2026" /></label>
+            <label class="field"><span>title（展示名，可留空＝同 round_id）</span><input id="rd-new-title" placeholder="例如 月行水上" /></label>
+            <label class="field"><span>copy_from（复制其商品/阶段，可选）</span><select id="rd-new-copy"><option value="">（不复制）</option></select></label>
+            <button id="rd-new-btn" class="primary">新建轮次</button>
+          </div>
+
+          <div class="hint" style="margin-top:10px">激活模式：<b>continue</b>＝仅切换（无既有状态时等价 fresh）；<b>fresh</b>＝切换并清空内存排位；<b>replay</b>＝切换并自动计算重放。切换与重放互不绑定。</div>
+
+          <div id="rounds-list" class="round-list" style="margin-top:8px"></div>
+          <div id="rounds-empty" class="empty">尚未加载轮次</div>
+          <div id="round-check"></div>
+        </div>
+      </section>
+
+      <section class="panel admin-section" id="sec-round-basic" style="margin-top:12px">
+        <div class="panel-head">
+          <span>当前激活轮次设置</span>
+          <span class="spacer"></span>
+          <span id="rd-active-info" class="hint"></span>
+        </div>
+        <div class="panel-body">
+          <div class="split">
+            <label class="field"><span>round_id（稳定标识，只读）</span><input id="rd-id" readonly /></label>
+            <label class="field"><span>title（展示名）</span><input id="rd-title" /></label>
+            <label class="field"><span>group_id</span><input id="rd-group" /></label>
+          </div>
+          <label class="field"><span>priority_users（预存用户，逗号分隔）</span><input id="rd-priority" /></label>
+          <div class="split">
+            <label class="field"><span>priority_window.start（本地时间）</span><input id="rd-start" type="datetime-local" /></label>
+            <label class="field"><span>priority_window.end（独占，本地时间）</span><input id="rd-end" type="datetime-local" /></label>
+          </div>
+          <div class="hint" id="rd-window-ms"></div>
+        </div>
+      </section>
+
+      <section class="panel admin-section" id="sec-phases" style="margin-top:12px">
+        <div class="panel-head">
+          <span>阶段时间窗（round.phases）</span>
+          <span class="spacer"></span>
+          <button id="phase-add" class="small">添加阶段</button>
+        </div>
+        <div class="panel-body">
+          <div class="hint">字段 phase / start_ms / end_ms；phase ∈ Phase0、PhaseI、PhaseII、PhaseIII、Settling、Locked；半开区间，空列表 = 不限制。日期旁显示相对日（周几 + 今天/明天/后天/X 天前/后）。</div>
+          <div id="phases" style="margin-top:8px"></div>
+        </div>
+      </section>
+
+      <section class="panel admin-section" id="sec-items" style="margin-top:12px">
+        <div class="panel-head">
+          <span>商品目录（种类：拼团 / 单领 / 整盒 / 特典）</span>
+          <span class="spacer"></span>
+          <span id="alias-llm-status" class="status-inline"></span>
+          <button id="alias-llm-btn" class="small">别名 LLM 建议</button>
+          <button id="item-add" class="small">添加商品</button>
+        </div>
+        <div class="panel-body">
+          <div class="hint">
+            价格以「分」为单位。变体显示 <b>原价 A ± 调价 B = 最终价 C</b>：改 A 或 B 联动 C，改 C 联动 B，<b>A 永不联动</b>；
+            <span class="price-pos">+ 为红</span>、<span class="price-neg">- 为蓝</span>。
+            <code>class</code>（A/B）由「种类 + 是否有变体」自动推导（有变体⇒A，无变体⇒B），只读显示。
+          </div>
+          <div id="kind-tabs" class="kind-tabs" style="margin-top:8px"></div>
+          <div id="items" class="cat-list"></div>
+          <div id="item-add-end" class="dashed add-end" role="button" tabindex="0">＋ 添加商品（选择种类后添加）</div>
+        </div>
+      </section>
+    </div>
+
+    <div id="loading" class="empty">正在载入配置…</div>
+  </div>
+</body>
+</html>

@@ -3,11 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>排谷管理面板</title>
+  <title>开团 · 入口</title>
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="./display.css" />
   <link rel="stylesheet" href="theme.css" />
   <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="./manage.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
@@ -21,7 +22,7 @@
       <div class="shell-row">
         <a class="brand" href="index.html">
           <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
-          <span class="brand-text"><b>管理面板</b><small>工作流向导 · ① 开团</small></span>
+          <span class="brand-text"><b>开团</b><small>工作流向导 · ① 开团</small></span>
         </a>
         <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
         <div class="wf-status" id="wf-status"></div>
@@ -33,14 +34,11 @@
         <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
       </div>
       <div class="tools-row">
-        <span id="rev-badge" class="status-badge">revision —</span>
-        <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
         <span class="spacer"></span>
-        <button id="load" class="small">重新载入</button>
-        <button id="reload" class="small">从磁盘重载</button>
-        <button id="save" class="primary">保存配置</button>
         <span class="nav-links">
           <a href="index.html">首页</a>
+          <a href="round.html">轮次与商品</a>
+          <a href="settings.html">设置</a>
           <a href="display.html">展示</a>
           <a href="settlement.html">结算</a>
           <a href="replay.html">回放</a>
@@ -51,167 +49,37 @@
 
     <div id="banner" class="banner"></div>
 
-    <nav class="section-nav">
-      <a href="#sec-gateway">接入</a>
-      <a href="#sec-display">展示</a>
-      <a href="#sec-llm">LLM</a>
-      <a href="#sec-members">成员</a>
-      <a href="#sec-round">轮次与商品</a>
-      <a href="#sec-messages">消息日志</a>
-      <a href="#sec-snapshot">快照</a>
-    </nav>
-
-    <div id="form" class="hidden">
-      <div class="layout">
-        <section class="panel admin-section" id="sec-gateway">
-          <div class="panel-head"><span>接入（gateway）</span></div>
-          <div class="panel-body">
-            <label class="field"><span>bind</span><input id="gw-bind" /></label>
-            <div class="split">
-              <label class="field"><span>heartbeat_secs</span><input id="gw-heartbeat" type="number" min="1" /></label>
-              <label class="field"><span>reply_enabled（真实群必须关闭）</span><input id="gw-reply" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>admin_commands_enabled（管理员命令落地执行）</span><input id="gw-admincmds" type="checkbox" style="width:auto" /></label>
-            </div>
-            <label class="field"><span>whitelist_groups（逗号分隔）</span><input id="gw-whitelist" /></label>
-            <label class="field"><span>whitelist_members（成员白名单，逗号分隔 user_id/身份/显示名；空 = 不限制）</span><input id="gw-whitelist-members" /></label>
-            <label class="field"><span>allowed_actions（逗号分隔，禁止 send_*）</span><input id="gw-actions" /></label>
-            <div class="row">
-              <button id="gw-reply-toggle" class="small">热切换 reply_enabled</button>
-              <button id="gw-admin-toggle" class="small">热切换 admin_commands_enabled</button>
-              <span class="hint">走后端 POST /api/config/reply、/api/config/admin-commands（只改单开关，不走整表保存）</span>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel admin-section" id="sec-display">
-          <div class="panel-head"><span>展示（display）</span></div>
-          <div class="panel-body">
-            <div class="split">
-              <label class="field"><span>refresh_ms</span><input id="dp-refresh" type="number" min="500" /></label>
-              <label class="field"><span>data_source</span>
-                <select id="dp-source"><option value="local">local</option><option value="remote">remote</option></select>
-              </label>
-            </div>
-            <label class="field"><span>remote_base_url</span><input id="dp-remote" placeholder="https://…/rounds/{round_id} 或 …/current.json" /></label>
-          </div>
-        </section>
-      </div>
-
-      <div class="layout" style="margin-top:12px">
-        <section class="panel admin-section" id="sec-llm">
-          <div class="panel-head"><span>LLM（llm）</span></div>
-          <div class="panel-body">
-            <div class="split">
-              <label class="field"><span>enabled</span><input id="llm-enabled" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>fallback_to_rules</span><input id="llm-fallback" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>base_url</span><input id="llm-base" /></label>
-              <label class="field"><span>model</span><input id="llm-model" /></label>
-              <label class="field"><span>api_key_env</span><input id="llm-keyenv" /></label>
-              <label class="field"><span>timeout_secs</span><input id="llm-timeout" type="number" min="1" /></label>
-              <label class="field"><span>max_tokens</span><input id="llm-maxtokens" type="number" min="1" /></label>
-              <label class="field"><span>temperature</span><input id="llm-temp" type="number" step="0.05" min="0" max="2" /></label>
-            </div>
-            <label class="field"><span>prompt_template</span><textarea id="llm-prompt" rows="12"></textarea></label>
-          </div>
-        </section>
-
-        <section class="panel admin-section" id="sec-members">
-          <div class="panel-head"><span>成员（members）</span></div>
-          <div class="panel-body">
-            <div class="split">
-              <label class="field"><span>group_id</span><input id="mb-group" /></label>
-              <label class="field"><span>cache_path</span><input id="mb-cache" /></label>
-              <label class="field"><span>daily_pull_at</span><input id="mb-pull" placeholder="19:00" /></label>
-            </div>
-            <div class="row">
-              <button id="members-refresh" class="small">拉取群成员</button>
-              <span id="members-info" class="hint"></span>
-            </div>
-            <div class="table-scroll" style="max-height:34vh;margin-top:8px">
-              <table class="grid">
-                <thead><tr><th>user_id</th><th>昵称（清洗后）</th><th>原始</th><th>角色</th></tr></thead>
-                <tbody id="members-body"></tbody>
-              </table>
-              <div id="members-empty" class="empty">尚未加载成员列表</div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <section class="panel admin-section" id="sec-round" style="margin-top:12px">
-        <div class="panel-head">
-          <span>轮次与商品（round）</span>
-          <span class="spacer"></span>
-          <button id="item-add" class="small">添加商品</button>
-        </div>
-        <div class="panel-body">
-          <div class="split">
-            <label class="field"><span>round_id</span><input id="rd-id" /></label>
-            <label class="field"><span>title</span><input id="rd-title" /></label>
-            <label class="field"><span>group_id</span><input id="rd-group" /></label>
-          </div>
-          <label class="field"><span>priority_users（预存用户，逗号分隔）</span><input id="rd-priority" /></label>
-          <div class="split">
-            <label class="field"><span>priority_window.start（本地时间）</span><input id="rd-start" type="datetime-local" /></label>
-            <label class="field"><span>priority_window.end（独占，本地时间）</span><input id="rd-end" type="datetime-local" /></label>
-          </div>
-          <div class="hint" id="rd-window-ms"></div>
-
-          <div class="card">
-            <div class="card-head">
-              <span>阶段时间窗（round.phases）</span>
-              <span class="spacer"></span>
-              <button id="phase-add" class="small">添加阶段</button>
-            </div>
-            <div class="hint">字段 phase / start_ms / end_ms；phase ∈ Phase0、PhaseI、PhaseII、PhaseIII、Settling、Locked；半开区间，空列表 = 不限制。</div>
-            <div id="phases"></div>
-          </div>
-
-          <div id="items"></div>
-        </div>
-      </section>
-
-      <div class="layout" style="margin-top:12px">
-        <section class="panel admin-section" id="sec-messages">
-          <div class="panel-head">
-            <span>消息日志编辑器（C4）</span>
-            <span class="spacer"></span>
-            <span id="msg-info" class="hint"></span>
-            <button id="msg-refresh" class="small">刷新消息</button>
-          </div>
-          <div class="panel-body">
-            <div class="hint">编辑文本 / 时间 / 状态后点「保存」调用 PUT /api/messages/:seq（带 revision，改后触发重算）；「删除」调用 DELETE /api/messages/:seq。</div>
-            <div id="msg-empty" class="empty">尚未加载消息</div>
-            <div class="table-wrap" style="max-height:46vh;overflow:auto">
-              <table class="grid">
-                <thead><tr><th>seq</th><th>text</th><th>timestamp（本地）</th><th>status</th><th>操作</th></tr></thead>
-                <tbody id="msg-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel admin-section" id="sec-snapshot">
-          <div class="panel-head"><span>快照导出 / 导入（C4）</span></div>
-          <div class="panel-body">
-            <div class="row">
-              <label class="field" style="flex:1;margin:0"><span>out_dir（可选；留空用后端默认目录）</span><input id="snap-out" placeholder="例如 data/snapshots" /></label>
-              <button id="snap-export" class="primary">导出快照（format=file）</button>
-            </div>
-            <div class="hint" id="snap-export-info"></div>
-            <hr style="border:none;border-top:1px solid var(--border);margin:10px 0" />
-            <label class="field"><span>path（.snapshot.json 文件或目录）</span><input id="snap-path" placeholder="上一步导出返回的路径" /></label>
-            <div class="row">
-              <label class="row tight"><input id="snap-apply" type="checkbox" style="width:auto" /><span>apply（写回消息日志并复算）</span></label>
-              <button id="snap-import" class="small">导入快照</button>
-            </div>
-            <div id="snap-import-result" class="hint"></div>
-          </div>
-        </section>
-      </div>
+    <div class="explain">
+      <b>开团只关心「轮次与商品」</b>。其余配置（gateway / llm / display / members / 快照）不常改、也不属于流程，已移到独立的「设置」页。
     </div>
 
-    <div id="loading" class="empty">正在载入配置…</div>
+    <div class="section-title">开团入口<span class="line"></span></div>
+    <div class="nav-cards">
+      <a class="nav-card" href="round.html" id="sec-round">
+        <span class="step-badge">1</span>
+        <h2>轮次与商品</h2>
+        <p>新建 / 激活 / 校验轮次，编辑商品目录（种类：拼团 / 单领 / 整盒 / 特典）、变体 A/B/C 价格、别名与阶段时间窗。</p>
+        <em>round_id（稳定标识）· title（展示名）</em>
+      </a>
+      <a class="nav-card" href="settings.html">
+        <span class="step-badge">⚙</span>
+        <h2>系统设置</h2>
+        <p>gateway 接入、LLM、展示、成员缓存与 CN 具体名、消息日志、快照导出/导入。</p>
+        <em>非流程配置</em>
+      </a>
+    </div>
+
+    <div class="section-title">工作流概览<span class="line"></span></div>
+    <section class="panel">
+      <div class="panel-head">
+        <span>当前工作流</span>
+        <span class="spacer"></span>
+        <span class="hint mono">/api/workflow</span>
+      </div>
+      <div class="panel-body">
+        <div id="admin-summary" class="kv"></div>
+      </div>
+    </section>
   </div>
 </body>
 </html>

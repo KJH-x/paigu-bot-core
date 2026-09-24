@@ -31,15 +31,20 @@ pub fn replay_result_json(result: &ReplayResult) -> Value {
     })
 }
 
+/// 记录一次重放结果（按 `round_id` 归档，供 `/api/replay/diff` 与 activate replay 复用）。
+pub fn remember_replay(result: &ReplayResult) {
+    if let Ok(mut map) = last_replays().lock() {
+        map.insert(result.round_id.clone(), result.clone());
+    }
+}
+
 pub async fn do_replay(
     state: &ApiState,
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
     let cfg = state.cfg.get().await;
     let result = session::replay(state.messages.as_ref(), &cfg, overrides).await?;
-    if let Ok(mut map) = last_replays().lock() {
-        map.insert(result.round_id.clone(), result.clone());
-    }
+    remember_replay(&result);
     Ok(result)
 }
 

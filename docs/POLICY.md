@@ -20,8 +20,7 @@
 
 ## 2. 昵称清洗与身份
 
-> ⚠️ **已废弃（2026-09-24）**：本节 L30 称实现单一真源在 `src/gateway/onebot.rs` —— 实际已迁至 **`src/parser/normalize.rs`**；
-> 另新增**成员具体名（CN）覆盖层**（绑定 user_id，用于匹配与结算表人名，回退 `CN → 归一化昵称 → user_id`）。见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U4。
+> ✅ **已更新（2026-09-24，见 [INTERFACES.md](./INTERFACES.md) §8.7）**：昵称清洗**单一真源已迁至 `src/parser/normalize.rs`**（`clean_nickname`，D-05）；并新增**成员具体名（CN）覆盖层**（绑定 `user_id`，用于匹配与结算表/账单人名，回退 `CN → 归一化昵称 → user_id`）。见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U4。
 
 - **去括号备注**：昵称中首个 `（` 或 `(` 起的内容去掉（全/半角），如
   `用户A（备注）→ 用户A`、`用户B（备注）→ 用户B`、`用户C/别名（备注）→ 用户C/别名`。
@@ -30,7 +29,13 @@
 - **全角归一**：`：`→`:`、全角数字/字母→半角。
 - **user_id 优先**：身份以 QQ `user_id` 为准；昵称仅用于展示。昵称↔user_id 映射来自群成员缓存（见 §7）。
 
-> **实现单一真源**：昵称清洗（全角归一 + 去括号备注 + 代理识别）只在 `src/gateway/onebot.rs` 的 `clean_nickname` 实现；Pipeline 与校验层复用，不得另起一套。
+> **实现单一真源（2026-09-24 更新）**：昵称清洗（全角归一 + 去括号备注 + 代理识别）只在 **`src/parser/normalize.rs` 的 `clean_nickname`** 实现；Gateway/Pipeline/校验层复用，不得另起一套。
+
+**成员具体名（CN，U4）**：
+- CN = **净化后的群昵称**，**绑定 QQ（`user_id`）**；存储 `members.cn_overrides[{user_id, cn, aliases[]}]`（config 热载 + 乐观并发 409）。
+- **用途**：① 请求匹配；② **制作结算表格**（每人买了什么）时**自动使用 CN 作为人名**。
+- **回退顺序：`CN → 归一化昵称（identity） → user_id`**（`settings::resolve_cn`）。
+- 展示层 `/api/members` 每项附 `cn`（覆盖值，未配置为 `null`）与 `resolved`（回退结果）；`who_whats` 按成员缓存做 `nickname → CN` best-effort 覆盖。
 
 ## 3. 消息判定流水线（LLM-first + 规则兜底）
 
@@ -72,12 +77,14 @@ LLM 输出契约（严格 JSON）：
 
 ## 5. 排谷执行与数据
 
-> ⚠️ **口径补充（2026-09-24）**：新增**种类「整盒」**（进单领队列）；`fullbox`(包盒) 保留为**拼团策略**；**包尾进拼团并在结算强制成盒**（按**列序=盒序号**锁定 + **自动滑入**）。见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U8。
+> ✅ **已更新（2026-09-24，见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U6/U8）**：**种类**为 `拼团 / 单领 / 整盒 / 特典`。**整盒为独立种类**（默认进单领队列，可作独立单领条目）；`fullbox`(包盒) 保留为**拼团策略**；**包尾进拼团并在结算强制成盒**（按**列序=盒序号**锁定 + **自动滑入**）。
 
-- 变体感知：`base 商品 + variants`；`split`（拼团，按变体/盒槽）/`single`（单领）/`gift`。
-- 策略：`normal` / `tail`(包尾) / `fullbox`(包盒)。
+- **种类与 `class`**：`拼团`（有变体）/`特典`（有变体）⇒ `class=A`（阶段受限）；`单领`/`整盒`（无变体）⇒ `class=B`；`class` **自动推导**，显式 `class` 仅在合法时覆盖。
+- 变体感知：`base 商品 + variants`；`split`（拼团，按变体/盒槽）/`single`（单领）/`wholebox`（整盒，进单领队列）/`gift`（特典）。
+- 策略（`slot_policy`）：`normal` / `tail`(包尾) / `fullbox`(包盒)；`整盒` 由种类（非策略）表达。
+- **列 = 盒的序号**；包尾锁定列 = 其申报变体集中各变体普通认购的**最大列序 + 1**；结算时锁定列**强制成盒**，不冲突（不在申报变体集内）的前序未成盒普通认购**自动滑入**。
 - 幂等：同 `message_id` 不重复处理。
-- 事件溯源 + 重放：所有操作记录为不可变事件，最终状态由重放得到。
+- 事件溯源 + 重放：所有操作记录为不可变事件，最终状态由重放得到；first-match 失败澄清结果以 `ParseOverride` 事件持久化并被重放消费（见 §3 流水线 / REQUIREMENTS §3.7）。
 - 发布：排位快照 `current.json` + 回放 `steps/*.json` 发布到 R2（本地开发可写本地目录）。
 
 ## 6. 模拟器（仅用于重放/测试）
@@ -91,9 +98,10 @@ LLM 输出契约（严格 JSON）：
 
 - 群：`123456789`。
 - **每日 19:00** 尝试 `get_group_member_list` 拉取，缓存到 `data/members.json`（gitignored）。
-- 拉取失败或未接入 → 使用内置子集（见 [DESIGN.md](./DESIGN.md) §8，已按 §2 清洗）。
+- 读取顺序：**刷新缓存 → `data/members.seed.json` → `data/members.example.json` → 空**（`/api/members` 的 `source` 为 `cache|seed|example|empty`；见 [DESIGN.md](./DESIGN.md) §8）。
 - **只读**：只拉取，不发送任何消息。
-- 提供手动“拉取成员”按钮（admin 面板）。
+- 提供手动“拉取成员”按钮（admin / settings 面板）。
+- **成员具体名（CN，U4）**：`members.cn_overrides[{user_id, cn, aliases[]}]` 绑定 `user_id`；用于**匹配**与**结算表/账单人名**，回退 **CN → 归一化昵称 → user_id**；在 `/settings` 面板编辑（config 热载 + 乐观并发 409）。
 
 ## 8. 展示（成员可见）
 
@@ -106,4 +114,6 @@ LLM 输出契约（严格 JSON）：
 
 - 配置文件：`config/app.json`（gitignored），带 `revision`。
 - 改动后**热载**（`notify` 文件监听；无依赖时退化为 mtime 轮询）。
-- **prompt 即配置**：LLM 提示词、商品目录、预存用户、时段、白名单、展示参数都在配置里，可在 admin 面板编辑并保存（乐观并发：`revision` 不匹配 → 409 + 冲突提示）。
+- **prompt 即配置**：LLM 提示词、预存用户、时段、白名单、展示参数都在配置里，可编辑并保存（乐观并发：`revision` 不匹配 → 409 + 冲突提示）。
+- **轮次库（U3，2026-09-24）**：`config/app.json` 仅保留 **`active_round_id`** 指向当前轮次；每个轮次一个文件 **`data/rounds/<round_id>.json`**（内容 = `RoundSettings`：round_id/title/group_id/priority_users/priority_window/phases/items）。`config/app.json` 的 `round` 仍是**运行时激活轮次**：启动/热载时若 `active_round_id` 指向的文件存在则据其覆盖 `round`，否则把当前 `round` 落盘并把 `active_round_id` 设为它（`PAIGU_ROUNDS_DIR` 可覆盖目录）。
+- **切换与重放解耦**：`activate` 模式 `continue`（默认；无既有状态时等价 `fresh`）/ `fresh` / `replay`；重放是独立自动计算功能，不与切换绑定。轮次/商品等流程内配置在 `/round` 页编辑；其余不常改配置在 `/settings` 页（不进 Stepper）。

@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::api::ApiState;
+use crate::settings::{resolve_cn, AppConfig};
 
 const SEED_PATH: &str = "data/members.seed.json";
 const EXAMPLE_PATH: &str = "data/members.example.json";
@@ -49,7 +51,69 @@ fn members_from_disk(cache_path: &Path) -> (Vec<Value>, &'static str) {
 pub async fn get_members(state: &ApiState) -> Value {
     let cfg = state.cfg.get().await;
     let (members, source) = members_from_disk(Path::new(&cfg.members.cache_path));
-    json!({ "members": members, "source": source })
+    let decorated: Vec<Value> = members.iter().map(|m| decorate_member(&cfg, m)).collect();
+    json!({ "members": decorated, "source": source })
+}
+
+/// 成员项附加 `cn`（CN 覆盖，未配置为 null）与 `resolved`（U4 展示名，CN→归一化昵称→user_id）。
+fn decorate_member(cfg: &AppConfig, member: &Value) -> Value {
+    let user_id = member.get("user_id").and_then(Value::as_str).unwrap_or("");
+    let nickname = member.get("nickname").and_then(Value::as_str).unwrap_or("");
+    let cn = cfg
+        .members
+        .cn_overrides
+        .iter()
+        .find(|o| o.user_id == user_id)
+        .map(|o| o.cn.clone());
+    let resolved = resolve_cn(cfg, user_id, nickname).unwrap_or_default();
+    let mut out = member.clone();
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("cn".to_string(), json!(cn));
+        obj.insert("resolved".to_string(), json!(resolved));
+    }
+    out
+}
+
+/// 当前配置下缓存的成员名单（供展示层做 `nickname → CN` 映射）。
+pub fn cached_members(cfg: &AppConfig) -> Vec<Value> {
+    members_from_disk(Path::new(&cfg.members.cache_path)).0
+}
+
+/// 展示层人名映射：`nickname / CN / 别名 → CN`（U4，best-effort）。
+///
+/// `who_whats` 由 Pipeline 按 display 分组、不含 user_id，故此处以成员缓存
+/// 的 `nickname ↔ user_id` 反查；精确绑定仍需 Pipeline 携带 user_id（见汇报）。
+pub fn cn_display_map(cfg: &AppConfig, members: &[Value]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for m in members {
+        let user_id = m.get("user_id").and_then(Value::as_str).unwrap_or("");
+        if user_id.is_empty() {
+            continue;
+        }
+        let Some(over) = cfg
+            .members
+            .cn_overrides
+            .iter()
+            .find(|o| o.user_id == user_id)
+        else {
+            continue;
+        };
+        let cn = over.cn.trim();
+        if cn.is_empty() {
+            continue;
+        }
+        let nickname = m.get("nickname").and_then(Value::as_str).unwrap_or("");
+        if !nickname.trim().is_empty() {
+            map.insert(nickname.to_string(), cn.to_string());
+        }
+        map.insert(over.cn.clone(), cn.to_string());
+        for alias in &over.aliases {
+            if !alias.trim().is_empty() {
+                map.insert(alias.clone(), cn.to_string());
+            }
+        }
+    }
+    map
 }
 
 /// 拉取群成员并写入缓存（供路由与每日 19:00 调度复用）。只读动作，绝不发消息。
@@ -117,6 +181,29 @@ mod tests {
         assert_eq!(members.len(), 1);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn decorate_member_adds_cn_and_resolved() {
+        use crate::settings::{default_config, CnOverride};
+        let mut cfg = default_config();
+        cfg.members.cn_overrides = vec![CnOverride {
+            user_id: "u1".to_string(),
+            cn: "甲子".to_string(),
+            aliases: vec!["小甲".to_string()],
+        }];
+
+        let with_cn = decorate_member(&cfg, &json!({ "user_id": "u1", "nickname": "老甲" }));
+        assert_eq!(with_cn["cn"], "甲子");
+        assert_eq!(with_cn["resolved"], "甲子");
+
+        let no_cn = decorate_member(&cfg, &json!({ "user_id": null, "nickname": "成员01" }));
+        assert_eq!(no_cn["cn"], Value::Null);
+        assert_eq!(no_cn["resolved"], "成员01");
+
+        let cn_map = cn_display_map(&cfg, &[json!({ "user_id": "u1", "nickname": "老甲" })]);
+        assert_eq!(cn_map.get("老甲").map(String::as_str), Some("甲子"));
+        assert_eq!(cn_map.get("小甲").map(String::as_str), Some("甲子"));
     }
 
     #[test]

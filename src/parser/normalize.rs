@@ -53,25 +53,40 @@ pub fn clean_nickname(raw: &str) -> (String, String) {
 pub fn normalize_claim_item(item: &ParsedClaimItem) -> ParsedClaimItem {
     let mut normalized = item.clone();
 
-    normalized.claim_type = normalized.claim_type.map(|ct| {
-        let ct_lower = ct.to_lowercase();
-        if ct_lower.contains("single") || ct_lower.contains("单领") || ct_lower.contains("单") {
-            "Single".to_string()
-        } else if ct_lower.contains("gift") || ct_lower.contains("赠") || ct_lower.contains("特典")
-        {
-            "GiftClaim".to_string()
-        } else {
-            "Split".to_string()
-        }
-    });
+    // §U6/U8 种类：`整盒` 是独立种类（进单领队列，按盒计数），不是 `fullbox`(包盒) 拼团策略。
+    let raw_policy = normalized.slot_policy.clone().unwrap_or_default();
+    let is_whole_box = is_whole_box_token(&raw_policy);
+
+    normalized.claim_type = if is_whole_box {
+        Some("Single".to_string())
+    } else {
+        normalized.claim_type.map(|ct| {
+            let ct_lower = ct.to_lowercase();
+            if ct_lower.contains("single") || ct_lower.contains("单领") || ct_lower.contains("单") {
+                "Single".to_string()
+            } else if ct_lower.contains("gift")
+                || ct_lower.contains("赠")
+                || ct_lower.contains("特典")
+            {
+                "GiftClaim".to_string()
+            } else {
+                "Split".to_string()
+            }
+        })
+    };
 
     normalized.slot_policy = normalized.slot_policy.map(|sp| {
         let sp_lower = sp.to_lowercase();
-        if sp_lower.contains("fullbox")
+        if is_whole_box_token(&sp) {
+            "Normal".to_string()
+        } else if sp_lower.contains("fullbox")
             || sp_lower.contains("full_box")
             || sp_lower.contains("包盒")
-            || sp_lower.contains("整盒")
             || sp_lower.contains("全包")
+            || sp_lower.contains("包一盒")
+            || sp_lower.contains("一盒全包")
+            || sp_lower.contains("包整盒")
+            || sp_lower.contains("整一盒")
         {
             "FullBox".to_string()
         } else if sp_lower.contains("tail")
@@ -89,6 +104,15 @@ pub fn normalize_claim_item(item: &ParsedClaimItem) -> ParsedClaimItem {
     });
 
     normalized
+}
+
+/// `整盒` 标记（含 RuleParser 的 `WholeBox`）；排除 `包整盒`/`包盒` 等 `fullbox` 说法。
+fn is_whole_box_token(token: &str) -> bool {
+    let lower = token.to_lowercase();
+    if lower.contains("full") || token.contains('包') {
+        return false;
+    }
+    lower.contains("wholebox") || lower.contains("whole_box") || token.contains("整盒")
 }
 
 #[cfg(test)]
@@ -114,5 +138,53 @@ mod tests {
     #[test]
     fn clean_nickname_normalizes_fullwidth() {
         assert_eq!(clean_nickname("名：015").1, "名:015");
+    }
+
+    fn claim(slot_policy: &str, claim_type: Option<&str>) -> ParsedClaimItem {
+        ParsedClaimItem {
+            name: "商品".to_string(),
+            category_hint: None,
+            quantity: 1,
+            claim_type: claim_type.map(str::to_string),
+            is_proxy_card: None,
+            slot_policy: Some(slot_policy.to_string()),
+            notes: None,
+            resolved_item_id: None,
+            resolved_variant_id: None,
+            resolved_round_id: None,
+        }
+    }
+
+    #[test]
+    fn whole_box_maps_to_single_queue() {
+        let n = normalize_claim_item(&claim("整盒", Some("Split")));
+        assert_eq!(n.claim_type.as_deref(), Some("Single"));
+        assert_eq!(n.slot_policy.as_deref(), Some("Normal"));
+
+        let n2 = normalize_claim_item(&claim("WholeBox", Some("Split")));
+        assert_eq!(n2.claim_type.as_deref(), Some("Single"));
+        assert_eq!(n2.slot_policy.as_deref(), Some("Normal"));
+    }
+
+    #[test]
+    fn full_box_remains_split_strategy() {
+        let n = normalize_claim_item(&claim("包盒", Some("Split")));
+        assert_eq!(n.claim_type.as_deref(), Some("Split"));
+        assert_eq!(n.slot_policy.as_deref(), Some("FullBox"));
+
+        let n2 = normalize_claim_item(&claim("fullbox", Some("Split")));
+        assert_eq!(n2.claim_type.as_deref(), Some("Split"));
+        assert_eq!(n2.slot_policy.as_deref(), Some("FullBox"));
+
+        let n3 = normalize_claim_item(&claim("包整盒", Some("Split")));
+        assert_eq!(n3.claim_type.as_deref(), Some("Split"));
+        assert_eq!(n3.slot_policy.as_deref(), Some("FullBox"));
+    }
+
+    #[test]
+    fn tail_remains_split_tail_locked() {
+        let n = normalize_claim_item(&claim("包尾", Some("Split")));
+        assert_eq!(n.claim_type.as_deref(), Some("Split"));
+        assert_eq!(n.slot_policy.as_deref(), Some("TailLocked"));
     }
 }

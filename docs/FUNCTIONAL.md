@@ -119,7 +119,8 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 | `round.items` | Vec<ItemConfig> | `[]` | 商品目录 | 是（`src/settings.rs:113-152`） |
 | `round.items[].item_id` | String | 必填 | 商品 ID | 是 |
 | `round.items[].name` | String | 必填 | 商品名 | 是 |
-| `round.items[].kind` | String | 必填 | `split`/`single`/`gift`/`shipping`/`adjustment`（其它按 split） | 是（`src/settings.rs:123-129`） |
+| `round.items[].kind` | String | 必填 | **种类**：`拼团`/`单领`/`整盒`/`特典`（兼容 `group`/`single`/`box`/`gift` 与旧 `split`/`single`/`gift`；其余按拼团） | 是（`src/settings/mod.rs`，2026-09-24 更新） |
+| `round.items[].class` | Option<String> | `None` | `A`/`B`；缺省**自动推导**（有变体⇒A，无变体⇒B），显式合法值可覆盖 | 否 |
 | `round.items[].aliases` | Vec<String> | `[]` | 商品别名 | 是 |
 | `round.items[].variants` | Vec<VariantConfig> | `[]` | 变体 | 是 |
 | `…variants[].variant_id` | String | 必填 | 变体 ID | 是 |
@@ -133,7 +134,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 | `members.cache_path` | String | 必填 | 成员缓存文件 | 是 |
 | `members.daily_pull_at` | String | `"19:00"` | 每日拉取时刻 | 是（调度每轮读，`src/main.rs:146`） |
 
-> 注意：`round.items[].box_size`、`max_quantity`、`unit_price` 等 `Item` 字段**不在配置中**，由 `to_items()` 置零/`None`（`src/settings.rs:130-137`）。因此 FullBox/包尾在 `capacity=null` 时使用消息数量作为盒规（`src/engine/allocation_engine.rs:203,241-244`），单领上限恒为无限（`max_quantity=None`，`src/engine/allocation_engine.rs:417-436`）。
+> 注意（**2026-09-24 更新**，见 [DESIGN.md](./DESIGN.md) §4、[INTERFACES.md](./INTERFACES.md) §8.7）：商品级 `unit_price_cents` 为**原价**（无调价）；**仅变体**有 `unit_price_cents`(A) + `adjust_cents`(B)（最终价 **C=A+B**）。`box_size` 与 `variants[].pieces` 已从**商品模型口径**移除（Rust 端暂留兼容字段、`to_items()` 仍透传 `box_size`，清理见 [TODOS.md](./TODOS.md) W-G2-04）；`max_quantity` 仅单领使用。⚠️ `adjust_cents` 目前**仅前端契约**（`web/round.js`），Rust `VariantConfig` 未声明、不落库（W-G2-01）。
 
 ### 4.2 环境变量
 

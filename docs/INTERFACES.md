@@ -1,4 +1,4 @@
-# 排谷系统 · 模块接口与数据契约（INTERFACES）
+﻿# 排谷系统 · 模块接口与数据契约（INTERFACES）
 
 > 对应 [REQUIREMENTS.md](./REQUIREMENTS.md) §5（C3）与 [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) A0/T7。
 > 事实来源为源码阅读，引用 `文件:行号`；未实现或不确定处显式标注「待 Tn / 待确认」。本文件为 T7 独占产物，不改动任何源码。
@@ -332,10 +332,12 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 ### 8.2 商品目录（src/settings.rs）
 
+> ✅ **2026-09-24 更新**：字段已改为现行口径（`kind`/`class`/变体 A/B），完整清单见 [§8.7](#87-2026-09-24-新增变更接口u1u9)。
+
 | 字段/接口 | 说明 |
 |---|---|
-| `ItemConfig.unit_price_cents / box_size / max_quantity` | 标价（分）、每盒件数、单领上限（添加商品时管理员手工确认） |
-| `VariantConfig.unit_price_cents / pieces` | 变体标价、件数（精一/精二=2） |
+| `ItemConfig.{unit_price_cents, kind, class, aliases, max_quantity, variants}` | 原价（分）、**种类**（`拼团/单领/整盒/特典`）、类别（**自动推导**、可显式覆盖）、别名、单领上限、变体。⚠️ `box_size` 已从口径移除（Rust 端暂留兼容字段，见 W-G2-04） |
+| `VariantConfig.{unit_price_cents, adjust_cents, capacity, aliases}` | 变体原价 A、调价 B（最终价 **C=A+B**）、容量、别名。⚠️ `pieces` 已从口径移除；`adjust_cents` **仅前端契约**（Rust 端未声明，见 W-G2-01） |
 | `RoundSettings::to_unit_prices()` | 商品目录 -> 标价表（结算/planner 取价来源） |
 | `GatewayConfig.admin_commands_enabled` | 管理员命令落地执行开关（D-1） |
 
@@ -371,5 +373,46 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/workflow` | **只读**快照：`round_id/title/group_id/phase/phase_label/phases_configured/priority_window/items/settlement_configured/members_cached/reply_enabled/admin_commands_enabled/revision/gateway/locked/version/events/messages/claims/eligibilities/updated_at` |
-| `RoundPhase::{as_str,label}` | 稳定标识与中文标签（`src/round/mod.rs`），供 Stepper 使用 |
+| `GET /api/workflow` | **只读**快照：`round_id/title/group_id/phase/phase_label/phases/phase_config...`（`phases` 见 §8.7）/`phases_configured/priority_window/items/settlement_configured/members_cached/reply_enabled/admin_commands_enabled/revision/gateway/locked/version/events/messages/claims/eligibilities/updated_at` |
+| `RoundPhase::{as_str,label}` | 稳定标识与中文标签（`src/round/mod.rs`），供 Stepper 使用；**Stepper 高亮 = 当前模块**（非当前阶段），阶段进度用弱标记 |
+
+---
+
+### 8.7 2026-09-24 新增/变更接口（U1–U9）
+
+> 均为本轮落地；源码 `src/api/rounds_routes.rs`、`src/services/rounds.rs`、`src/settings/rounds.rs`、`src/services/workflow.rs`、`src/services/members.rs`、`src/services/display.rs`、`src/domain/event.rs`。**标注「前端契约 / 后端未实现」者为已知差距，见 [TODOS.md](./TODOS.md)**。
+
+**轮次库（U3）**
+
+| 接口/字段 | 说明 |
+|---|---|
+| `GET /api/rounds` | `{rounds:[{round_id,title,group_id,items,variants,active,updated_at}], active_round_id}`；按 mtime 降序 |
+| `POST /api/rounds` | body `{round_id, title?, copy_from?}`；`round_id` 非空、≤64、仅字母/数字/中文/`_`/`-`；`copy_from` 存在则复制其商品/阶段 |
+| `POST /api/rounds/:id/activate` | body `{mode?:"continue"\|"fresh"\|"replay"}`（**默认 continue**）；`continue` 仅切换激活（无既有状态时等价 `fresh`），`fresh` 重置流水线，`replay` 重置并用该轮消息重放；**切换与重放解耦**。返回 `{ok,active_round_id,mode,reset,replayed,version}` |
+| `POST /api/rounds/:id/check` | `{ok,issues:[{level,code,message,where}]}`；含 `duplicate_item_id`/`alias_conflict`/`name_conflict`/`category_variant_mismatch`/`class_derived_mismatch`（warn）等 |
+| `DELETE /api/rounds/:id` | `{ok,removed}`；激活中的轮次拒绝 |
+| `data/rounds/<round_id>.json` | 轮次文件（内容 = `RoundSettings`）；`PAIGU_ROUNDS_DIR` 可覆盖目录 |
+| `AppConfig.active_round_id` | `config/app.json` 当前激活轮次 id；启动/热载据此覆盖 `round`（`settings::rounds::resolve_active`） |
+| `GET /api/workflow.phases` | 数组 `[{phase,label,start_ms,end_ms}]`；仅供前端 Stepper **弱阶段进度**使用 |
+
+**商品目录 / 成员 CN**
+
+| 接口/字段 | 说明 |
+|---|---|
+| `ItemCategory`（`settings`） | `Group/Single/Box/Gift`；`parse` 兼容中英与旧值；`requires_variants()` = 拼团/特典为真 |
+| `ItemConfig::{category,has_variants,derived_class}` | 种类解析、是否有变体、`class` 自动推导（有变体⇒A、无变体⇒B） |
+| `RoundSettings::item_class` | 显式合法 `class` 可覆盖推导；未配置商品按 `B` |
+| `MembersSettings.cn_overrides: Vec<CnOverride>` | `CnOverride{user_id, cn, aliases[]}`（U4；注意字段名是 `MembersSettings`） |
+| `settings::resolve_cn` | 展示人名回退 **CN → 归一化昵称（identity） → user_id** |
+| `GET /api/members` | 每项装饰 `cn`（覆盖值或 `null`）与 `resolved`（`resolve_cn` 结果） |
+| `ParseOverrideEvent`（`domain/event.rs`） | `{event_id,round_id,target_raw_message_id,corrected_parsed_message,admin_user_id,reason,occurred_at}`；事件类型 `parse_override`，重放消费（U7） |
+| `POST /api/items/suggest-aliases` | body `{items:[{item_id,name,aliases}], mode:"aliases"}` → `{suggestions:[{item_id,verdict?,aliases?}]}`。⚠️ 后端已实现（`src/api/item_routes.rs`）：`web/round.js` 已接入并对 404/405/501 兜底为「未就绪」；落库接线见 [TODOS.md](./TODOS.md) W-G2-02 |
+| `VariantConfig.adjust_cents` | 变体调价 B（最终价 C = A+B）。⚠️ **前端契约**（`web/round.js` 已按 A±B=C 三格联动）；**Rust `VariantConfig` 尚未声明该字段**（当前忽略、不落库）——见 [TODOS.md](./TODOS.md) W-G2-01 |
+
+**页面（静态文件）**
+
+| 路由 | 说明 |
+|---|---|
+| `/round.html` | 轮次与商品管理页（`web/round.html` + `round.js`）：轮次管理、商品目录编辑器（4 种类、A±B=C、别名本地词切+LLM 建议+锁定+冲突校验、末尾虚线卡/缝隙「+」插入、单领多行、整盒独立种类）、消息日志折叠面板 |
+| `/settings.html` | 其余配置页（`web/settings.html` + `settings.js`）：gateway/llm/display/members(CN)/白名单等；**不进 Stepper** |
+| — | ⚠️ **无 `/round`、`/settings` 短路由**；两页经静态文件服务（`/round.html`、`/settings.html`）访问。若要短路由需在 `src/api/mod.rs` 增补 |

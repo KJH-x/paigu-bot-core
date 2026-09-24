@@ -66,7 +66,8 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 | `src/snapshot_bundle/` | 单一 JSON 快照导出/导入 |
 | `src/messages/` | 共享消息日志 `MessageLog`（JSONL + 原始事件） |
 | `src/tests/` | Rust 重放辅助测试（`#[cfg(test)] mod tests;`） |
-| `web/` | 静态前端：display / admin / sim / replay / settlement + `common.js` |
+| `web/` | 静态前端：display / admin / sim / replay / settlement / **round（轮次与商品）/ settings（其余配置）** + `common.js`、`shell.js` |
+| `data/rounds/` | **轮次库**（gitignored 运行时数据）：`<round_id>.json` = `RoundSettings`；`config/app.json` 的 `active_round_id` 指向激活轮次 |
 | `tests/e2e/` | Node `.mjs` Playwright 端到端测试 |
 | `scripts/` | 模拟/录制脚本 + `privacy-scan.mjs` |
 | `config.example.json` | 配置模板（首次运行据此生成 `config/app.json`） |
@@ -87,6 +88,10 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
   2. **< 120 行 → 内联** `#[cfg(test)] mod tests { … }`（同文件）。
   - 已目录化示例：`llm/pipeline/`、`planner/`、`settlement/`、`messages/`、`api/`、`round/`、`snapshot_bundle/`、`settings/`、`engine/{allocation_engine,settlement_engine}/`、`gateway/{onebot,ws_server}/`、`replay/session/`。
   - 独立测试入口：Node/Playwright `tests/e2e/sim.mjs`；Python 夹具 `simulation-corpus/**`。
+- **业务要点（2026-09-24，SPEC-UPDATE U1–U9）**：
+  - **轮次库**：`config/app.json` 只留 `active_round_id`；轮次数据 `data/rounds/<round_id>.json`；`GET/POST /api/rounds`、`POST /api/rounds/:id/activate`（`continue` 默认 / `fresh` / `replay`，**切换与重放解耦**）、`POST /api/rounds/:id/check`、`DELETE /api/rounds/:id`。开团=`/round`，设置=`/settings`（不进 Stepper）。
+  - **成员 CN**：`members.cn_overrides[{user_id,cn,aliases}]`；人名回退 **CN → 归一化昵称 → user_id**；用于匹配与**结算表/账单人名**；`/api/members` 附 `cn/resolved`。
+  - **调价在目录（仅变体）**：商品级只设原价；**仅变体** `原价 A ± 调价 B = 最终价 C`；结算页**不录入**调价、仅展示调后价；调价**不参与**折扣/减均/特典档位。⚠️ 现存差距：`VariantConfig.adjust_cents` 仅前端契约、后端未落库（见 [docs/TODOS.md](./docs/TODOS.md) W-G2-01）。
 - **禁止事项（红线）**：
   - **绝不向真实群发消息**：`reply_enabled=false` 默认关闭；`send_*` 仅当开启且 `action ∈ allowed_actions` 时放行，否则强制拦截并告警。
   - 真实昵称 / 群号 / 配置 / `data/**` / `config/**` / `*.xlsx` **不得入库**；改动只提交占位名（如 `成员01`、`123456789`、`0.0.0.0:9801`）。
@@ -106,7 +111,7 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 ## 6. 文档索引
 
 - **总入口**：[docs/README.md](./docs/README.md)（LLM 接手工作入口，含必读顺序与红线）。
-- 🔴 **最新口径**：[docs/SPEC-UPDATE-2026-09-24.md](./docs/SPEC-UPDATE-2026-09-24.md)（用户 2026-09-24 追加；冲突处以它为准）。
+- ✅ **SPEC-UPDATE-2026-09-24 已实现（正文已更新）**：[docs/SPEC-UPDATE-2026-09-24.md](./docs/SPEC-UPDATE-2026-09-24.md)（U1–U9 现为现行口径；未落地差距见 [docs/TODOS.md](./docs/TODOS.md)「本轮遗留（Wave G2）」）。
 - 现行：[POLICY.md](./docs/POLICY.md) / [DESIGN.md](./docs/DESIGN.md) / [REQUIREMENTS.md](./docs/REQUIREMENTS.md) / [INTERFACES.md](./docs/INTERFACES.md) / [FUNCTIONAL.md](./docs/FUNCTIONAL.md) / [MODULES.md](./docs/MODULES.md) / [TASKS.md](./docs/TASKS.md) / [AGENT-RULES.md](./docs/AGENT-RULES.md) / [GAP-ANALYSIS.md](./docs/GAP-ANALYSIS.md) / [DECISIONS.md](./docs/DECISIONS.md) / [TODOS.md](./docs/TODOS.md)。
 - 归档：`docs/archive/README-legacy.md`（旧 README）。
 
@@ -126,7 +131,7 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 | D-08 | ✅ | 删除 `MessageStore` trait；`MessageLog` 为唯一存储 API |
 | D-09 | ✅ | 新增 `src/services/**`；handler 薄层化（HTTP 契约不变） |
 
-> 仍开放的产品/工程项见 [docs/TODOS.md](./docs/TODOS.md)（T-13 阶段分类 UI、T-14 管理员改单目标语法、T-19 拉取告警、T-24 `simulate` 迁移新栈、T-27 远程展示等）。
+> 仍开放的产品/工程项见 [docs/TODOS.md](./docs/TODOS.md)（T-14 管理员改单目标语法、T-19 拉取告警、T-24 `simulate` 迁移新栈、T-27 远程展示，以及 Wave G2 遗留 W-G2-05…07：`adjust_cents` 落库 / `suggest-aliases` 后端 / `box_size`·`pieces` 清理 / 重放 CN / `ColumnLocked` 语义等）。
 
 ## 8. 常驻运行 / 部署（`deploy/`）
 

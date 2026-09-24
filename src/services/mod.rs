@@ -3,10 +3,12 @@
 //! 路由只负责解析请求、调用本层、把结果映射为 `Json<Value>` / `ApiError`；
 //! 对外 HTTP 契约（路径、方法、请求体字段、响应体字段、状态码）保持不变。
 
+pub mod aliases;
 pub mod display;
 pub mod members;
 pub mod messages;
 pub mod replay;
+pub mod rounds;
 pub mod settlement;
 pub mod snapshot;
 

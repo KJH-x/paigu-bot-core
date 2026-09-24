@@ -110,6 +110,66 @@ fn settle_delegates_to_evaluate_and_maps_bills() {
 }
 
 #[test]
+fn settle_resolves_and_reports_forced_tail_boxes() {
+    use crate::domain::claim::{ClaimType, EffectiveClaimLine, SlotPolicy};
+    use crate::domain::ids::ClaimId;
+    use crate::domain::item::ItemVariant;
+    use crate::engine::allocation_engine::AllocationEngine;
+
+    let mut it = item("box", ItemKind::Split, 1000);
+    it.variants = vec![
+        ItemVariant {
+            variant_id: "A".to_string(),
+            name: "A".to_string(),
+            unit_price: MoneyCents(1000),
+            capacity: None,
+            aliases: vec![],
+        },
+        ItemVariant {
+            variant_id: "B".to_string(),
+            name: "B".to_string(),
+            unit_price: MoneyCents(1000),
+            capacity: None,
+            aliases: vec![],
+        },
+    ];
+    let mk = |user: &str, variant: &str, policy: SlotPolicy, seq: i64| EffectiveClaimLine {
+        claim_id: ClaimId(format!("c-{user}-{seq}")),
+        line_index: 0,
+        user_id: UserId(user.to_string()),
+        item_id: ItemId("box".to_string()),
+        variant_id: Some(variant.to_string()),
+        quantity: 1,
+        claim_type: ClaimType::Split,
+        slot_policy: policy,
+        effective_at: chrono::DateTime::from_timestamp_millis(seq).unwrap(),
+        sequence: seq,
+        priority_level: 0,
+    };
+    let lines = vec![
+        mk("a1", "A", SlotPolicy::Normal, 1),
+        mk("b1", "B", SlotPolicy::Normal, 2),
+        mk("tail", "B", SlotPolicy::TailLocked, 3),
+    ];
+
+    let allocation = AllocationEngine::new()
+        .allocate(&[it.clone()], &lines, &[])
+        .unwrap();
+    let snap = engine().settle(&SettlementInput {
+        allocation,
+        items: vec![it],
+        discount_rules: vec![],
+    });
+    assert!(
+        snap.warnings
+            .iter()
+            .any(|w| w.message.contains("包尾强制成盒")),
+        "warnings={:?}",
+        snap.warnings
+    );
+}
+
+#[test]
 fn settle_warns_when_legacy_discount_rules_present() {
     let input = SettlementInput {
         allocation: allocation(),

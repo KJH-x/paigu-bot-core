@@ -13,6 +13,8 @@
   </script>
   <script defer src="./common.js"></script>
   <script defer src="shell.js"></script>
+  <script defer src="./manage.js"></script>
+  <script defer src="./msglog.js"></script>
   <script defer src="./display.js"></script>
 </head>
 <body data-page="display">
@@ -129,6 +131,49 @@
         </section>
       </div>
     </div>
+
+    <div class="section-title">消息日志<span class="line"></span></div>
+    <section class="panel fold-panel collapsed" id="sec-msglog">
+      <div class="panel-head">
+        <button type="button" class="collapse-btn" data-collapse aria-expanded="false" title="展开/折叠">消息日志编辑器 <span class="fold-chev">▾</span></button>
+        <span class="spacer"></span>
+        <span id="pf-msg-info" class="hint"></span>
+        <button id="pf-msg-refresh" class="small">刷新消息</button>
+      </div>
+      <div class="panel-body">
+        <div class="hint">编辑文本 / 时间 / 状态后点「保存」调用 PUT /api/messages/:seq（带 revision，改后触发重算）；「删除」调用 DELETE /api/messages/:seq。</div>
+        <div id="pf-msg-empty" class="empty">尚未加载消息</div>
+        <div class="table-wrap" style="max-height:46vh;overflow:auto;margin-top:8px">
+          <table class="grid">
+            <thead><tr><th>seq</th><th>text</th><th>timestamp（本地）</th><th>status</th><th>操作</th></tr></thead>
+            <tbody id="pf-msg-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </div>
+
+  <script>
+    (function () {
+      function start() {
+        if (!window.PAIGU_MSGLOG) return;
+        var P = window.PAIGU;
+        var msglog = window.PAIGU_MSGLOG.create({
+          tbody: 'pf-msg-body', empty: 'pf-msg-empty', info: 'pf-msg-info', refresh: 'pf-msg-refresh',
+          getRevision: function () { return null; },
+          onBanner: function (m, bad) {
+            var b = document.getElementById('banner');
+            if (!b) return;
+            if (!m) { b.className = 'banner'; b.textContent = ''; return; }
+            b.textContent = m; b.className = 'banner show' + (bad ? ' bad' : '');
+          },
+          onToast: function (t, k) { P.toast(t, k); }
+        });
+        msglog.load();
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+      else start();
+    })();
+  </script>
 </body>
 </html>
