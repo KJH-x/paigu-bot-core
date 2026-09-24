@@ -1,4 +1,4 @@
-# AGENTS.md — paigu-bot-core 仓库指南
+﻿# AGENTS.md — paigu-bot-core 仓库指南
 
 > 本文件是**仓库级 agent 入口**（含构建/测试/约定/红线）。文档总入口见 [docs/README.md](./docs/README.md)。
 
@@ -106,6 +106,7 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 ## 6. 文档索引
 
 - **总入口**：[docs/README.md](./docs/README.md)（LLM 接手工作入口，含必读顺序与红线）。
+- 🔴 **最新口径**：[docs/SPEC-UPDATE-2026-09-24.md](./docs/SPEC-UPDATE-2026-09-24.md)（用户 2026-09-24 追加；冲突处以它为准）。
 - 现行：[POLICY.md](./docs/POLICY.md) / [DESIGN.md](./docs/DESIGN.md) / [REQUIREMENTS.md](./docs/REQUIREMENTS.md) / [INTERFACES.md](./docs/INTERFACES.md) / [FUNCTIONAL.md](./docs/FUNCTIONAL.md) / [MODULES.md](./docs/MODULES.md) / [TASKS.md](./docs/TASKS.md) / [AGENT-RULES.md](./docs/AGENT-RULES.md) / [GAP-ANALYSIS.md](./docs/GAP-ANALYSIS.md) / [DECISIONS.md](./docs/DECISIONS.md) / [TODOS.md](./docs/TODOS.md)。
 - 归档：`docs/archive/README-legacy.md`（旧 README）。
 

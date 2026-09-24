@@ -88,6 +88,8 @@
 
 ## 4. 商品目录（`round.items`，种子来自 `simulation-corpus/real-chat/月行水上`）
 
+> ⚠️ **已废弃（2026-09-24）**：本节示例缺 `class`（现**自动推导**）、**调价**（`adjust_cents`）；且 **`box_size` 与 `variants[].pieces` 已移除**；**种类**为 `拼团/单领/整盒/特典`。见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U6。
+
 ```jsonc
 { "item_id":"pass_sp", "name":"通行认证SP-月行水上", "kind":"split",
   "aliases":["通行证","通行认证SP","通行认证"],
@@ -101,6 +103,8 @@
 另含：`hr_resume`(人事部简历SP-月行水上)、`fashion`(风尚速递SP-月行水上)、`gift_card`(特典卡组-校园凭证，变体含 `整套`，别名 `一套`)。
 
 ## 5. HTTP API（`127.0.0.1:21081`）
+
+> ⚠️ **已废弃（2026-09-24）**：本表不全。现行接口见 [INTERFACES.md](./INTERFACES.md) §8，另新增 `/api/workflow`、`/api/rounds*`、`/api/items/suggest-aliases`、`/api/messages` CRUD、`/api/settlement/*`、`/api/replay`、`/api/snapshot/*`、`/api/events`。
 
 | Method | Path | 说明 |
 |---|---|---|
