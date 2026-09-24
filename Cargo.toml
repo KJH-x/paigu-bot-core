@@ -20,3 +20,7 @@ tokio-tungstenite = "0.26"
 futures-util = "0.3"
 notify = "6"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
+
+[profile.release]
+lto = true
+codegen-units = 1

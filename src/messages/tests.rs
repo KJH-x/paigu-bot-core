@@ -119,7 +119,7 @@ async fn raw_events_round_trip() {
     let ev = serde_json::json!({ "post_type": "message", "user_id": 10001 });
     log.append_raw_event("r5", &ev).await.unwrap();
 
-    let events = log.read_raw_events("r5").await.unwrap();
+    let events = log.read_raw_events("r5", 0).await.unwrap();
     assert_eq!(events, vec![ev]);
 }
 

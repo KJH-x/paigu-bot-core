@@ -4,6 +4,10 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// 以脚本位置定位仓库根（不依赖 CWD）
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const SELF = "scripts/privacy-scan.mjs";
 const PLACEHOLDER_NICK = /^成员\d{2}$/;
@@ -38,7 +42,7 @@ const IP_PATTERNS = [
 
 function gitLsFiles() {
   const out = execFileSync("git", ["-c", "core.quotepath=false", "ls-files"], {
-    cwd: process.cwd(),
+    cwd: REPO_ROOT,
     encoding: "utf8",
   });
   return out
@@ -48,7 +52,7 @@ function gitLsFiles() {
 }
 
 function readText(rel) {
-  const abs = path.join(process.cwd(), rel);
+  const abs = path.join(REPO_ROOT, rel);
   let buf;
   try {
     buf = readFileSync(abs);
@@ -60,7 +64,7 @@ function readText(rel) {
 }
 
 function collectNicknames(rel) {
-  const abs = path.join(process.cwd(), rel);
+  const abs = path.join(REPO_ROOT, rel);
   if (!existsSync(abs)) return [];
   let data;
   try {
@@ -84,8 +88,8 @@ function flattenStrings(value, out) {
 }
 
 function collectConfigLeaks() {
-  const localPath = path.join(process.cwd(), "config", "app.json");
-  const examplePath = path.join(process.cwd(), "config.example.json");
+  const localPath = path.join(REPO_ROOT, "config", "app.json");
+  const examplePath = path.join(REPO_ROOT, "config.example.json");
   if (!existsSync(localPath)) return [];
   let local, example = {};
   try {

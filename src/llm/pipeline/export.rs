@@ -10,7 +10,7 @@ impl Pipeline {
         let records = self.messages.read_all(&round_id).await.unwrap_or_default();
         let events = self
             .messages
-            .read_raw_events(&round_id)
+            .read_raw_events(&round_id, 0)
             .await
             .unwrap_or_default();
         let board = {

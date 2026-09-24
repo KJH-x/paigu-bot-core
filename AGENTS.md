@@ -126,3 +126,18 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 | D-09 | ✅ | 新增 `src/services/**`；handler 薄层化（HTTP 契约不变） |
 
 > 仍开放的产品/工程项见 [docs/TODOS.md](./docs/TODOS.md)（T-13 阶段分类 UI、T-14 管理员改单目标语法、T-19 拉取告警、T-24 `simulate` 迁移新栈、T-27 远程展示等）。
+
+## 8. 常驻运行 / 部署（`deploy/`）
+
+长期运行实例由 Windows 计划任务 **`paigu-bot-core-run`**（登录时触发，用户 `NSLC`，Interactive/Limited）拉起 `deploy\run.ps1`。
+
+| 命令 | 作用 |
+|---|---|
+| `.\deploy\build.ps1` | `cargo build --release` 并安装到 `deploy\bin\paigu-bot-core.exe`（**更新流程**） |
+| `.\deploy\stop.ps1` | 停止计划任务实例并清理残留进程 |
+| `Start-ScheduledTask -TaskName paigu-bot-core-run` | 启动/重启实例 |
+| `Unregister-ScheduledTask -TaskName paigu-bot-core-run -Confirm:$false` | 取消登录自启 |
+
+- `deploy\run.ps1`：单实例守卫 → `Set-Location` 仓库根（`config/`、`web/`、`data/` 为相对路径）→ 看护重启（5s→60s 退避）→ 日志 `deploy\logs\paigu-YYYYMMDD.log`（UTF-8、保留 14 天）。
+- 说明见 [deploy/readme.md](./deploy/readme.md)。`deploy/bin/`、`deploy/logs/` 已 gitignore。
+- **NapCat 不由本实例管理**：可延后启动；未连接时 bot 正常监听等待，连上即处理（`/api/gateway/status` 的 `clients`）。

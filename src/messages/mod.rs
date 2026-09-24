@@ -92,12 +92,20 @@ impl JsonlMessageStore {
         }
         let raw = std::fs::read_to_string(&self.path)?;
         let mut out = Vec::new();
+        let mut skipped = 0usize;
         for line in raw.lines() {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            out.push(serde_json::from_str(trimmed)?);
+            // 容错：损坏/截断行跳过而非整体失败（长期运行下单个坏行不应致命）
+            match serde_json::from_str(trimmed) {
+                Ok(rec) => out.push(rec),
+                Err(_) => skipped += 1,
+            }
+        }
+        if skipped > 0 {
+            tracing::warn!(path = %self.path.display(), skipped, "消息日志存在无法解析的行，已跳过");
         }
         Ok(out)
     }
@@ -240,20 +248,37 @@ impl MessageLog {
         Ok(())
     }
 
-    pub async fn read_raw_events(&self, round_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+    /// 读取原始事件（C-3）。
+    ///
+    /// - **容错**：损坏/截断行跳过并 `warn!`，不使整体失败；
+    /// - `limit == 0` 表示全部；否则只返回**最后 `limit` 条**（避免 40MB+ 日志撑爆响应）。
+    pub async fn read_raw_events(
+        &self,
+        round_id: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<serde_json::Value>> {
         let path = self.event_path_for(round_id);
         let _guard = JsonlMessageStore::lock();
         if !path.exists() {
             return Ok(Vec::new());
         }
         let raw = std::fs::read_to_string(&path)?;
-        let mut out = Vec::new();
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
+        let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
+        let start = if limit == 0 || lines.len() <= limit {
+            0
+        } else {
+            lines.len() - limit
+        };
+        let mut out = Vec::with_capacity(lines.len() - start);
+        let mut skipped = 0usize;
+        for line in &lines[start..] {
+            match serde_json::from_str::<serde_json::Value>(line.trim()) {
+                Ok(v) => out.push(v),
+                Err(_) => skipped += 1,
             }
-            out.push(serde_json::from_str(trimmed)?);
+        }
+        if skipped > 0 {
+            tracing::warn!(round_id, skipped, "原始事件日志存在无法解析的行，已跳过");
         }
         Ok(out)
     }
