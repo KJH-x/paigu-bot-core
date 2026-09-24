@@ -152,7 +152,7 @@
 必须产出 `docs/INTERFACES.md`，至少含：
 - **模块清单**：`gateway` / `pipeline` / `engine(allocation,replay)` / `settlement` / `planner` / `messages(store)` / `snapshot` / `api` / `web`。
 - **接口表**：每模块 × 方法签名 × 输入 DTO × 输出 DTO × 错误 × 调用方。
-- **数据契约**：`IncomingEvent`、`MessageRecord`、`RoundPhase`、`PricingConfig`、`DiscountRule`、`GiftTier`、`AllocationSnapshot`、`SettlementSnapshot`、`OrderTable`、`SnapshotBundle`；**2026-09-24 新增** `RoundSettings`（`data/rounds/<round_id>.json`）、`ParseOverrideEvent`、`CnOverride`、`ItemCategory`（`class` 自动推导）、`VariantConfig.adjust_cents`（前端契约，见 [INTERFACES.md](./INTERFACES.md) §8.7）。
+- **数据契约**：`IncomingEvent`、`MessageRecord`、`RoundPhase`、`PricingConfig`、`DiscountRule`、`GiftTier`、`AllocationSnapshot`、`SettlementSnapshot`、`OrderTable`、`SnapshotBundle`；**2026-09-24 新增** `RoundSettings`（`data/rounds/<round_id>.json`）、`ParseOverrideEvent`、`CnOverride`、`ItemCategory`（`class` 自动推导）、`VariantConfig.adjust_cents`（已落库，见 [INTERFACES.md](./INTERFACES.md) §8.7）。
 - **需求→接口映射**：C1..C7 各自落在哪些接口/文件。
 - **解耦约束**：模块间只经接口；不得跨层直连（如 UI 不得直读引擎内部状态）。
 

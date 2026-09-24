@@ -41,11 +41,11 @@
 
 | ID | 优先级 | 状态 | 任务 | 验收 |
 |---|---|---|---|---|
-| W-G2-01 | P1 | **done** ✅ | **`VariantConfig.adjust_cents` 落库**：Rust 声明该字段 + `to_unit_prices`/结算取价接线；当前仅 `web/round.js` 前端契约（保存时被 serde 忽略、不落 `data/rounds/*.json`） | `/round` 保存 A/B 后重载仍存在，结算见调后价 |
-| W-G2-02 | P1 | **done** ✅ | **`POST /api/items/suggest-aliases` 后端实现**（LLM 别名建议，返回 `{suggestions:[{item_id,verdict?,aliases?}]}`）；前端已接入并对 404/405/501 兜底 | 按钮返回建议/「是最佳」 |
-| W-G2-03 | P2 | **done** ✅ | **`GET /round`、`GET /settings` 短路由**（如需）：当前仅静态文件 `/round.html`、`/settings.html` | 短路由可直接访问 |
-| W-G2-04 | P2 | **done** ✅ | **清理 `box_size`/`variants[].pieces` 残留**：Rust `ItemConfig.box_size`/`VariantConfig.pieces` 字段、`to_items` 透传、`config.example.json` 旧值 | 代码/配置不再含该字段且回归全绿 |
-| W-G2-05 | P2 | todo | **重放快照的 CN**：`replay_engine::to_allocation_snapshot`（及 `replay/session`）产出的 `user_summaries.display_name` 未走 CN | 重放人名与 `/api/display` 一致 |
+| W-G2-01 | P1 | **done** ✅ | **`VariantConfig.adjust_cents` 落库**：Rust 字段、往返序列化、`to_unit_prices`/结算取价均已接线 | `/round` 保存 A/B 后重载仍存在，结算见调后价 |
+| W-G2-02 | P1 | **done** ✅ | **`POST /api/items/suggest-aliases` 后端实现**：LLM 别名建议，返回 `{suggestions:[{item_id,verdict?,aliases?}]}`；前端带未启用降级 | 按钮返回建议/「是最佳」 |
+| W-G2-03 | P2 | **done** ✅ | **`GET /round`、`GET /settings` 短路由**：`src/api/mod.rs` 显式路由，`.html` 继续兼容 | 短路由可直接访问 |
+| W-G2-04 | P2 | **done** ✅ | **清理 `box_size`/`variants[].pieces` 配置残留**：字段、转换透传、示例旧值均已删除；领域 `Item.box_size` 是引擎运行时容量，不属配置残留 | 配置代码/样例不再含旧字段且回归全绿 |
+| W-G2-05 | P2 | todo | **旧 `simulate` 重放快照的 CN**：现行 `replay/session` 已把 CN 写入消息视图与 `user_summaries.display_name`；旧 `simulation` 使用的 `replay_engine` 仍无成员配置输入，随 T-24 迁移收口 | `simulate` 迁移后重放人名与 `/api/display` 一致 |
 | W-G2-06 | P2 | todo | **`SlotPolicy::ColumnLocked` 语义未定义**：`allocation_engine` 当前按 `normal` 处理；需明确「锁列」含义或移除 | 语义有文档与单测 |
 | W-G2-07 | P2 | todo | **`check` 跨商品规则细化**：变体名跨商品重名（角色名）当前不报错、`class_derived_mismatch` 为 warn；按需分级/扩展 | 规则有单测 |
 
@@ -57,7 +57,7 @@
 |---|---|---|---|---|
 | T-13 | done | **阶段权限接入实时链路**：实时+重放均按 `phase_at` 拒绝越权；A/B 分类由 `class` **自动推导**（有变体⇒A/无变体⇒B，`RoundSettings::item_class`）+ `/round` 编辑器设置 `kind` | A-5 | ✅ 越权实时==重放单测；分类自动推导单测 |
 | T-14 | todo | **管理员改单目标语法**：`/改单 <目标> ...`（管理员改群内任意指定人）；需把目标昵称解析为 user_id（可用 `state.display/identity`） | D-2 | 管理员改他单用例 |
-| T-15 | todo | **`MessageLog::update` 接线**：`PUT /api/messages/:seq` 仍走 read_all+replace_all，改用细粒度 `update` | — | 不再全量重写 |
+| T-15 | done | **`MessageLog::update` 接线**：`PUT /api/messages/:seq` 已由 `services::messages::update_message` 调用细粒度 `MessageLog::update` | — | ✅ 不再全量重写 |
 | T-16 | todo | **快照导出/导入前端入口**：`web/admin` 按钮 + 下载（含 `format=file`） | T-06 | admin 可操作 |
 | T-17 | todo | **`/api/replay` diff 可视化**（`web/replay`） | — | diff 可见 |
 | T-18 | done | **成员 user_id 映射**（NapCat 拉取写入缓存）：refresh 已写缓存（`data/members.json`），映射实现完成；待实机验证 | B-2 | 映射非空 |

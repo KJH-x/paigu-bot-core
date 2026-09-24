@@ -118,10 +118,7 @@ fn apply_cancellation(
     }
 }
 
-fn apply_modification(
-    claims: &mut [Claim],
-    modify: &crate::domain::event::ClaimModified,
-) {
+fn apply_modification(claims: &mut [Claim], modify: &crate::domain::event::ClaimModified) {
     for c in claims.iter_mut() {
         if c.claim_id == modify.target_claim_id {
             if let Some(ref item_id) = modify.target_item_id {

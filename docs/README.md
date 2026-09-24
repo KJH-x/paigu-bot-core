@@ -49,7 +49,7 @@
 ## 四、当前状态快照
 
 - 详见 [GAP-ANALYSIS.md](./GAP-ANALYSIS.md)（完成状态）与 [TODOS.md](./TODOS.md)（待办）。
-- 快速事实：`cargo test` 139 passed · `cargo build` 0 warning · e2e 11/11 · real-samples/real-xlsx 逐格 ALL PASS · `npm run privacy` OK（真实昵称跟踪文件 0 命中）。
+- 快速事实（2026-09-25）：`cargo test` 200 passed · `cargo clippy -- -D warnings` 通过 · e2e 12/12 · real-samples/real-xlsx 逐格 ALL PASS · `npm run privacy` OK（真实昵称跟踪文件 0 命中）。
 
 ## 五、归档 / 历史
 

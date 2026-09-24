@@ -64,16 +64,12 @@ fn base_config() -> AppConfig {
 }
 
 fn store(cfg: &AppConfig) -> Arc<ConfigStore> {
-    let path =
-        std::env::temp_dir().join(format!("paigu-llm-test-{}.json", uuid::Uuid::new_v4()));
+    let path = std::env::temp_dir().join(format!("paigu-llm-test-{}.json", uuid::Uuid::new_v4()));
     std::fs::write(&path, serde_json::to_string_pretty(cfg).unwrap()).unwrap();
     Arc::new(ConfigStore::load(path).unwrap())
 }
 
-fn test_pipeline_with_dir(
-    cfg: &AppConfig,
-    llm: Arc<dyn LlmClient>,
-) -> (Arc<Pipeline>, PathBuf) {
+fn test_pipeline_with_dir(cfg: &AppConfig, llm: Arc<dyn LlmClient>) -> (Arc<Pipeline>, PathBuf) {
     let dir = std::env::temp_dir().join(format!("paigu-msgs-test-{}", uuid::Uuid::new_v4()));
     (
         Pipeline::new_with_client_dir(store(cfg), llm, dir.clone()),
@@ -297,11 +293,13 @@ async fn first_match_clarification_emits_parse_override() {
         .await
         .unwrap();
     assert!(
-        raw.iter().any(|v| v["payload"]["event_type"] == "ParseOverride"),
+        raw.iter()
+            .any(|v| v["payload"]["event_type"] == "ParseOverride"),
         "应落盘 ParseOverride 事件: {raw:?}"
     );
     assert!(
-        raw.iter().any(|v| v["payload"]["target_raw_message_id"] == "u1::要一个悠人"),
+        raw.iter()
+            .any(|v| v["payload"]["target_raw_message_id"] == "u1::要一个悠人"),
         "ParseOverride 应指向原 message_id"
     );
 }
@@ -332,10 +330,9 @@ async fn replay_consumes_parse_override_matching_realtime() {
     );
 
     let log = pipeline.messages();
-    let replayed =
-        crate::replay::session::replay(log.as_ref(), &cfg, ReplayOverrides::default())
-            .await
-            .unwrap();
+    let replayed = crate::replay::session::replay(log.as_ref(), &cfg, ReplayOverrides::default())
+        .await
+        .unwrap();
     assert_eq!(
         replayed.outcomes[0].status, "Applied",
         "{:?}",
@@ -543,4 +540,9 @@ async fn message_log_records_every_inbound() {
     assert_eq!(recs[0].nickname, "成员01");
     assert_eq!(recs[0].timestamp_ms, 1_000);
     assert!(recs.windows(2).all(|w| w[1].seq > w[0].seq));
+
+    let visible = pipeline.messages_since(0).await;
+    assert!(visible.windows(2).all(|w| {
+        w[1]["seq"].as_i64().unwrap_or_default() > w[0]["seq"].as_i64().unwrap_or_default()
+    }));
 }

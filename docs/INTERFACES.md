@@ -306,7 +306,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `web/sim` 改 WS 客户端 | `web/sim*` | ✅ 已改真 WS 客户端 |
 | `scripts/sim-run.mjs`（`--speed`） | `scripts` | ✅ 已实现 |
 | 录制 `record.jsonl` + `--replay` | `scripts` | ✅ `scripts/sim-record.mjs` |
-| e2e（C5/C6/C7 用例） | `tests` | ✅ 11/11（`node tests/e2e/sim.mjs`） |
+| e2e（C5/C6/C7 用例） | `tests` | ✅ 12/12（`node tests/e2e/sim.mjs`，2026-09-25 复核） |
 | `MessageRecord` 与 Pipeline 消息模型统一 | `messages`、`llm::pipeline` | ✅ 共享 `MessageLog`（T-05） |
 
 > 复核：本文件 §1–§6 为 Wave 1–4 前快照；现状以 §8 与源码为准。
@@ -336,8 +336,8 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 | 字段/接口 | 说明 |
 |---|---|
-| `ItemConfig.{unit_price_cents, kind, class, aliases, max_quantity, variants}` | 原价（分）、**种类**（`拼团/单领/整盒/特典`）、类别（**自动推导**、可显式覆盖）、别名、单领上限、变体。⚠️ `box_size` 已从口径移除（Rust 端暂留兼容字段，见 W-G2-04） |
-| `VariantConfig.{unit_price_cents, adjust_cents, capacity, aliases}` | 变体原价 A、调价 B（最终价 **C=A+B**）、容量、别名。⚠️ `pieces` 已从口径移除；`adjust_cents` **仅前端契约**（Rust 端未声明，见 W-G2-01） |
+| `ItemConfig.{unit_price_cents, kind, class, aliases, max_quantity, variants}` | 原价（分）、**种类**（`拼团/单领/整盒/特典`）、类别（**自动推导**、可显式覆盖）、别名、单领上限、变体；配置模型已移除 `box_size` |
+| `VariantConfig.{unit_price_cents, adjust_cents, capacity, aliases}` | 变体原价 A、调价 B（最终价 **C=A+B**）、容量、别名；已移除 `pieces`，`adjust_cents` 已落库并进入 `to_unit_prices()` |
 | `RoundSettings::to_unit_prices()` | 商品目录 -> 标价表（结算/planner 取价来源） |
 | `GatewayConfig.admin_commands_enabled` | 管理员命令落地执行开关（D-1） |
 
@@ -380,7 +380,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 ### 8.7 2026-09-24 新增/变更接口（U1–U9）
 
-> 均为本轮落地；源码 `src/api/rounds_routes.rs`、`src/services/rounds.rs`、`src/settings/rounds.rs`、`src/services/workflow.rs`、`src/services/members.rs`、`src/services/display.rs`、`src/domain/event.rs`。**标注「前端契约 / 后端未实现」者为已知差距，见 [TODOS.md](./TODOS.md)**。
+> 均已落地；源码 `src/api/rounds_routes.rs`、`src/services/rounds.rs`、`src/settings/rounds.rs`、`src/services/workflow.rs`、`src/services/members.rs`、`src/services/display.rs`、`src/domain/event.rs`。
 
 **轮次库（U3）**
 
@@ -406,8 +406,8 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `settings::resolve_cn` | 展示人名回退 **CN → 归一化昵称（identity） → user_id** |
 | `GET /api/members` | 每项装饰 `cn`（覆盖值或 `null`）与 `resolved`（`resolve_cn` 结果） |
 | `ParseOverrideEvent`（`domain/event.rs`） | `{event_id,round_id,target_raw_message_id,corrected_parsed_message,admin_user_id,reason,occurred_at}`；事件类型 `parse_override`，重放消费（U7） |
-| `POST /api/items/suggest-aliases` | body `{items:[{item_id,name,aliases}], mode:"aliases"}` → `{suggestions:[{item_id,verdict?,aliases?}]}`。⚠️ 后端已实现（`src/api/item_routes.rs`）：`web/round.js` 已接入并对 404/405/501 兜底为「未就绪」；落库接线见 [TODOS.md](./TODOS.md) W-G2-02 |
-| `VariantConfig.adjust_cents` | 变体调价 B（最终价 C = A+B）。⚠️ **前端契约**（`web/round.js` 已按 A±B=C 三格联动）；**Rust `VariantConfig` 尚未声明该字段**（当前忽略、不落库）——见 [TODOS.md](./TODOS.md) W-G2-01 |
+| `POST /api/items/suggest-aliases` | body `{items:[{item_id,name,aliases}], mode:"aliases"}` → `{suggestions:[{item_id,verdict?,aliases?}]}`；后端由 `src/api/item_routes.rs` / `src/services/aliases.rs` 实现，前端保留 404/405/501 降级 |
+| `VariantConfig.adjust_cents` | 变体调价 B（最终价 C = A+B）；`web/round.js` A±B=C 三格联动，Rust 字段支持落库，`RoundSettings::to_unit_prices()` 输出调后价 |
 
 **页面（静态文件）**
 
@@ -415,4 +415,4 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 |---|---|
 | `/round.html` | 轮次与商品管理页（`web/round.html` + `round.js`）：轮次管理、商品目录编辑器（4 种类、A±B=C、别名本地词切+LLM 建议+锁定+冲突校验、末尾虚线卡/缝隙「+」插入、单领多行、整盒独立种类）、消息日志折叠面板 |
 | `/settings.html` | 其余配置页（`web/settings.html` + `settings.js`）：gateway/llm/display/members(CN)/白名单等；**不进 Stepper** |
-| — | ⚠️ **无 `/round`、`/settings` 短路由**；两页经静态文件服务（`/round.html`、`/settings.html`）访问。若要短路由需在 `src/api/mod.rs` 增补 |
+| `/round`、`/settings` | `src/api/mod.rs` 已提供短路由；`.html` 地址继续由静态文件服务兼容 |

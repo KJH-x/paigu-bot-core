@@ -147,7 +147,10 @@ fn to_items_maps_whole_box_and_gift_kinds() {
 fn empty_cn_overrides_match_legacy_behaviour() {
     let cfg = default_config();
     assert!(cfg.members.cn_overrides.is_empty());
-    assert_eq!(resolve_cn(&cfg, "u1", "昵称（备注）").as_deref(), Some("昵称"));
+    assert_eq!(
+        resolve_cn(&cfg, "u1", "昵称（备注）").as_deref(),
+        Some("昵称")
+    );
     assert_eq!(resolve_cn(&cfg, "u2", "").as_deref(), Some("u2"));
     assert!(!is_priority_with_cn(&cfg, "u1", "昵称"));
 }

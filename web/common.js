@@ -34,6 +34,16 @@
     return isNaN(n) ? d : n;
   }
 
+  // Rust enums currently serialize as PascalCase. Normalize them at the UI
+  // boundary so component state and CSS selectors use one stable vocabulary.
+  function enumKey(v, fallback) {
+    var s = String(v == null ? (fallback || '') : v).trim();
+    return s
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/[\s-]+/g, '_')
+      .toLowerCase();
+  }
+
   function isObj(v) {
     return v != null && typeof v === 'object' && !Array.isArray(v);
   }
@@ -543,8 +553,8 @@
       index: num(raw.slot_index != null ? raw.slot_index : (raw.slot != null ? raw.slot : raw.index), fallbackIndex),
       box_index: num(raw.box_index, boxIndex),
       user: user ? String(user) : '',
-      status: String(status),
-      policy: raw.policy || raw.slot_policy || 'normal',
+      status: enumKey(status, 'empty'),
+      policy: enumKey(raw.policy || raw.slot_policy, 'normal'),
       segment_id: raw.segment_id || null
     };
   }

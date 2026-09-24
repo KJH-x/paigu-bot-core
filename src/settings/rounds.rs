@@ -109,11 +109,7 @@ pub fn list_round_files() -> Vec<RoundFileInfo> {
 pub fn resolve_active(cfg: &mut AppConfig) -> bool {
     let current_id = cfg.round.round_id.trim().to_string();
 
-    if let Some(active) = cfg
-        .active_round_id
-        .clone()
-        .filter(|s| !s.trim().is_empty())
-    {
+    if let Some(active) = cfg.active_round_id.clone().filter(|s| !s.trim().is_empty()) {
         if let Some(mut loaded) = read_round(active.trim()) {
             if loaded.round_id.trim().is_empty() {
                 loaded.round_id = active.trim().to_string();

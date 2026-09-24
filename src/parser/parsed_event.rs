@@ -221,9 +221,16 @@ mod tests {
 
         let fallback = parsed_with("悠人", "hr_resume");
         let applied = apply_parse_override(fallback, Some("m1"), &overrides);
-        assert_eq!(applied.items[0].resolved_item_id.as_deref(), Some("pass_sp"));
+        assert_eq!(
+            applied.items[0].resolved_item_id.as_deref(),
+            Some("pass_sp")
+        );
 
-        let untouched = apply_parse_override(parsed_with("悠人", "hr_resume"), Some("m2"), &overrides);
-        assert_eq!(untouched.items[0].resolved_item_id.as_deref(), Some("hr_resume"));
+        let untouched =
+            apply_parse_override(parsed_with("悠人", "hr_resume"), Some("m2"), &overrides);
+        assert_eq!(
+            untouched.items[0].resolved_item_id.as_deref(),
+            Some("hr_resume")
+        );
     }
 }

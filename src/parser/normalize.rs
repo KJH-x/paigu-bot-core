@@ -62,7 +62,8 @@ pub fn normalize_claim_item(item: &ParsedClaimItem) -> ParsedClaimItem {
     } else {
         normalized.claim_type.map(|ct| {
             let ct_lower = ct.to_lowercase();
-            if ct_lower.contains("single") || ct_lower.contains("单领") || ct_lower.contains("单") {
+            if ct_lower.contains("single") || ct_lower.contains("单领") || ct_lower.contains("单")
+            {
                 "Single".to_string()
             } else if ct_lower.contains("gift")
                 || ct_lower.contains("赠")

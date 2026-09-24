@@ -24,8 +24,8 @@ NapCatQQ ──反向 WS──▶ gateway ──▶ llm::Pipeline ──▶ engi
 
 ```bash
 cargo build                                  # 编译（无 error / 无新 warning）
-cargo test                                   # Rust 单测（当前 139 passed）
-node tests/e2e/sim.mjs                       # Playwright e2e（当前 11/11，脚本自带 cargo build）
+cargo test                                   # Rust 单测（当前 200 passed）
+node tests/e2e/sim.mjs                       # Playwright e2e（当前 12/12，脚本自带 cargo build）
 
 # 回归语料（具体以 simulation-corpus/**/README.md 为准）
 python simulation-corpus/real-xlsx/parse_xlsx.py          # ① xlsx → sections/messages JSON（需 *.xlsx）
@@ -91,7 +91,7 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 - **业务要点（2026-09-24，SPEC-UPDATE U1–U9）**：
   - **轮次库**：`config/app.json` 只留 `active_round_id`；轮次数据 `data/rounds/<round_id>.json`；`GET/POST /api/rounds`、`POST /api/rounds/:id/activate`（`continue` 默认 / `fresh` / `replay`，**切换与重放解耦**）、`POST /api/rounds/:id/check`、`DELETE /api/rounds/:id`。开团=`/round`，设置=`/settings`（不进 Stepper）。
   - **成员 CN**：`members.cn_overrides[{user_id,cn,aliases}]`；人名回退 **CN → 归一化昵称 → user_id**；用于匹配与**结算表/账单人名**；`/api/members` 附 `cn/resolved`。
-  - **调价在目录（仅变体）**：商品级只设原价；**仅变体** `原价 A ± 调价 B = 最终价 C`；结算页**不录入**调价、仅展示调后价；调价**不参与**折扣/减均/特典档位。⚠️ 现存差距：`VariantConfig.adjust_cents` 仅前端契约、后端未落库（见 [docs/TODOS.md](./docs/TODOS.md) W-G2-01）。
+  - **调价在目录（仅变体）**：商品级只设原价；**仅变体** `原价 A ± 调价 B = 最终价 C`；`VariantConfig.adjust_cents` 已落库并接入结算取价；结算页**不录入**调价、仅展示调后价；调价**不参与**折扣/减均/特典档位。
 - **禁止事项（红线）**：
   - **绝不向真实群发消息**：`reply_enabled=false` 默认关闭；`send_*` 仅当开启且 `action ∈ allowed_actions` 时放行，否则强制拦截并告警。
   - 真实昵称 / 群号 / 配置 / `data/**` / `config/**` / `*.xlsx` **不得入库**；改动只提交占位名（如 `成员01`、`123456789`、`0.0.0.0:9801`）。
@@ -131,7 +131,7 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 | D-08 | ✅ | 删除 `MessageStore` trait；`MessageLog` 为唯一存储 API |
 | D-09 | ✅ | 新增 `src/services/**`；handler 薄层化（HTTP 契约不变） |
 
-> 仍开放的产品/工程项见 [docs/TODOS.md](./docs/TODOS.md)（T-14 管理员改单目标语法、T-19 拉取告警、T-24 `simulate` 迁移新栈、T-27 远程展示，以及 Wave G2 遗留 W-G2-05…07：`adjust_cents` 落库 / `suggest-aliases` 后端 / `box_size`·`pieces` 清理 / 重放 CN / `ColumnLocked` 语义等）。
+> 仍开放的产品/工程项见 [docs/TODOS.md](./docs/TODOS.md)（T-14 管理员改单目标语法、T-19 拉取告警、T-24 `simulate` 迁移新栈、T-27 远程展示，以及 Wave G2 遗留 W-G2-05…07：旧 `simulate` 重放 CN / `ColumnLocked` 语义 / 跨商品校验分级）。
 
 ## 8. 常驻运行 / 部署（`deploy/`）
 

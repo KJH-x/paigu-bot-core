@@ -134,7 +134,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 | `members.cache_path` | String | 必填 | 成员缓存文件 | 是 |
 | `members.daily_pull_at` | String | `"19:00"` | 每日拉取时刻 | 是（调度每轮读，`src/main.rs:146`） |
 
-> 注意（**2026-09-24 更新**，见 [DESIGN.md](./DESIGN.md) §4、[INTERFACES.md](./INTERFACES.md) §8.7）：商品级 `unit_price_cents` 为**原价**（无调价）；**仅变体**有 `unit_price_cents`(A) + `adjust_cents`(B)（最终价 **C=A+B**）。`box_size` 与 `variants[].pieces` 已从**商品模型口径**移除（Rust 端暂留兼容字段、`to_items()` 仍透传 `box_size`，清理见 [TODOS.md](./TODOS.md) W-G2-04）；`max_quantity` 仅单领使用。⚠️ `adjust_cents` 目前**仅前端契约**（`web/round.js`），Rust `VariantConfig` 未声明、不落库（W-G2-01）。
+> 注意（**2026-09-25 核对**，见 [DESIGN.md](./DESIGN.md) §4、[INTERFACES.md](./INTERFACES.md) §8.7）：商品级 `unit_price_cents` 为**原价**（无调价）；**仅变体**有 `unit_price_cents`(A) + `adjust_cents`(B)（最终价 **C=A+B**，已落库并接入结算）。`box_size` 与 `variants[].pieces` 已从配置模型移除；`max_quantity` 仅单领使用。
 
 ### 4.2 环境变量
 
@@ -201,10 +201,10 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 - **处理**：
   1. 幂等：键 `group_id::message_id`，命中 → `Duplicate`（`src/llm/pipeline.rs:84-107`）。
   2. 空文本 → `Ignored`（`:116-120`）。
-  3. `/` 开头：非管理员 → `Rejected`「非管理员斜杠命令」；管理员 → `Applied`「管理员命令已记录」（`:122-145`，仅记录不执行）。
+  3. `/` 开头：非管理员 → `Rejected`「非管理员斜杠命令」；管理员命令开关关闭时只记录，开启时执行 `/开团 /锁位 /结团 /状态 /导出`。
   4. `RuleParser::parse`（规则置信度 `>=0.9` 且 intent 非 Unknown 则采用）；否则 `llm.enabled` 时调 LLM；LLM 抛错且 `fallback_to_rules` → 回退规则，否则 `Rejected`「没识别成功」（`:147-186`；常量 `:28-29`）。
   5. `EventValidator`：Unknown→`Ignore`；有 `ambiguous_parts`→`NeedConfirm`；`confidence<0.65`→`Reject`；`quantity==0` 或 `>99`→`Reject`；商品无法解析→`Reject`（`src/parser/validation.rs:38-104`）。
-  6. `Modify` 意图 → `Ignored`「改单功能暂未实现」（`src/llm/pipeline.rs:188-192`）。
+  6. `Modify` 意图复用 Claim 校验与分配链路，应用前先撤销本人同商品既有认购，再按新数量重排；管理员指定他人改单仍见 T-14。
 - **LLM 输出契约**（`src/llm/prompt.rs:43-50`；解析 `src/llm/pipeline.rs:539-615`）：
 ```json
 {
@@ -615,9 +615,9 @@ node tests/e2e/sim.mjs
 4. ~~`Modify`（改单）未实现~~（**Wave 3 已实现**）：`ParsedIntent::Modify` 支持自助改单（撤销本人该商品既有认购 + 重新认购）；管理员改任意指定人待 T-14。
 5. ~~`/api/replay` 501~~（**Wave 1–4 已实现**）：`/api/replay`、`/api/replay/*` 已接线逐步重放，契约见 [INTERFACES.md](./INTERFACES.md) §8。
 6. **远程数据源契约待统一**：local 返回 `AllocationSnapshot`（`item_allocations`），remote 预期 `PublicSnapshot`（`items`）；`messages`/`who_whats`/`changed` 远程无对应（`src/domain/snapshot.rs:24-95`；`web/common.js:537-661`）。
-7. **枚举序列化大小写不一致**：`status`/`slot_policy`/`claim_type` 输出 PascalCase（实测 `"Filled"`/`"Normal"`/`"Split"`），前端部分样式判定用小写（`web/common.js:228-235`），导致锁定/预留样式不生效。
-8. **重复消息 `seq` 复用**：`Duplicate` 记录使用当前 `state.seq`（不自增，`src/llm/pipeline.rs:87-96`），与上一条消息同 `seq`；前端消息 key 为 `s<seq>`，可能复用/覆盖节点（`web/common.js:669-670`）。
-9. **无持久化**：事件/快照仅在内存，进程重启即丢失（`src/llm/pipeline.rs:37-48`）；`data/` 仅存成员缓存。
+7. ~~枚举序列化大小写不一致导致状态样式失效~~（**2026-09-25 已修复**）：`web/common.js` 在 UI 边界把 PascalCase/kebab-case 统一为 snake_case。
+8. ~~重复消息 `seq` 复用~~（**2026-09-25 已修复**）：重复入站不改变排位版本，但会获得独立、单调的 UI 消息序号。
+9. **运行态快照在内存**：消息 JSONL 与原始事件 JSONL 会持久化；进程重启后的状态恢复仍依赖主动重放，当前没有数据库型快照持久层。
 10. **`ColumnLocked`（锁列）无专门语义**：按普通槽处理（`src/engine/allocation_engine.rs:190-192`；`simulation-corpus/VERIFICATION.public.md`）。
 11. **`gateway.bind` 热改不重绑**：监听循环不响应配置变更（`src/gateway/ws_server.rs:46-73`）。
 12. **`sim/identity` 的身份/优先级未参与处理**：仅存储；预存判定实际来自 `config.round.priority_users` 与昵称匹配（`src/api/sim_routes.rs:85-96`；`src/llm/pipeline.rs:494-499`）。

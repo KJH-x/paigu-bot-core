@@ -1,6 +1,6 @@
 # web · 排谷机器人前端（A4）
 
-纯 vanilla JS、无构建、无框架。四页：展示 / 管理 / 模拟器 / 重放步进。只依赖本地 HTTP API（DESIGN §5）。
+纯 vanilla JS、无构建、无框架。页面覆盖入口、开团、设置、排谷展示、结算/下单、模拟器与重放；只依赖本地 HTTP API（DESIGN §5）。
 
 ## 文件
 
@@ -8,11 +8,15 @@
 |---|---|
 | `index.html` | 入口导航 + `/api/health` 检查 |
 | `display.html` / `display.js` | 展示页：排位表 + 消息流 + who-whats + 状态 |
-| `admin.html` / `admin.js` | 管理面板：config 编辑（revision 乐观并发）、拉取群成员 |
+| `round.html` / `round.js` | 开团页：轮次库、阶段窗口、商品目录与变体调价 |
+| `settings.html` / `settings.js` | 设置页：gateway / LLM / display / 成员 CN 等非流程配置 |
+| `admin.html` / `admin.js` | 兼容管理入口 |
+| `settlement.html` / `settlement.js` / `settlement.css` | 结算试算、排包与下单方案 |
 | `sim.html` / `sim.js` | 模拟器：身份、时间偏移、发送、转录、实时排位 |
 | `replay.html` / `replay.js` / `replay.css` | 重放步进查看器：步进/播放、累积排位与状态差异高亮、列视图、Mermaid、核对条、双向联动 |
-| `display.css` | 各页共用样式（含排位渲染器、状态差异高亮） |
-| `common.js` | 共用：API 封装、数据归一化、keyed diff 排位渲染器、smart-scroll、成员子集 |
+| `display.css` / `theme.css` / `app.css` | 共用基础样式、语义 token、工作流外壳与响应式布局 |
+| `newlook.css` | 最后加载的方形视觉层：无圆角、分层边框、高对比焦点、明暗主题统一覆盖 |
+| `common.js` / `shell.js` | API 与数据归一化、keyed diff、smart-scroll、工作流导航与主题切换 |
 
 ## 打开方式
 
@@ -47,7 +51,7 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 - keyed diff：单元格以 `item|variant#box:slot` 为 key，只更新变化格并高亮（3s 后淡出）；消息、who-whats、状态同样按 key 复用 DOM 节点。
 - smart-scroll：消息容器贴近底部（阈值 60px）时自动跟随；否则不动滚动，只显示「有新内容 N 条」按钮。
 - 不打断交互：不使用 `innerHTML` 重建容器，不移动无关节点；文字仅在变化时写入，尽量不破坏划词/点击。
-- 数据源：`local`（同源 API）/ `remote`（静态 JSON）。remote 依次尝试 `<base>/rounds/<round_id>/current.json`、`<base>/current.json`（`<base>` 本身以 `.json` 结尾则直接用）。
+- 数据源：`local`（同源 API）/ `remote`（静态 JSON）。remote 依次尝试 `<base>/rounds/<round_id>/current`、`<base>/current`（无扩展名；`<base>` 本身以 `.json` 结尾则直接用）。
 
 ## 管理面板
 
@@ -92,3 +96,14 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 - **响应式**：`≥1200` 桌面多列；`768–1199` 平板（Stepper 可横滚）；`<768` 移动（底部阶段 Tab + 单列 + 吸附操作条）。
 - **图标**：全部内联 SVG；**零新增依赖**（replay 的 Mermaid 视图由 `shell.js` 内置的 Mermaid-lite 渲染，不再依赖 CDN）。
 - 页面脚本（`display.js`/`admin.js`/`sim.js`/`replay.js`/`settlement.js`）**未改数据契约**，所有既有 `id`/`class` 保留。
+
+## Newlook 方形视觉层（2026-09-25）
+
+`newlook.css` 在各页最后加载，不改功能脚本与 DOM 契约。设计取向是高信息密度的操作台，而不是卡片化消费产品：
+
+- 所有组件零圆角；层级主要靠 1px 实线、灰阶表面和少量 3–4px 强调边，不用悬浮阴影制造深度；
+- 颜色是语义 token：蓝色只用于主要操作与当前模块，成功/警告/错误同时使用文字和左侧色条，不只依赖色相；
+- 键盘焦点使用高对比双层轮廓，并保留 `forced-colors`；动效服从 `prefers-reduced-motion`；
+- 表格、编号、状态与价格使用等宽/等宽数字，移动端保持单列和底部流程导航。
+
+取舍参考：[Carbon 的颜色分层与 token](https://carbondesignsystem.com/elements/color/overview/)、[Carbon spacing](https://carbondesignsystem.com/elements/spacing/overview/)、[W3C Focus Appearance](https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance)、[W3C Non-text Contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast)、[GOV.UK focus states](https://design-system.service.gov.uk/get-started/focus-states/)。

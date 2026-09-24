@@ -119,6 +119,9 @@ impl Pipeline {
             let key = format!("{}::{}", ev.group_id, ev.message_id);
             if !state.seen.insert(key) {
                 let detail = "重复 message_id，已按幂等忽略";
+                // Duplicate inputs do not mutate the board, but they are still
+                // distinct inbound messages and need a unique UI/log sequence.
+                state.seq += 1;
                 let seq = state.seq;
                 state.messages.push(MessageRecord {
                     seq,
@@ -260,7 +263,14 @@ impl Pipeline {
                 BareVariantOutcome::Resolved(p) => parsed = p,
                 BareVariantOutcome::FallbackIgnore => {
                     return self
-                        .finish(&ev, &display, seq, "Ignored", "商品未能 first-match，未记录", None)
+                        .finish(
+                            &ev,
+                            &display,
+                            seq,
+                            "Ignored",
+                            "商品未能 first-match，未记录",
+                            None,
+                        )
                         .await;
                 }
                 BareVariantOutcome::FallbackReject => {
@@ -504,5 +514,3 @@ impl EventSink for Pipeline {
         self.messages.clone()
     }
 }
-
-
