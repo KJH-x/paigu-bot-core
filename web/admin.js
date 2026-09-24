@@ -259,6 +259,23 @@
     end.value = msToLocalInput(p.end_ms);
     row.appendChild(end);
 
+    // 相对日提示：周几 + 前天/昨天/今天/明天/后天（其余 X 天前/后）
+    var hint = document.createElement('span');
+    hint.className = 'hint';
+    hint.setAttribute('data-scope', 'phase-hint');
+    hint.setAttribute('data-i', i);
+    function paintHint() {
+      var shell = window.PAIGU_SHELL;
+      var rel = shell && shell.relDay ? shell.relDay : function () { return ''; };
+      var s = rel(localInputToMs(start.value) || p.start_ms);
+      var e = rel(localInputToMs(end.value) || p.end_ms);
+      hint.textContent = (s || '?') + ' → ' + (e || '?');
+    }
+    start.addEventListener('change', paintHint);
+    end.addEventListener('change', paintHint);
+    paintHint();
+    row.appendChild(hint);
+
     var del = document.createElement('button');
     del.className = 'danger small';
     del.textContent = '×';

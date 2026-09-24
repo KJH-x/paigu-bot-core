@@ -12,6 +12,19 @@ pub async fn snapshot(state: &ApiState) -> Value {
     let now_ms = chrono::Utc::now().timestamp_millis();
 
     let phase = crate::round::phase_at(&cfg.round.phases, now_ms);
+    let phases: Vec<Value> = cfg
+        .round
+        .phases
+        .iter()
+        .map(|w| {
+            json!({
+                "phase": w.phase.as_str(),
+                "label": w.phase.label(),
+                "start_ms": w.start_ms,
+                "end_ms": w.end_ms,
+            })
+        })
+        .collect();
     let priority_window = cfg.round.priority_window.as_ref().map(|w| {
         json!({
             "start_ms": w.start_ms,
@@ -38,6 +51,7 @@ pub async fn snapshot(state: &ApiState) -> Value {
         "group_id": cfg.round.group_id,
         "phase": phase.map(|p| p.as_str()),
         "phase_label": phase.map(|p| p.label()),
+        "phases": phases,
         "phases_configured": !cfg.round.phases.is_empty(),
         "priority_window": priority_window,
         "items": cfg.round.items.len(),
