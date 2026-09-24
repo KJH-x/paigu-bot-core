@@ -257,7 +257,13 @@ mod tests {
         }
     }
 
-    fn item(id: &str, name: &str, kind: ItemKind, aliases: &[&str], variants: Vec<ItemVariant>) -> Item {
+    fn item(
+        id: &str,
+        name: &str,
+        kind: ItemKind,
+        aliases: &[&str],
+        variants: Vec<ItemVariant>,
+    ) -> Item {
         Item {
             item_id: ItemId(id.to_string()),
             round_id: RoundId("r1".to_string()),
@@ -328,7 +334,10 @@ mod tests {
     fn first_match_picks_catalog_first_splittable_item() {
         let rounds = catalog();
         let m = first_match("结城理", &rounds).expect("match");
-        assert_eq!(m.1 .0, "pass_sp", "应命中目录第一个（通行证），而非人事部简历");
+        assert_eq!(
+            m.1 .0, "pass_sp",
+            "应命中目录第一个（通行证），而非人事部简历"
+        );
         assert_eq!(m.2.as_deref(), Some("v_jcl"));
         assert!(is_bare_variant_name("结城理", &rounds));
     }

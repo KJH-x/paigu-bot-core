@@ -51,8 +51,7 @@ pub async fn do_replay(
 /// 消息变更后的重算：与 `do_replay` 不同，不写入 `last_replays`（保持原语义）。
 pub async fn recompute(state: &ApiState) -> anyhow::Result<Value> {
     let cfg = state.cfg.get().await;
-    let result =
-        session::replay(state.messages.as_ref(), &cfg, ReplayOverrides::default()).await?;
+    let result = session::replay(state.messages.as_ref(), &cfg, ReplayOverrides::default()).await?;
     Ok(replay_result_json(&result))
 }
 
@@ -63,7 +62,9 @@ pub struct ReplayBody {
 }
 
 pub async fn run_replay(state: &ApiState, body: ReplayBody) -> Result<Value, ServiceError> {
-    let result = do_replay(state, body.overrides).await.map_err(ServiceError::from)?;
+    let result = do_replay(state, body.overrides)
+        .await
+        .map_err(ServiceError::from)?;
     Ok(replay_result_json(&result))
 }
 

@@ -101,10 +101,18 @@ fn settle_delegates_to_evaluate_and_maps_bills() {
     assert_eq!(snap.gross_total.0, 2500);
     assert_eq!(snap.final_total.0, 2500);
 
-    let a = snap.item_totals.iter().find(|t| t.item_id.0 == "a").unwrap();
+    let a = snap
+        .item_totals
+        .iter()
+        .find(|t| t.item_id.0 == "a")
+        .unwrap();
     assert_eq!(a.total_quantity, 2);
     assert_eq!(a.gross_total.0, 2000);
-    let b = snap.item_totals.iter().find(|t| t.item_id.0 == "b").unwrap();
+    let b = snap
+        .item_totals
+        .iter()
+        .find(|t| t.item_id.0 == "b")
+        .unwrap();
     assert_eq!(b.total_quantity, 1);
     assert_eq!(b.gross_total.0, 500);
 }
@@ -180,10 +188,14 @@ fn settle_warns_when_legacy_discount_rules_present() {
         discount_rules: vec![DiscountRule::ShoppingFund {
             rule_id: "fund".to_string(),
             amount: MoneyCents(100),
-            allocation_policy: crate::domain::discount::DiscountAllocationPolicy::ByGrossAmountRatio,
+            allocation_policy:
+                crate::domain::discount::DiscountAllocationPolicy::ByGrossAmountRatio,
         }],
     };
 
     let snap = engine().settle(&input);
-    assert!(snap.warnings.iter().any(|w| w.message.contains("DiscountRule")));
+    assert!(snap
+        .warnings
+        .iter()
+        .any(|w| w.message.contains("DiscountRule")));
 }

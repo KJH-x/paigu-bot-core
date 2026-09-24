@@ -150,7 +150,10 @@ pub async fn replay_messages(
 }
 
 /// §U7：读取轮次事件日志中的 `ParseOverride`，建立 `message_id → 修正解析` 映射。
-async fn load_parse_overrides(store: &MessageLog, round_id: &str) -> HashMap<String, ParsedMessage> {
+async fn load_parse_overrides(
+    store: &MessageLog,
+    round_id: &str,
+) -> HashMap<String, ParsedMessage> {
     let raw = match store.read_raw_events(round_id, 0).await {
         Ok(raw) => raw,
         Err(_) => return HashMap::new(),
@@ -280,8 +283,7 @@ async fn compute(
         });
     }
 
-    let mut board =
-        rebuild_allocation_snapshot(&items, &events, &eligibilities, &display_names);
+    let mut board = rebuild_allocation_snapshot(&items, &events, &eligibilities, &display_names);
     board.generated_at = DateTime::<Utc>::from_timestamp_millis(latest_ts).unwrap_or_else(Utc::now);
     let version = board.version;
 

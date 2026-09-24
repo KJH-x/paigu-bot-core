@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::allocation::{
-    resolve_tail_boxes, BoxAllocation, ItemAllocation, SingleAllocation, SlotAllocation, SlotStatus,
-    UserAllocationSummary, UserItemAllocation, WaitingLine,
+    resolve_tail_boxes, BoxAllocation, ItemAllocation, SingleAllocation, SlotAllocation,
+    SlotStatus, UserAllocationSummary, UserItemAllocation, WaitingLine,
 };
 use crate::domain::claim::{ClaimType, EffectiveClaimLine, SlotPolicy};
 use crate::domain::event::{AdminAllocationAction, DomainEvent, EventEnvelope};

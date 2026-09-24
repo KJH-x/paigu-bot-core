@@ -378,14 +378,7 @@ fn detect_policy(text: &str) -> String {
     }
     if contains_any(
         text,
-        &[
-            "包盒",
-            "包一盒",
-            "一盒全包",
-            "全包",
-            "包整盒",
-            "整一盒",
-        ],
+        &["包盒", "包一盒", "一盒全包", "全包", "包整盒", "整一盒"],
     ) {
         return "FullBox".to_string();
     }

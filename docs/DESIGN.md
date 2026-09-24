@@ -112,12 +112,11 @@
 | 变体 | `variant_id` | String | **只读、自动生成**（不允许手填） |
 | 变体 | `name` | String | 变体名（**可改**） |
 | 变体 | `unit_price_cents` | i64 | **原价 A**（分） |
-| 变体 | `adjust_cents` | i64 | **调价 B**（分）；最终价 **C = A + B**（见下方实现注记） |
+| 变体 | `adjust_cents` | i64 | **调价 B**（分）；最终价 **C = A + B**；已落库并接入结算取价 |
 | 变体 | `capacity` | Option<u32> | 容量（可空） |
 | 变体 | `aliases` | String[] | 变体别名 |
 
-> **移除口径**：`box_size` 与 `variants[].pieces` 已从**商品模型口径**移除（拼团逐个设置变体；单领/整盒不考虑内容）。⚠️ 实现注记：Rust `ItemConfig.box_size` / `VariantConfig.pieces` 字段目前**仍保留为兼容反序列化**（编辑器不再读写），且 `config.example.json` 仍含旧值 —— 清理项见 [TODOS.md](./TODOS.md) W-G2-04。
-> ⚠️ **`adjust_cents` 实现注记**：`/round` 编辑器（`web/round.js`）已按 `原价 A ± 调价 B = 最终价 C` 三格联动读写 `variants[].adjust_cents`；但 Rust `VariantConfig` **尚未声明该字段**（当前反序列化时被忽略、不落 `data/rounds/*.json`）。落库/结算接线见 [TODOS.md](./TODOS.md) W-G2-01。
+> **实现状态（2026-09-25 核对）**：`box_size` 与 `variants[].pieces` 已从配置模型、转换逻辑和示例配置中清理；领域层 `Item.box_size` 仍是分配引擎运行时容量，不是商品配置字段。`VariantConfig.adjust_cents` 已在 Rust 声明、可往返落库，`to_unit_prices()` 与结算均读取调后价。
 
 ```jsonc
 { "item_id":"pass_sp", "name":"通行认证SP-月行水上", "kind":"拼团",
@@ -156,7 +155,7 @@
 | GET | `/api/gateway/status` | WS 连接状态 |
 | GET | `/api/replay`、`/api/replay/*` | 逐步重放（Wave 1–4 已实现；路由/返回值见 [INTERFACES.md](./INTERFACES.md) §8） |
 | GET | `/` `/admin` `/sim` `/replay` `/settlement` | 静态页（display / admin / sim / replay / settlement） |
-| GET | `/round.html`、`/settings.html` | 静态页（轮次与商品 / 其余配置）；**无 `/round`、`/settings` 短路由**，由静态文件服务提供 |
+| GET | `/round`、`/settings`（兼容 `.html`） | 静态页（轮次与商品 / 其余配置）；短路由由 `src/api/mod.rs` 显式提供 |
 | GET | `/api/workflow` | 只读工作流快照（含 `phases`）；见 [INTERFACES.md](./INTERFACES.md) §8.6/§8.7 |
 | GET/POST | `/api/rounds` | 轮次列表 / 新建（`{round_id,title?,copy_from?}`） |
 | POST | `/api/rounds/:id/activate` | 切换激活（`{mode?:continue\|fresh\|replay}`，默认 `continue`） |

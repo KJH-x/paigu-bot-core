@@ -79,7 +79,8 @@ impl Pipeline {
             .await
         {
             Ok(Some(corrected)) => {
-                self.emit_parse_override(cfg, ev, seq, now, &corrected).await;
+                self.emit_parse_override(cfg, ev, seq, now, &corrected)
+                    .await;
                 BareVariantOutcome::Resolved(corrected)
             }
             Ok(None) | Err(_) => fallback(cfg.llm.fallback_to_rules),
@@ -235,7 +236,11 @@ struct LlmClarifyMatch {
 
 impl LlmClarify {
     fn answer_for(&self, index: usize, name: &str) -> Option<(Option<String>, Option<String>)> {
-        if let Some(m) = self.matches.iter().find(|m| m.name.as_deref() == Some(name)) {
+        if let Some(m) = self
+            .matches
+            .iter()
+            .find(|m| m.name.as_deref() == Some(name))
+        {
             return Some((m.item.clone(), m.variant.clone()));
         }
         if let Some(m) = self.matches.get(index) {
@@ -426,5 +431,3 @@ fn resolve_llm_item(
         (parsed, Some(format!("商品歧义：{}", names.join("、"))))
     }
 }
-
-

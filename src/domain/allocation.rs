@@ -180,12 +180,7 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
     for (item_id, indices) in &groups {
         let variant_entries: Vec<(String, usize)> = indices
             .iter()
-            .filter_map(|&i| {
-                out.item_allocations[i]
-                    .variant_id
-                    .clone()
-                    .map(|v| (v, i))
-            })
+            .filter_map(|&i| out.item_allocations[i].variant_id.clone().map(|v| (v, i)))
             .collect();
         if variant_entries.is_empty() {
             continue;
@@ -228,8 +223,7 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
         let mut used_tail_columns: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
 
         for slots in tail_groups.values() {
-            let declared: BTreeSet<String> =
-                slots.iter().map(|s| s.variant.clone()).collect();
+            let declared: BTreeSet<String> = slots.iter().map(|s| s.variant.clone()).collect();
 
             let mut locked = 1u32;
             for v in &declared {
@@ -321,7 +315,10 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
             }
 
             for v in &declared {
-                used_tail_columns.entry(v.clone()).or_default().insert(locked);
+                used_tail_columns
+                    .entry(v.clone())
+                    .or_default()
+                    .insert(locked);
             }
             let user_id = slots.first().map(|s| s.user_id.clone());
             let message = format!("包尾强制成盒：{item_id} 列 {locked}");
@@ -370,9 +367,10 @@ fn max_normal_column(
             continue;
         }
         for b in &snapshot.item_allocations[*idx].boxes {
-            let has_normal = b.slots.iter().any(|s| {
-                s.status == SlotStatus::Filled && s.slot_policy == SlotPolicy::Normal
-            });
+            let has_normal = b
+                .slots
+                .iter()
+                .any(|s| s.status == SlotStatus::Filled && s.slot_policy == SlotPolicy::Normal);
             if has_normal {
                 max = max.max(b.box_index);
             }
@@ -433,7 +431,12 @@ fn normal_slot_at(
         })
 }
 
-fn clear_slot(snapshot: &mut AllocationSnapshot, entry_idx: usize, box_index: u32, slot_index: u32) {
+fn clear_slot(
+    snapshot: &mut AllocationSnapshot,
+    entry_idx: usize,
+    box_index: u32,
+    slot_index: u32,
+) {
     if let Some(b) = snapshot.item_allocations[entry_idx]
         .boxes
         .iter_mut()

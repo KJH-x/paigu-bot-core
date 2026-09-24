@@ -163,7 +163,7 @@
 | G-3 | **轮次库**：`config/app.json` 只留 `active_round_id`；轮次数据 `data/rounds/<round_id>.json`；`GET/POST /api/rounds`、`activate`、`check`、`DELETE`。 |
 | G-4 | **切换与重放解耦**：`activate` 模式 `continue`（**默认**，无状态时等价 `fresh`）/`fresh`/`replay`；重放是独立自动计算，不与切换绑定。 |
 | G-5 | **成员 CN**：`members.cn_overrides[{user_id,cn,aliases}]`，绑定 QQ；回退 **CN → 归一化昵称 → user_id**；用于匹配与**结算表/账单人名**。 |
-| G-6 | **商品模型**：商品级仅**原价**；**仅变体**有 `unit_price_cents`(A)+`adjust_cents`(B)，最终价 C=A+B；**`box_size` 与 `variants[].pieces` 已移除**（实现残留见 TODOS W-G2-04）。 |
+| G-6 | **商品模型**：商品级仅**原价**；**仅变体**有 `unit_price_cents`(A)+`adjust_cents`(B)，最终价 C=A+B；**`box_size` 与 `variants[].pieces` 已从配置模型移除**。 |
 | G-7 | **种类与 class**：`拼团/单领/整盒/特典`；`class` **自动推导**（有变体⇒A 受限；无变体⇒B）；**整盒为独立种类**（默认进单领队列）。 |
 | G-8 | **first-match 与失败澄清**：只报角色名→目录序**第一个可拼团商品**；全 fail→**LLM 澄清**→**`ParseOverride` 事件持久化**并**被重放消费**。 |
 | G-9 | **整盒/包尾**：整盒→单领队列；`fullbox` 保留为拼团策略；**包尾→拼团并在结算强制成盒**；**列=盒序号**，锁定列 = 申报变体**最大列序 + 1**；冲突外的前序未成盒普通认购**自动滑入**。 |

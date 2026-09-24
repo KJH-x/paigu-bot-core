@@ -53,10 +53,7 @@ pub struct CreateRoundBody {
 }
 
 /// `POST /api/rounds`：新建轮次（`copy_from` 存在则复制其商品/阶段）。
-pub async fn create_round(
-    state: &ApiState,
-    body: CreateRoundBody,
-) -> Result<Value, ServiceError> {
+pub async fn create_round(state: &ApiState, body: CreateRoundBody) -> Result<Value, ServiceError> {
     let round_id = body.round_id.trim().to_string();
     if !rounds::is_valid_round_id(&round_id) {
         return Err(ServiceError::BadRequest(
@@ -77,9 +74,8 @@ pub async fn create_round(
         .filter(|s| !s.is_empty())
     {
         Some(from) => {
-            let mut base = rounds::read_round(from).ok_or_else(|| {
-                ServiceError::BadRequest(format!("copy_from 不存在：{from}"))
-            })?;
+            let mut base = rounds::read_round(from)
+                .ok_or_else(|| ServiceError::BadRequest(format!("copy_from 不存在：{from}")))?;
             base.round_id = round_id.clone();
             base
         }
@@ -93,7 +89,12 @@ pub async fn create_round(
             items: Vec::new(),
         },
     };
-    if let Some(title) = body.title.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(title) = body
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         round.title = title.to_string();
     }
 
@@ -159,10 +160,9 @@ pub async fn activate_round(
                 .read_all(&id)
                 .await
                 .map_err(ServiceError::from)?;
-            let result =
-                session::replay_messages(&cfg_now, &records, ReplayOverrides::default())
-                    .await
-                    .map_err(ServiceError::from)?;
+            let result = session::replay_messages(&cfg_now, &records, ReplayOverrides::default())
+                .await
+                .map_err(ServiceError::from)?;
             replay::remember_replay(&result);
             replayed = Some(replay::replay_result_json(&result));
         }
@@ -198,9 +198,7 @@ pub async fn delete_round(state: &ApiState, id: &str) -> Result<Value, ServiceEr
         .clone()
         .unwrap_or_else(|| cfg.round.round_id.clone());
     if id == active || id == cfg.round.round_id {
-        return Err(ServiceError::BadRequest(
-            "不能删除激活中的轮次".to_string(),
-        ));
+        return Err(ServiceError::BadRequest("不能删除激活中的轮次".to_string()));
     }
     let path = rounds::round_path(&id);
     if !path.exists() {
@@ -437,7 +435,10 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
             issues.push(issue(
                 "error",
                 "alias_conflict",
-                format!("变体名/别名与商品名冲突：{token}（{}）", owners_label(owners)),
+                format!(
+                    "变体名/别名与商品名冲突：{token}（{}）",
+                    owners_label(owners)
+                ),
                 "variants",
             ));
         }
@@ -462,7 +463,12 @@ mod tests {
         }
     }
 
-    fn item(item_id: &str, kind: &str, aliases: Vec<&str>, variants: Vec<VariantConfig>) -> ItemConfig {
+    fn item(
+        item_id: &str,
+        kind: &str,
+        aliases: Vec<&str>,
+        variants: Vec<VariantConfig>,
+    ) -> ItemConfig {
         ItemConfig {
             item_id: item_id.to_string(),
             name: item_id.to_string(),
@@ -487,7 +493,12 @@ mod tests {
             items: vec![
                 item("a", "拼团", vec!["通用"], vec![variant("v1", 100)]),
                 item("b", "单领", vec!["通用"], vec![]),
-                item("c", "单领", vec![], vec![variant("v1", 0), variant("v1", 0)]),
+                item(
+                    "c",
+                    "单领",
+                    vec![],
+                    vec![variant("v1", 0), variant("v1", 0)],
+                ),
             ],
         };
         let issues = check_issues(&round);

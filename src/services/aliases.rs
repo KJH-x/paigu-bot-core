@@ -72,7 +72,12 @@ pub async fn suggest_aliases_with(
     settings: &LlmSettings,
     body: SuggestAliasesBody,
 ) -> Value {
-    if let Some(mode) = body.mode.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+    if let Some(mode) = body
+        .mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+    {
         if !mode.eq_ignore_ascii_case("aliases") {
             return degraded(format!("不支持的 mode：{mode}"));
         }

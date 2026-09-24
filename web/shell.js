@@ -422,7 +422,7 @@
             ' ' + pos.x + ',' + (pos.y + h / 2 + 5) + ' ' + (pos.x - w / 2) + ',' + pos.y +
             '" style="fill:' + fill + ';stroke:' + stroke + ';stroke-width:' + sw + '"/>');
         } else {
-          var rx = n.shape === 'stadium' ? h / 2 : 8;
+          var rx = 0;
           p.push('<rect x="' + (pos.x - w / 2) + '" y="' + (pos.y - h / 2) + '" width="' + w + '" height="' + h +
             '" rx="' + rx + '" style="fill:' + fill + ';stroke:' + stroke + ';stroke-width:' + sw + '"/>');
         }

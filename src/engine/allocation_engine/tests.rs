@@ -150,12 +150,7 @@ fn variant_item(item_id: &str, variants: &[&str]) -> Item {
     item
 }
 
-fn filled_user(
-    snap: &AllocationSnapshot,
-    item: &str,
-    variant: &str,
-    col: u32,
-) -> Option<String> {
+fn filled_user(snap: &AllocationSnapshot, item: &str, variant: &str, col: u32) -> Option<String> {
     snap.item_allocations
         .iter()
         .find(|i| i.item_id.0 == item && i.variant_id.as_deref() == Some(variant))
@@ -167,7 +162,12 @@ fn filled_user(
         })
 }
 
-fn slot_at(snap: &AllocationSnapshot, item: &str, variant: &str, col: u32) -> Option<SlotAllocation> {
+fn slot_at(
+    snap: &AllocationSnapshot,
+    item: &str,
+    variant: &str,
+    col: u32,
+) -> Option<SlotAllocation> {
     snap.item_allocations
         .iter()
         .find(|i| i.item_id.0 == item && i.variant_id.as_deref() == Some(variant))

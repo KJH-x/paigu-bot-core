@@ -70,7 +70,9 @@ impl SettlementEngine {
 
             let item = item_map.get(&ItemId(line.item_id.clone()));
             let name = item.map(|i| i.name.clone()).unwrap_or_default();
-            let kind = item.map(|i| i.kind.as_str().to_string()).unwrap_or_default();
+            let kind = item
+                .map(|i| i.kind.as_str().to_string())
+                .unwrap_or_default();
 
             if let Some(existing) = bill.lines.iter_mut().find(|l| l.item_id.0 == line.item_id) {
                 existing.quantity = existing.quantity.saturating_add(line.qty);
@@ -153,8 +155,8 @@ impl SettlementEngine {
         if !input.discount_rules.is_empty() {
             warnings.push(SettlementWarning {
                 user_id: None,
-                message:
-                    "旧 DiscountRule 已停止参与结算；金额统一由 settlement::evaluate 计算".to_string(),
+                message: "旧 DiscountRule 已停止参与结算；金额统一由 settlement::evaluate 计算"
+                    .to_string(),
                 severity: "warning".to_string(),
             });
         }
