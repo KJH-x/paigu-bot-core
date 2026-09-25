@@ -99,11 +99,12 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 
 ## Newlook 方形视觉层（2026-09-25）
 
-`newlook.css` 在各页最后加载，不改功能脚本与 DOM 契约。设计取向是高信息密度的操作台，而不是卡片化消费产品：
+`newlook.css` 在各页最后加载，不改功能脚本与 DOM 契约。设计取向是连续、可扫描的任务工作台，而不是一组彼此漂浮的表单卡片：
 
-- 所有组件零圆角；层级主要靠 1px 实线、灰阶表面和少量 3–4px 强调边，不用悬浮阴影制造深度；
-- 颜色是语义 token：蓝色只用于主要操作与当前模块，成功/警告/错误同时使用文字和左侧色条，不只依赖色相；
-- 键盘焦点使用高对比双层轮廓，并保留 `forced-colors`；动效服从 `prefers-reduced-motion`；
-- 表格、编号、状态与价格使用等宽/等宽数字，移动端保持单列和底部流程导航。
+- 所有组件零圆角；内容画布限制为 1180px，顶栏、局部导航和同级面板无缝衔接，外层网格只用于标示应用边界；
+- 用「应用顶栏 → 局部导航 → 编号功能区 → 内嵌卡片/表格 → 编辑控件」五级样式建立层级；仅主要操作和独立商品卡使用无模糊硬阴影；
+- 橙、蓝、紫、青、红分别标记接入/轮次、展示、LLM/重放、成员/结算、日志/风险等功能类别；成功、警告、错误仍同时使用文字与边框，不只依赖色相；
+- 表单采用统一 12 栏轨道，短数值、ID、标题、URL 按预期内容长度分配宽度；可编辑控件用实底和粗下边线，只读控件用斜纹与虚线，开关开启后显示整块色洗；
+- 键盘焦点使用高对比双层轮廓，并保留 `forced-colors`；动效服从 `prefers-reduced-motion`；移动端回到单列、保留底部流程导航。
 
-取舍参考：[Carbon 的颜色分层与 token](https://carbondesignsystem.com/elements/color/overview/)、[Carbon spacing](https://carbondesignsystem.com/elements/spacing/overview/)、[W3C Focus Appearance](https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance)、[W3C Non-text Contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast)、[GOV.UK focus states](https://design-system.service.gov.uk/get-started/focus-states/)。
+取舍参考：[Are.na Sander 的高对比、内联编辑与快速导航](https://www.are.na/editorial/introducing-sander-our-new-web-client)、[Bloomberg 的客户导向产品设计](https://www.bloomberg.com/company/stories/bloombergs-customer-centric-design-ethos/)、[GOV.UK 固定宽度输入](https://design-system.service.gov.uk/components/text-input/)、[GOV.UK 响应式布局](https://design-system.service.gov.uk/styles/layout/)、[Carbon 的颜色分层与 token](https://carbondesignsystem.com/elements/color/overview/)、[W3C Focus Appearance](https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance) 与 [W3C Non-text Contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast)。
