@@ -10,7 +10,14 @@
     table: { packages: [] },
     result: null,
     plans: {},
-    evalTimer: null
+    evalTimer: null,
+    draftRevision: 0,
+    orderNumbers: {},
+    selectedStrategy: null,
+    locked: false,
+    draftTimer: null,
+    draftSaveChain: Promise.resolve(),
+    suppressSave: false
   };
 
   function defaultConfig() {
@@ -299,7 +306,7 @@
       head.appendChild(el('span', 'pkg-id', pkg.package_id));
       head.appendChild(el('span', 'spacer'));
       head.appendChild(buttonEl('删包', 'small danger', function () {
-        state.table.packages.splice(pi, 1); renderOrderTable(); evaluate(true);
+        state.table.packages.splice(pi, 1); renderOrderTable(); evaluate(true); scheduleDraftSave();
       }));
       card.appendChild(head);
 
@@ -312,10 +319,49 @@
       addWrap.appendChild(buttonEl('＋ 加行', 'small', function () {
         pkg.lines.push({ item_id: '', variant_id: null, qty: 1, unit_price_cents: 0, is_gift: false });
         renderOrderTable();
+        scheduleDraftSave();
       }));
       card.appendChild(addWrap);
       host.appendChild(card);
     });
+    renderOrderNumbers();
+    applyLockState();
+  }
+
+  function renderOrderNumbers() {
+    var host = $('order-numbers');
+    if (!host) return;
+    host.innerHTML = '';
+    (state.table.packages || []).filter(function (pkg) {
+      return (pkg.lines || []).some(function (line) { return line.qty > 0; });
+    }).forEach(function (pkg) {
+      var row = el('div', 'row');
+      row.appendChild(el('span', 'mono', pkg.package_id));
+      row.appendChild(inputEl('text', state.orderNumbers[pkg.package_id] || '', '订单号', function (value) {
+        state.orderNumbers[pkg.package_id] = value.trim();
+        scheduleDraftSave();
+      }));
+      host.appendChild(row);
+    });
+  }
+
+  function applyLockState() {
+    var host = $('order');
+    if (host) {
+      Array.prototype.forEach.call(host.querySelectorAll('input,button,select'), function (control) {
+        if (control.id !== 'unlock-order') control.disabled = !!state.locked;
+      });
+    }
+    var configHost = $('settle');
+    if (configHost) {
+      Array.prototype.forEach.call(configHost.querySelectorAll('input,button,select'), function (control) {
+        control.disabled = !!state.locked;
+      });
+    }
+    $('lock-order').classList.toggle('hidden', !!state.locked);
+    $('unlock-order').classList.toggle('hidden', !state.locked);
+    $('save').disabled = !!state.locked;
+    $('draft-status').textContent = state.locked ? '已锁定 · revision ' + state.draftRevision : '已保存 · revision ' + state.draftRevision;
   }
 
   function lineRow(pkg, line, pi, li) {
@@ -365,7 +411,7 @@
 
     row.appendChild(el('span', 'line-total', totalText(line)));
     row.appendChild(buttonEl('删', 'small danger', function () {
-      pkg.lines.splice(li, 1); renderOrderTable(); evaluate(true);
+      pkg.lines.splice(li, 1); renderOrderTable(); evaluate(true); scheduleDraftSave();
     }));
     return row;
   }
@@ -390,15 +436,97 @@
     else target.lines.push(line);
     renderOrderTable();
     evaluate(true);
+    scheduleDraftSave();
   }
 
   function addPackage() {
     state.table.packages.push({ package_id: '包' + (state.table.packages.length + 1), lines: [] });
     renderOrderTable();
+    scheduleDraftSave();
   }
 
   function scheduleEval() {
     evaluate(false);
+    scheduleDraftSave();
+  }
+
+  function scheduleDraftSave() {
+    if (state.suppressSave || state.locked) return;
+    if (state.draftTimer) clearTimeout(state.draftTimer);
+    $('draft-status').textContent = '等待保存…';
+    state.draftTimer = setTimeout(function () { saveDraft(); }, 500);
+  }
+
+  function saveDraft() {
+    if (state.locked) return Promise.resolve(null);
+    if (state.draftTimer) { clearTimeout(state.draftTimer); state.draftTimer = null; }
+    state.draftSaveChain = state.draftSaveChain.catch(function () { return null; }).then(function () {
+      $('draft-status').textContent = '保存中…';
+      return P.put('/api/settlement/draft', {
+        revision: state.draftRevision,
+        order_table: P.deepClone(state.table),
+        selected_strategy: state.selectedStrategy,
+        order_numbers: P.deepClone(state.orderNumbers)
+      }).then(function (res) {
+        var draft = res.draft || {};
+        state.draftRevision = draft.revision || state.draftRevision;
+        state.result = draft.last_result || state.result;
+        state.locked = !!draft.locked;
+        renderResult();
+        applyLockState();
+        $('draft-status').textContent = '已保存 · revision ' + state.draftRevision;
+        return res;
+      }).catch(function (err) {
+        $('draft-status').textContent = '保存失败';
+        if (err.status === 409 && err.data && err.data.draft) applyDraft(err.data.draft);
+        showBanner('草稿保存失败：' + P.errorText(err), true);
+        throw err;
+      });
+    });
+    return state.draftSaveChain;
+  }
+
+  function applyDraft(draft) {
+    state.draftRevision = draft.revision || 0;
+    state.table = draft.order_table || { packages: [] };
+    state.result = draft.last_result || null;
+    state.selectedStrategy = draft.selected_strategy || null;
+    state.orderNumbers = draft.order_numbers || {};
+    state.locked = !!draft.locked;
+    renderOrderTable();
+    renderResult();
+    applyLockState();
+  }
+
+  function loadDraft() {
+    state.suppressSave = true;
+    return P.get('/api/settlement/draft').then(function (res) {
+      applyDraft(res.draft || {});
+      $('draft-status').textContent = state.locked ? '已锁定 · revision ' + state.draftRevision : '已保存 · revision ' + state.draftRevision;
+    }).catch(function (err) {
+      showBanner('结算草稿载入失败：' + P.errorText(err), true);
+    }).then(function () { state.suppressSave = false; });
+  }
+
+  function lockOrder() {
+    saveDraft().then(function () {
+      return P.post('/api/settlement/lock', { revision: state.draftRevision });
+    }).then(function (res) {
+      applyDraft(res.draft || {});
+      hideBanner();
+      P.toast('订单已锁定并持久化', 'ok');
+    }).catch(function (err) {
+      showBanner('锁定失败：' + P.errorText(err), true);
+    });
+  }
+
+  function unlockOrder() {
+    if (!window.confirm('确认解锁？解锁后消息、配置和下单表可继续修改。')) return;
+    P.post('/api/settlement/unlock', { revision: state.draftRevision }).then(function (res) {
+      applyDraft(res.draft || {});
+      hideBanner();
+      P.toast('已解锁', 'ok');
+    }).catch(function (err) { showBanner('解锁失败：' + P.errorText(err), true); });
   }
 
   function evaluate(immediate) {
@@ -615,9 +743,12 @@
 
     var best = res.best || { packages: [] };
     var apply = buttonEl('应用此方案', 'small primary', function () {
+      if (!res.invariants_ok) { showBanner('方案未通过价格守恒校验，禁止应用。', true); return; }
       state.table = P.deepClone(best);
+      state.selectedStrategy = res.strategy || s;
       renderOrderTable();
       evaluate(true);
+      scheduleDraftSave();
       P.toast('已应用 ' + (res.strategy || s) + ' 方案', 'ok');
     });
     apply.classList.add('apply');
@@ -647,6 +778,7 @@
     renderConfig();
     renderOrderTable();
     evaluate(true);
+    scheduleDraftSave();
     P.toast('已载入占位示例', 'ok');
   }
 
@@ -659,7 +791,8 @@
       state.table = res.order_table;
       renderOrderTable();
       evaluate(true);
-      P.toast('已从当前排位生成 ' + state.table.packages.length + ' 个包（单价默认 0，可在表内编辑）', 'ok');
+      scheduleDraftSave();
+      P.toast('已从当前排位生成 ' + state.table.packages.length + ' 个包', 'ok');
     }).catch(function (err) {
       showBanner('生成失败：' + P.errorText(err), true);
     });
@@ -743,6 +876,8 @@
     $('load-allocation').addEventListener('click', fromAllocation);
     $('pkg-add').addEventListener('click', addPackage);
     $('run-plans').addEventListener('click', runPlans);
+    $('lock-order').addEventListener('click', lockOrder);
+    $('unlock-order').addEventListener('click', unlockOrder);
     $('price-add').addEventListener('click', function () {
       state.config.pricing.push({ item_id: '', variant_id: null, mode: $('price-mode-global').value, value: 0 });
       renderConfig();
@@ -771,7 +906,7 @@
     renderConfig();
     renderOrderTable();
     loadMeta();
-    loadConfig();
+    loadConfig().then(loadDraft);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

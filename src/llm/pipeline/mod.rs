@@ -456,6 +456,8 @@ impl Pipeline {
     async fn persist(&self, ev: &IncomingEvent, status: &str, detail: &str, routed: &str) {
         let round_id = self.cfg.get().await.round.round_id.clone();
         let rec = LogMessageRecord {
+            record_id: crate::messages::new_record_id(),
+            record_revision: 1,
             seq: crate::messages::next_seq(),
             group_id: ev.group_id.clone(),
             user_id: ev.user_id.clone(),

@@ -6,7 +6,8 @@ use axum::{Json, Router};
 use serde_json::Value;
 
 use crate::services::settlement::{
-    self, CompletenessBody, EvaluateBody, FromAllocationBody, PlanBody, SettlementConfigBody,
+    self, CompletenessBody, DraftBody, DraftRevisionBody, EvaluateBody, FromAllocationBody,
+    PlanBody, SettlementConfigBody,
 };
 use crate::services::ServiceError;
 use crate::settlement::{CompletenessReport, SettlementResult};
@@ -23,6 +24,46 @@ pub fn routes() -> Router<Arc<ApiState>> {
         .route("/api/settlement/completeness", post(completeness_check))
         .route("/api/settlement/plan", post(plan_order))
         .route("/api/settlement/from-allocation", post(from_allocation))
+        .route("/api/settlement/draft", get(get_draft).put(put_draft))
+        .route("/api/settlement/lock", post(lock_draft))
+        .route("/api/settlement/unlock", post(unlock_draft))
+}
+
+async fn get_draft(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
+    settlement::get_draft(&state)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
+}
+
+async fn put_draft(
+    State(state): State<Arc<ApiState>>,
+    Json(body): Json<DraftBody>,
+) -> Result<Json<Value>, ApiError> {
+    settlement::put_draft(&state, body)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
+}
+
+async fn lock_draft(
+    State(state): State<Arc<ApiState>>,
+    Json(body): Json<DraftRevisionBody>,
+) -> Result<Json<Value>, ApiError> {
+    settlement::lock_draft(&state, body)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
+}
+
+async fn unlock_draft(
+    State(state): State<Arc<ApiState>>,
+    Json(body): Json<DraftRevisionBody>,
+) -> Result<Json<Value>, ApiError> {
+    settlement::unlock_draft(&state, body)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
 }
 
 async fn get_settlement_config(State(state): State<Arc<ApiState>>) -> Json<Value> {

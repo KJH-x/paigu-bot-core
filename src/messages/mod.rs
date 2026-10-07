@@ -3,9 +3,22 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+fn default_record_revision() -> u64 {
+    1
+}
+
+pub fn new_record_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageRecord {
+    #[serde(default)]
+    pub record_id: String,
+    #[serde(default = "default_record_revision")]
+    pub record_revision: u64,
     pub seq: i64,
     pub group_id: String,
     pub user_id: String,
@@ -30,9 +43,14 @@ pub fn next_seq() -> i64 {
     NEXT_SEQ.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-/// 复位进程级序号（`Pipeline::reset` 时调用，使内存状态与全局序号一道回到初始）。
-pub fn reset_seq() {
-    NEXT_SEQ.store(0, Ordering::SeqCst);
+fn advance_seq_floor(value: i64) {
+    let mut current = NEXT_SEQ.load(Ordering::SeqCst);
+    while value > current {
+        match NEXT_SEQ.compare_exchange(current, value, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => break,
+            Err(actual) => current = actual,
+        }
+    }
 }
 
 pub fn messages_dir_from(env_value: Option<String>) -> PathBuf {
@@ -87,38 +105,82 @@ impl JsonlMessageStore {
 
     pub(crate) async fn read_all(&self) -> anyhow::Result<Vec<MessageRecord>> {
         let _guard = Self::lock();
+        self.read_all_locked()
+    }
+
+    fn read_all_locked(&self) -> anyhow::Result<Vec<MessageRecord>> {
         if !self.path.exists() {
             return Ok(Vec::new());
         }
         let raw = std::fs::read_to_string(&self.path)?;
         let mut out = Vec::new();
         let mut skipped = 0usize;
-        for line in raw.lines() {
+        let mut migrated = false;
+        for (line_index, line) in raw.lines().enumerate() {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
             // 容错：损坏/截断行跳过而非整体失败（长期运行下单个坏行不应致命）
-            match serde_json::from_str(trimmed) {
-                Ok(rec) => out.push(rec),
+            match serde_json::from_str::<MessageRecord>(trimmed) {
+                Ok(mut rec) => {
+                    if rec.record_id.trim().is_empty() {
+                        let mut hash = Sha256::new();
+                        hash.update(
+                            self.path
+                                .file_stem()
+                                .and_then(|value| value.to_str())
+                                .unwrap_or("unknown-round")
+                                .as_bytes(),
+                        );
+                        hash.update(b"\0");
+                        hash.update(line_index.to_le_bytes());
+                        hash.update(b"\0");
+                        hash.update(trimmed.as_bytes());
+                        rec.record_id = format!("legacy-{:x}", hash.finalize());
+                        migrated = true;
+                    }
+                    if rec.record_revision == 0 {
+                        rec.record_revision = 1;
+                        migrated = true;
+                    }
+                    advance_seq_floor(rec.seq);
+                    out.push(rec)
+                }
                 Err(_) => skipped += 1,
             }
         }
         if skipped > 0 {
             tracing::warn!(path = %self.path.display(), skipped, "消息日志存在无法解析的行，已跳过");
         }
+        if migrated {
+            let backup = self.path.with_extension("jsonl.pre-record-id.bak");
+            if !backup.exists() {
+                std::fs::copy(&self.path, &backup)?;
+            }
+            Self::replace_locked(&self.path, &out)?;
+        }
         Ok(out)
     }
 
     pub(crate) async fn replace_all(&self, recs: &[MessageRecord]) -> anyhow::Result<()> {
+        let _guard = Self::lock();
+        Self::replace_locked(&self.path, recs)
+    }
+
+    fn replace_locked(path: &Path, recs: &[MessageRecord]) -> anyhow::Result<()> {
         let mut buf = String::new();
         for rec in recs {
             buf.push_str(&serde_json::to_string(rec)?);
             buf.push('\n');
         }
-        let _guard = Self::lock();
-        Self::ensure_parent(&self.path)?;
-        std::fs::write(&self.path, buf)?;
+        Self::ensure_parent(path)?;
+        let temp = path.with_extension(format!("jsonl.{}.tmp", uuid::Uuid::new_v4()));
+        std::fs::write(&temp, buf)?;
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
+        std::fs::rename(temp, path)?;
         Ok(())
     }
 
@@ -131,33 +193,39 @@ impl JsonlMessageStore {
         Ok(all.into_iter().filter(|r| pred(r)).collect())
     }
 
-    /// 就地修改单条（按 `seq`），返回是否命中。
-    async fn update<F>(&self, seq: i64, mut f: F) -> anyhow::Result<bool>
+    /// 就地修改单条（按不可变 `record_id`），返回修改后的记录。
+    async fn update<F>(&self, record_id: &str, mut f: F) -> anyhow::Result<Option<MessageRecord>>
     where
         F: FnMut(&mut MessageRecord) + Send,
     {
-        let mut recs = self.read_all().await?;
-        let mut hit = false;
+        let _guard = Self::lock();
+        let mut recs = self.read_all_locked()?;
+        let mut updated = None;
         for rec in recs.iter_mut() {
-            if rec.seq == seq {
+            if rec.record_id == record_id {
                 f(rec);
-                hit = true;
+                updated = Some(rec.clone());
+                break;
             }
         }
-        if hit {
-            self.replace_all(&recs).await?;
+        if updated.is_some() {
+            Self::replace_locked(&self.path, &recs)?;
         }
-        Ok(hit)
+        Ok(updated)
     }
 
-    /// 删除单条（按 `seq`），返回是否命中。
-    async fn delete(&self, seq: i64) -> anyhow::Result<bool> {
-        let recs = self.read_all().await?;
+    /// 删除单条（按不可变 `record_id`），返回是否命中。
+    async fn delete(&self, record_id: &str) -> anyhow::Result<bool> {
+        let _guard = Self::lock();
+        let recs = self.read_all_locked()?;
         let before = recs.len();
-        let kept: Vec<MessageRecord> = recs.into_iter().filter(|r| r.seq != seq).collect();
+        let kept: Vec<MessageRecord> = recs
+            .into_iter()
+            .filter(|r| r.record_id != record_id)
+            .collect();
         let hit = kept.len() != before;
         if hit {
-            self.replace_all(&kept).await?;
+            Self::replace_locked(&self.path, &kept)?;
         }
         Ok(hit)
     }
@@ -173,8 +241,25 @@ pub struct MessageLog {
 
 impl MessageLog {
     pub fn new(dir: impl Into<PathBuf>, events_dir: impl Into<PathBuf>) -> Arc<Self> {
+        let dir = dir.into();
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if entry.path().extension().and_then(|v| v.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                if let Ok(raw) = std::fs::read_to_string(entry.path()) {
+                    for line in raw.lines() {
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+                            if let Some(seq) = value.get("seq").and_then(|v| v.as_i64()) {
+                                advance_seq_floor(seq);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Arc::new(Self {
-            dir: dir.into(),
+            dir,
             events_dir: events_dir.into(),
         })
     }
@@ -218,15 +303,40 @@ impl MessageLog {
         self.store_for(round_id).query(pred).await
     }
 
-    pub async fn update<F>(&self, round_id: &str, seq: i64, f: F) -> anyhow::Result<bool>
+    pub async fn update<F>(
+        &self,
+        round_id: &str,
+        record_id: &str,
+        f: F,
+    ) -> anyhow::Result<Option<MessageRecord>>
     where
         F: FnMut(&mut MessageRecord) + Send,
     {
-        self.store_for(round_id).update(seq, f).await
+        self.store_for(round_id).update(record_id, f).await
     }
 
-    pub async fn delete(&self, round_id: &str, seq: i64) -> anyhow::Result<bool> {
-        self.store_for(round_id).delete(seq).await
+    pub async fn delete(&self, round_id: &str, record_id: &str) -> anyhow::Result<bool> {
+        self.store_for(round_id).delete(record_id).await
+    }
+
+    pub async fn resolve_record_id(
+        &self,
+        round_id: &str,
+        key: &str,
+    ) -> anyhow::Result<Result<String, usize>> {
+        let records = self.read_all(round_id).await?;
+        if records.iter().any(|record| record.record_id == key) {
+            return Ok(Ok(key.to_string()));
+        }
+        let Ok(seq) = key.parse::<i64>() else {
+            return Ok(Err(0));
+        };
+        let matches: Vec<&MessageRecord> =
+            records.iter().filter(|record| record.seq == seq).collect();
+        match matches.as_slice() {
+            [record] => Ok(Ok(record.record_id.clone())),
+            many => Ok(Err(many.len())),
+        }
     }
 
     /// 追加一条**原始事件**（C-3：保留所有成员原始事件，供事件溯源/重放）。

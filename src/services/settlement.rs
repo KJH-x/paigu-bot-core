@@ -1,6 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::api::ApiState;
@@ -16,6 +18,249 @@ use crate::settlement::{
 };
 
 use super::ServiceError;
+
+fn draft_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn draft_dir() -> PathBuf {
+    std::env::var("PAIGU_SETTLEMENT_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data/settlement"))
+}
+
+fn draft_path(round_id: &str) -> PathBuf {
+    draft_dir().join(format!("{round_id}.json"))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettlementDraft {
+    pub schema_version: u32,
+    pub round_id: String,
+    pub revision: u64,
+    #[serde(default)]
+    pub order_table: OrderTable,
+    #[serde(default)]
+    pub last_result: Option<SettlementResult>,
+    #[serde(default)]
+    pub selected_strategy: Option<String>,
+    #[serde(default)]
+    pub order_numbers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub locked_at_ms: Option<i64>,
+    pub updated_at_ms: i64,
+}
+
+impl SettlementDraft {
+    fn empty(round_id: &str) -> Self {
+        Self {
+            schema_version: 1,
+            round_id: round_id.to_string(),
+            revision: 0,
+            order_table: OrderTable::default(),
+            last_result: None,
+            selected_strategy: None,
+            order_numbers: BTreeMap::new(),
+            locked: false,
+            locked_at_ms: None,
+            updated_at_ms: crate::services::messages::now_ms(),
+        }
+    }
+}
+
+fn read_draft(round_id: &str) -> Result<SettlementDraft, ServiceError> {
+    let _guard = draft_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    read_draft_unlocked(round_id)
+}
+
+fn read_draft_unlocked(round_id: &str) -> Result<SettlementDraft, ServiceError> {
+    let path = draft_path(round_id);
+    if !path.exists() {
+        return Ok(SettlementDraft::empty(round_id));
+    }
+    let raw =
+        std::fs::read_to_string(path).map_err(|error| ServiceError::Internal(error.into()))?;
+    serde_json::from_str(&raw).map_err(|error| ServiceError::Internal(error.into()))
+}
+
+pub fn round_locked(round_id: &str) -> Result<bool, ServiceError> {
+    Ok(read_draft(round_id)?.locked)
+}
+
+pub async fn is_locked(state: &ApiState) -> Result<bool, ServiceError> {
+    let round_id = state.cfg.get().await.round.round_id;
+    Ok(round_locked(&round_id)? || state.pipeline.is_locked().await)
+}
+
+fn write_draft_unlocked(draft: &SettlementDraft) -> Result<(), ServiceError> {
+    let path = draft_path(&draft.round_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| ServiceError::Internal(error.into()))?;
+    }
+    let temp = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4()));
+    let raw =
+        serde_json::to_vec_pretty(draft).map_err(|error| ServiceError::Internal(error.into()))?;
+    std::fs::write(&temp, raw).map_err(|error| ServiceError::Internal(error.into()))?;
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|error| ServiceError::Internal(error.into()))?;
+    }
+    std::fs::rename(temp, path).map_err(|error| ServiceError::Internal(error.into()))?;
+    Ok(())
+}
+
+fn write_draft_checked(draft: &mut SettlementDraft, expected: u64) -> Result<(), ServiceError> {
+    let _guard = draft_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let current = read_draft_unlocked(&draft.round_id)?;
+    ensure_draft_revision(&current, expected)?;
+    draft.revision = current.revision.saturating_add(1);
+    write_draft_unlocked(draft)
+}
+
+pub async fn get_draft(state: &ApiState) -> Result<Value, ServiceError> {
+    let round_id = state.cfg.get().await.round.round_id;
+    let draft = read_draft(&round_id)?;
+    Ok(json!({ "draft": draft }))
+}
+
+#[derive(Deserialize)]
+pub struct DraftBody {
+    pub revision: u64,
+    pub order_table: OrderTable,
+    #[serde(default)]
+    pub selected_strategy: Option<String>,
+    #[serde(default)]
+    pub order_numbers: BTreeMap<String, String>,
+}
+
+pub async fn put_draft(state: &ApiState, body: DraftBody) -> Result<Value, ServiceError> {
+    let cfg = state.cfg.get().await;
+    let mut draft = read_draft(&cfg.round.round_id)?;
+    if draft.locked || state.pipeline.is_locked().await {
+        return Err(ServiceError::Locked("结算草稿已锁定".to_string()));
+    }
+    ensure_draft_revision(&draft, body.revision)?;
+    let result = evaluate(
+        &merge_catalog_pricing(cfg.settlement, &cfg.round),
+        &body.order_table,
+    );
+    draft.order_table = body.order_table;
+    draft.last_result = Some(result);
+    draft.selected_strategy = body.selected_strategy;
+    draft.order_numbers = body.order_numbers;
+    draft.updated_at_ms = crate::services::messages::now_ms();
+    write_draft_checked(&mut draft, body.revision)?;
+    Ok(json!({ "draft": draft }))
+}
+
+#[derive(Deserialize)]
+pub struct DraftRevisionBody {
+    pub revision: u64,
+}
+
+pub async fn lock_draft(state: &ApiState, body: DraftRevisionBody) -> Result<Value, ServiceError> {
+    let cfg = state.cfg.get().await;
+    let mut draft = read_draft(&cfg.round.round_id)?;
+    ensure_draft_revision(&draft, body.revision)?;
+    if draft.locked {
+        return Ok(json!({ "draft": draft }));
+    }
+    let nonempty: Vec<_> = draft
+        .order_table
+        .packages
+        .iter()
+        .filter(|package| package.lines.iter().any(|line| line.qty > 0))
+        .collect();
+    if nonempty.is_empty() {
+        return Err(ServiceError::Unprocessable(
+            "没有可锁定的订单包".to_string(),
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    let mut package_ids = BTreeSet::new();
+    for package in &nonempty {
+        if package.package_id.trim().is_empty() || !package_ids.insert(package.package_id.clone()) {
+            return Err(ServiceError::Unprocessable(
+                "订单包名称不能为空且必须唯一".to_string(),
+            ));
+        }
+        let number = draft
+            .order_numbers
+            .get(&package.package_id)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ServiceError::Unprocessable(format!("订单包 {} 缺少订单号", package.package_id))
+            })?;
+        if !unique.insert(number.to_string()) {
+            return Err(ServiceError::Unprocessable(format!("订单号重复：{number}")));
+        }
+    }
+    let allocation = current_allocation(state).await?;
+    let completeness = check_completeness(&draft.order_table, &allocation);
+    if !completeness.complete {
+        return Err(ServiceError::Unprocessable(format!(
+            "排包未完成：{}",
+            completeness.messages.join("；")
+        )));
+    }
+    let prices = prices_from_order_table(&draft.order_table)?;
+    validate_prices_for_allocation(&allocation, &prices)?;
+    draft.last_result = Some(evaluate(
+        &merge_catalog_pricing(cfg.settlement, &cfg.round),
+        &draft.order_table,
+    ));
+    draft.locked = true;
+    let now = crate::services::messages::now_ms();
+    draft.locked_at_ms = Some(now);
+    draft.updated_at_ms = now;
+    write_draft_checked(&mut draft, body.revision)?;
+    state.pipeline.set_locked(true).await;
+    Ok(json!({ "draft": draft }))
+}
+
+pub async fn unlock_draft(
+    state: &ApiState,
+    body: DraftRevisionBody,
+) -> Result<Value, ServiceError> {
+    let round_id = state.cfg.get().await.round.round_id;
+    let mut draft = read_draft(&round_id)?;
+    ensure_draft_revision(&draft, body.revision)?;
+    draft.locked = false;
+    draft.locked_at_ms = None;
+    draft.updated_at_ms = crate::services::messages::now_ms();
+    write_draft_checked(&mut draft, body.revision)?;
+    state.pipeline.set_locked(false).await;
+    Ok(json!({ "draft": draft }))
+}
+
+fn ensure_draft_revision(draft: &SettlementDraft, expected: u64) -> Result<(), ServiceError> {
+    if draft.revision != expected {
+        return Err(ServiceError::Conflict(json!({
+            "error": "stale_draft_revision",
+            "revision": draft.revision,
+            "draft": draft,
+        })));
+    }
+    Ok(())
+}
+
+pub async fn restore_persistent_lock(state: &ApiState) -> Result<(), ServiceError> {
+    let round_id = state.cfg.get().await.round.round_id;
+    state
+        .pipeline
+        .set_locked(read_draft(&round_id)?.locked)
+        .await;
+    Ok(())
+}
 
 /// §U6：把目录变体的 `adjust_cents`（B）合成为结算定价（`mode=AdjustBy`，精确匹配
 /// `item_id`/`variant_id`），使 `evaluate` 的「调后价」列反映 C = A + B。
@@ -64,6 +309,11 @@ pub async fn put_settlement_config(
     state: &ApiState,
     body: SettlementConfigBody,
 ) -> Result<Value, ServiceError> {
+    if is_locked(state).await? {
+        return Err(ServiceError::Locked(
+            "轮次已锁定，不能修改结算规则".to_string(),
+        ));
+    }
     let mut cfg = state.cfg.get().await;
     cfg.settlement = body.config;
     match state.cfg.put(cfg, body.revision).await {
@@ -157,8 +407,11 @@ pub async fn plan_order(state: &ApiState, body: PlanBody) -> Result<Value, Servi
         Some(config) => config,
         None => merge_catalog_pricing(cfg_now.settlement.clone(), &cfg_now.round),
     };
-    // 标价表：请求未带则取「商品目录」（A-4 口径）
-    let prices = if body.prices.is_empty() {
+    let source_table = body.order_table.clone();
+    // 手工订单表中的显式价格是本次规划的权威价格；无订单表时才回退商品目录。
+    let prices = if let Some(table) = &source_table {
+        prices_from_order_table(table)?
+    } else if body.prices.is_empty() {
         cfg_now.round.to_unit_prices()
     } else {
         body.prices
@@ -170,6 +423,7 @@ pub async fn plan_order(state: &ApiState, body: PlanBody) -> Result<Value, Servi
             None => current_allocation(state).await?,
         },
     };
+    validate_prices_for_allocation(&allocation, &prices)?;
     let request = PlanRequest {
         config,
         allocation,
@@ -178,6 +432,9 @@ pub async fn plan_order(state: &ApiState, body: PlanBody) -> Result<Value, Servi
         prices,
     };
     let result = planner::plan(&request);
+    if let Some(source) = &source_table {
+        ensure_plan_invariants(source, &result.best)?;
+    }
     Ok(json!({
         "strategy": strategy_name,
         "best": result.best,
@@ -186,7 +443,112 @@ pub async fn plan_order(state: &ApiState, body: PlanBody) -> Result<Value, Servi
         "candidates": result.candidates,
         "stats": result.stats,
         "planner": "t5",
+        "invariants_ok": true,
     }))
+}
+
+fn prices_from_order_table(table: &OrderTable) -> Result<Vec<UnitPrice>, ServiceError> {
+    let mut prices: BTreeMap<(String, Option<String>), i64> = BTreeMap::new();
+    for package in &table.packages {
+        for line in &package.lines {
+            if line.qty == 0 || line.is_gift {
+                continue;
+            }
+            if line.unit_price_cents <= 0 {
+                return Err(ServiceError::Unprocessable(format!(
+                    "非赠品 {}{} 缺少有效标价",
+                    line.item_id,
+                    line.variant_id
+                        .as_deref()
+                        .map(|v| format!("/{v}"))
+                        .unwrap_or_default()
+                )));
+            }
+            let key = (line.item_id.clone(), line.variant_id.clone());
+            if let Some(existing) = prices.insert(key.clone(), line.unit_price_cents) {
+                if existing != line.unit_price_cents {
+                    return Err(ServiceError::Unprocessable(format!(
+                        "同一商品/变体价格冲突：{}",
+                        key.0
+                    )));
+                }
+            }
+        }
+    }
+    Ok(prices
+        .into_iter()
+        .map(|((item_id, variant_id), unit_price_cents)| UnitPrice {
+            item_id,
+            variant_id,
+            unit_price_cents,
+        })
+        .collect())
+}
+
+fn validate_prices_for_allocation(
+    allocation: &AllocationSnapshot,
+    prices: &[UnitPrice],
+) -> Result<(), ServiceError> {
+    for item in &allocation.item_allocations {
+        if item.kind == "gift" {
+            continue;
+        }
+        let price = item
+            .variant_id
+            .as_ref()
+            .and_then(|variant| {
+                prices.iter().find(|price| {
+                    price.item_id == item.item_id.0
+                        && price.variant_id.as_deref() == Some(variant.as_str())
+                })
+            })
+            .or_else(|| {
+                prices
+                    .iter()
+                    .find(|price| price.item_id == item.item_id.0 && price.variant_id.is_none())
+            });
+        if price.map(|price| price.unit_price_cents > 0) != Some(true) {
+            return Err(ServiceError::Unprocessable(format!(
+                "商品 {} 缺少非零标价，已停止规划",
+                item.item_id.0
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_plan_invariants(source: &OrderTable, planned: &OrderTable) -> Result<(), ServiceError> {
+    fn signature(table: &OrderTable) -> BTreeMap<(String, Option<String>, bool), (u32, i64)> {
+        let mut out = BTreeMap::new();
+        for package in &table.packages {
+            for line in &package.lines {
+                let entry = out
+                    .entry((line.item_id.clone(), line.variant_id.clone(), line.is_gift))
+                    .or_insert((0u32, 0i64));
+                entry.0 = entry.0.saturating_add(line.qty);
+                if !line.is_gift {
+                    entry.1 = entry.1.saturating_add(line.total_cents());
+                }
+            }
+        }
+        out
+    }
+    if signature(source) != signature(planned) {
+        return Err(ServiceError::Unprocessable(
+            "规划前后商品数量或折前总价不守恒，已禁止应用".to_string(),
+        ));
+    }
+    if planned
+        .packages
+        .iter()
+        .flat_map(|package| &package.lines)
+        .any(|line| !line.is_gift && line.qty > 0 && line.unit_price_cents <= 0)
+    {
+        return Err(ServiceError::Unprocessable(
+            "规划结果包含零价非赠品，已禁止应用".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize, Default)]
@@ -410,5 +772,39 @@ mod tests {
         let merged = merge_catalog_pricing(base, &round_with_adjust(-500));
         assert_eq!(merged.pricing.len(), 1, "已存在的显式定价保留、不追加");
         assert_eq!(merged.pricing[0].value, 6000);
+    }
+
+    #[test]
+    fn order_table_prices_reject_zero_and_conflicts() {
+        let zero = OrderTable::new(vec![Package::new("p1", vec![Line::new("a", 1, 0)])]);
+        assert!(matches!(
+            prices_from_order_table(&zero),
+            Err(ServiceError::Unprocessable(_))
+        ));
+
+        let conflict = OrderTable::new(vec![
+            Package::new("p1", vec![Line::new("a", 1, 100)]),
+            Package::new("p2", vec![Line::new("a", 1, 200)]),
+        ]);
+        assert!(matches!(
+            prices_from_order_table(&conflict),
+            Err(ServiceError::Unprocessable(_))
+        ));
+    }
+
+    #[test]
+    fn plan_invariant_accepts_repack_and_rejects_price_loss() {
+        let source = OrderTable::new(vec![
+            Package::new("p1", vec![Line::new("a", 1, 100)]),
+            Package::new("p2", vec![Line::new("a", 2, 100)]),
+        ]);
+        let repacked = OrderTable::new(vec![Package::new("p3", vec![Line::new("a", 3, 100)])]);
+        assert!(ensure_plan_invariants(&source, &repacked).is_ok());
+
+        let zeroed = OrderTable::new(vec![Package::new("p3", vec![Line::new("a", 3, 0)])]);
+        assert!(matches!(
+            ensure_plan_invariants(&source, &zeroed),
+            Err(ServiceError::Unprocessable(_))
+        ));
     }
 }

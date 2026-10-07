@@ -89,6 +89,30 @@ async fn put_config(
     State(state): State<Arc<ApiState>>,
     Json(body): Json<ConfigBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let current_round = state.cfg.get().await.round.round_id;
+    if state.pipeline.is_locked().await
+        || crate::services::settlement::round_locked(&current_round).unwrap_or(false)
+    {
+        return Err((
+            StatusCode::LOCKED,
+            Json(json!({ "error": "locked", "message": "轮次已锁定，请先解锁" })),
+        ));
+    }
+    if !body
+        .config
+        .gateway
+        .whitelist_groups
+        .iter()
+        .any(|group| group == &body.config.round.group_id)
+    {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "round_group_not_whitelisted",
+                "message": "轮次群号不在网关群白名单中",
+            })),
+        ));
+    }
     match state.cfg.put(body.config, body.revision).await {
         Ok(revision) => {
             let config = state.cfg.get().await;

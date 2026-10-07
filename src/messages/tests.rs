@@ -6,6 +6,8 @@ fn temp_dir() -> PathBuf {
 
 fn record(seq: i64, text: &str) -> MessageRecord {
     MessageRecord {
+        record_id: format!("record-{seq}"),
+        record_revision: 1,
         seq,
         group_id: "123456789".to_string(),
         user_id: "10001".to_string(),
@@ -88,7 +90,7 @@ async fn replace_all_with_empty_clears_file() {
 }
 
 #[tokio::test]
-async fn query_update_and_delete_by_seq() {
+async fn query_update_and_delete_by_record_id() {
     let dir = temp_dir();
     let log = MessageLog::new(&dir, dir.join("events"));
     log.append("r4", &record(1, "甲")).await.unwrap();
@@ -99,17 +101,62 @@ async fn query_update_and_delete_by_seq() {
     assert_eq!(hit[0].seq, 2);
 
     assert!(log
-        .update("r4", 2, |r| r.status = "Edited".to_string())
+        .update("r4", "record-2", |r| r.status = "Edited".to_string())
         .await
-        .unwrap());
+        .unwrap()
+        .is_some());
     let edited = log.query("r4", |r| r.seq == 2).await.unwrap();
     assert_eq!(edited[0].status, "Edited");
 
-    assert!(log.delete("r4", 1).await.unwrap());
-    assert!(!log.delete("r4", 1).await.unwrap());
+    assert!(log.delete("r4", "record-1").await.unwrap());
+    assert!(!log.delete("r4", "record-1").await.unwrap());
     let remaining = log.read_all("r4").await.unwrap();
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].seq, 2);
+}
+
+#[tokio::test]
+async fn duplicate_seq_updates_exactly_one_record() {
+    let dir = temp_dir();
+    let log = MessageLog::new(&dir, dir.join("events"));
+    let mut first = record(7, "甲");
+    first.record_id = "first".to_string();
+    let mut second = record(7, "乙");
+    second.record_id = "second".to_string();
+    log.append("dup", &first).await.unwrap();
+    log.append("dup", &second).await.unwrap();
+
+    log.update("dup", "second", |record| record.text = "已修改".to_string())
+        .await
+        .unwrap();
+    let records = log.read_all("dup").await.unwrap();
+    assert_eq!(records[0].text, "甲");
+    assert_eq!(records[1].text, "已修改");
+    assert!(matches!(
+        log.resolve_record_id("dup", "7").await.unwrap(),
+        Err(2)
+    ));
+}
+
+#[tokio::test]
+async fn legacy_log_is_migrated_with_backup() {
+    let dir = temp_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.jsonl");
+    let mut value = serde_json::to_value(record(3, "旧记录")).unwrap();
+    value.as_object_mut().unwrap().remove("record_id");
+    value.as_object_mut().unwrap().remove("record_revision");
+    std::fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string(&value).unwrap()),
+    )
+    .unwrap();
+    let log = MessageLog::new(&dir, dir.join("events"));
+
+    let records = log.read_all("legacy").await.unwrap();
+    assert!(records[0].record_id.starts_with("legacy-"));
+    assert_eq!(records[0].record_revision, 1);
+    assert!(dir.join("legacy.jsonl.pre-record-id.bak").exists());
 }
 
 #[tokio::test]

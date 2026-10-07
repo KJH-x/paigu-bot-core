@@ -69,6 +69,7 @@ pub fn apply_overrides(base: &AppConfig, overrides: &ReplayOverrides) -> AppConf
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplayMessageView {
+    pub record_id: String,
     pub seq: i64,
     pub group_id: String,
     pub user_id: String,
@@ -82,6 +83,7 @@ pub struct ReplayMessageView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplayOutcome {
+    pub record_id: String,
     pub seq: i64,
     pub status: String,
     pub detail: String,
@@ -124,6 +126,10 @@ pub struct ReplayResult {
     pub board: AllocationSnapshot,
     pub outcomes: Vec<ReplayOutcome>,
     pub events: Vec<EventEnvelope>,
+    #[serde(skip)]
+    pub(crate) eligibilities: Vec<Eligibility>,
+    #[serde(skip)]
+    pub(crate) display_names: HashMap<UserId, String>,
     pub diff: ReplayDiff,
     #[serde(default)]
     pub settlement: Option<SettlementConfig>,
@@ -193,6 +199,8 @@ async fn replay_messages_with_parse(
         board: computed.board,
         outcomes: computed.outcomes,
         events: computed.events,
+        eligibilities: computed.eligibilities,
+        display_names: computed.display_names,
         diff,
         settlement: overrides.settlement,
     })
@@ -202,6 +210,8 @@ struct Computation {
     messages: Vec<ReplayMessageView>,
     outcomes: Vec<ReplayOutcome>,
     events: Vec<EventEnvelope>,
+    eligibilities: Vec<Eligibility>,
+    display_names: HashMap<UserId, String>,
     board: AllocationSnapshot,
     version: i64,
 }
@@ -262,6 +272,7 @@ async fn compute(
         }
 
         messages.push(ReplayMessageView {
+            record_id: rec.record_id.clone(),
             seq: rec.seq,
             group_id: rec.group_id.clone(),
             user_id: rec.user_id.clone(),
@@ -276,6 +287,7 @@ async fn compute(
             detail: processed.detail.clone(),
         });
         outcomes.push(ReplayOutcome {
+            record_id: rec.record_id.clone(),
             seq: rec.seq,
             applied: processed.status == "Applied",
             status: processed.status,
@@ -291,6 +303,8 @@ async fn compute(
         messages,
         outcomes,
         events,
+        eligibilities,
+        display_names,
         board,
         version,
     }
@@ -330,7 +344,9 @@ async fn process_one(
     // U4：人名优先 CN（已由 `compute` 解析），回退昵称。
     let cn = display_names.get(&UserId(rec.user_id.clone()));
 
-    if rec.routed.eq_ignore_ascii_case("drop") {
+    if rec.routed.eq_ignore_ascii_case("drop")
+        || rec.routed.to_ascii_lowercase().starts_with("drop:")
+    {
         return skipped("Dropped", "非白名单/Drop");
     }
 

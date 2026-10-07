@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 use crate::domain::claim::Eligibility;
 use crate::domain::event::EventEnvelope;
 use crate::domain::snapshot::AllocationSnapshot;
+use crate::messages::MessageRecord as LogMessageRecord;
+use crate::replay::session::ReplayResult;
 
 use super::Pipeline;
 
@@ -33,7 +35,6 @@ pub(super) struct MessageRecord {
 
 impl Pipeline {
     pub async fn reset(&self) {
-        crate::messages::reset_seq();
         let mut state = self.state.lock().await;
         *state = State::default();
     }
@@ -46,6 +47,55 @@ impl Pipeline {
             .and_then(|s| serde_json::to_value(s).ok())
             .unwrap_or(Value::Null);
         (state.version, snapshot)
+    }
+
+    pub async fn is_locked(&self) -> bool {
+        self.state.lock().await.locked
+    }
+
+    pub async fn set_locked(&self, locked: bool) {
+        self.state.lock().await.locked = locked;
+    }
+
+    /// 将持久化日志的权威重放结果一次性应用到实时管线。
+    pub async fn apply_replay(&self, result: &ReplayResult, records: &[LogMessageRecord]) {
+        let mut state = self.state.lock().await;
+        let locked = state.locked;
+        let mut seen = HashSet::new();
+        let mut identity = std::collections::HashMap::new();
+        for record in records {
+            seen.insert(format!("{}::{}", record.group_id, record.message_id));
+            let (clean, _) = crate::parser::normalize::clean_nickname(&record.nickname);
+            identity.insert(record.user_id.clone(), clean);
+        }
+        let display = result
+            .display_names
+            .iter()
+            .map(|(user_id, name)| (user_id.0.clone(), name.clone()))
+            .collect();
+        let messages = result
+            .messages
+            .iter()
+            .map(|message| MessageRecord {
+                seq: message.seq,
+                display: message.nickname.clone(),
+                text: message.text.clone(),
+                status: message.status.clone(),
+                detail: message.detail.clone(),
+            })
+            .collect();
+        *state = State {
+            events: result.events.clone(),
+            messages,
+            seen,
+            eligibilities: result.eligibilities.clone(),
+            display,
+            identity,
+            seq: records.iter().map(|record| record.seq).max().unwrap_or(0),
+            version: result.version,
+            snapshot: Some(result.board.clone()),
+            locked,
+        };
     }
 
     pub async fn messages_since(&self, since: i64) -> Vec<Value> {

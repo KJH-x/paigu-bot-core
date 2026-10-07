@@ -37,6 +37,8 @@ fn test_config() -> AppConfig {
 
 fn record(seq: i64, user_id: &str, text: &str, ts: i64) -> MessageRecord {
     MessageRecord {
+        record_id: format!("record-{seq}-{user_id}"),
+        record_revision: 1,
         seq,
         group_id: "123456789".to_string(),
         user_id: user_id.to_string(),
@@ -389,6 +391,8 @@ async fn realtime_and_replay_whitelist_decisions_match() {
     let records = vec![
         record(1, "u1", "排 徽章 甲 1", 1_000),
         MessageRecord {
+            record_id: "record-2-u2".to_string(),
+            record_revision: 1,
             seq: 2,
             group_id: "123456789".to_string(),
             user_id: "u2".to_string(),

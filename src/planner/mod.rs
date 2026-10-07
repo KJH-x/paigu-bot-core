@@ -419,7 +419,11 @@ fn collect_atoms(req: &PlanRequest) -> Vec<Atom> {
         let is_gift = alloc.kind == "gift";
         let variant = alloc.variant_id.clone();
         // 标价一律取商品目录（canonical）：同一商品不因购买人/单领自带价而拆成两种（A-3）
-        let base = lookup_price(&req.prices, &alloc.item_id.0, variant.as_deref());
+        let base = if is_gift {
+            0
+        } else {
+            lookup_price(&req.prices, &alloc.item_id.0, variant.as_deref())
+        };
 
         for mbox in &alloc.boxes {
             for slot in &mbox.slots {

@@ -48,11 +48,54 @@ pub async fn do_replay(
     Ok(result)
 }
 
-/// 消息变更后的重算：与 `do_replay` 不同，不写入 `last_replays`（保持原语义）。
+/// 消息变更后的权威重算：写回每条消息状态，并原子替换实时管线。
 pub async fn recompute(state: &ApiState) -> anyhow::Result<Value> {
+    let started = std::time::Instant::now();
     let cfg = state.cfg.get().await;
     let result = session::replay(state.messages.as_ref(), &cfg, ReplayOverrides::default()).await?;
-    Ok(replay_result_json(&result))
+    let current = state.cfg.get().await;
+    anyhow::ensure!(
+        current.revision == cfg.revision && current.round.round_id == cfg.round.round_id,
+        "配置在重算期间发生变化，请重试"
+    );
+
+    let outcomes: HashMap<&str, (&str, &str)> = result
+        .outcomes
+        .iter()
+        .map(|outcome| {
+            (
+                outcome.record_id.as_str(),
+                (outcome.status.as_str(), outcome.detail.as_str()),
+            )
+        })
+        .collect();
+    let mut records = state.messages.read_all(&cfg.round.round_id).await?;
+    for record in &mut records {
+        if let Some((status, detail)) = outcomes.get(record.record_id.as_str()) {
+            record.status = (*status).to_string();
+            record.detail = (*detail).to_string();
+        }
+    }
+    state
+        .messages
+        .replace_all(&cfg.round.round_id, &records)
+        .await?;
+    state.pipeline.apply_replay(&result, &records).await;
+    remember_replay(&result);
+
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for outcome in &result.outcomes {
+        *counts.entry(outcome.status.as_str()).or_default() += 1;
+    }
+    let mut value = replay_result_json(&result);
+    value["summary"] = json!({
+        "applied": counts.get("Applied").copied().unwrap_or(0),
+        "dropped": counts.get("Dropped").copied().unwrap_or(0),
+        "rejected": counts.get("Rejected").copied().unwrap_or(0),
+        "ignored": counts.get("Ignored").copied().unwrap_or(0),
+        "elapsed_ms": started.elapsed().as_millis(),
+    });
+    Ok(value)
 }
 
 #[derive(Deserialize, Default)]

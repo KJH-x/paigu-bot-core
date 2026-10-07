@@ -159,11 +159,11 @@
             <button id="msg-refresh" class="small">刷新消息</button>
           </div>
           <div class="panel-body">
-            <div class="hint">编辑文本 / 时间 / 状态后点「保存」调用 PUT /api/messages/:seq（带 revision，改后触发重算）；「删除」调用 DELETE /api/messages/:seq。</div>
+            <div class="hint">编辑文本或时间后会按消息唯一 ID 保存并权威重算；“重新路由”会按当前白名单重新判断该消息。</div>
             <div id="msg-empty" class="empty">尚未加载消息</div>
             <div class="table-wrap" style="max-height:46vh;overflow:auto">
               <table class="grid">
-                <thead><tr><th>seq</th><th>text</th><th>timestamp（本地）</th><th>status</th><th>操作</th></tr></thead>
+                <thead><tr><th>seq / ID</th><th>消息 / 来源</th><th>时间（本地）</th><th>状态 / 路由</th><th>操作</th></tr></thead>
                 <tbody id="msg-body"></tbody>
               </table>
             </div>

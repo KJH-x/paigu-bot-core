@@ -21,14 +21,23 @@ impl Pipeline {
         let head = cmd.split_whitespace().next().unwrap_or("").to_string();
         let (status, detail, reply): (&str, String, String) = match head.as_str() {
             "开团" | "解锁" | "open" | "unlock" => {
-                let mut st = self.state.lock().await;
-                st.locked = false;
-                let v = st.version;
-                (
-                    "Applied",
-                    "已开团（解锁）".to_string(),
-                    format!("已开团（解锁），当前版本 #{v}"),
-                )
+                let round_id = self.cfg.get().await.round.round_id;
+                if crate::services::settlement::round_locked(&round_id).unwrap_or(false) {
+                    (
+                        "Rejected",
+                        "订单已持久化锁定，请在结算页解锁".to_string(),
+                        "订单已锁定；请在结算页确认并解锁。".to_string(),
+                    )
+                } else {
+                    let mut st = self.state.lock().await;
+                    st.locked = false;
+                    let v = st.version;
+                    (
+                        "Applied",
+                        "已开团（解锁）".to_string(),
+                        format!("已开团（解锁），当前版本 #{v}"),
+                    )
+                }
             }
             "锁位" | "锁定" | "结团" | "结束" | "lock" | "close" => {
                 let mut st = self.state.lock().await;

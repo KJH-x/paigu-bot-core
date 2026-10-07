@@ -100,6 +100,24 @@ fn gift_max_prefers_more_packages_up_to_claims() {
 }
 
 #[test]
+fn gift_atoms_remain_zero_when_catalog_has_a_price() {
+    let mut gift = single_item("gift", "u1", "c1", 9_999);
+    gift.kind = "gift".to_string();
+    let req = PlanRequest {
+        config: SettlementConfig::default(),
+        allocation: snapshot(vec![gift]),
+        strategy: Strategy::GiftMax,
+        limits: limits(1, 100),
+        prices: vec![price("gift", 9_999)],
+    };
+
+    let atoms = collect_atoms(&req);
+    assert_eq!(atoms.len(), 1);
+    assert!(atoms[0].is_gift);
+    assert_eq!(atoms[0].unit_price_cents, 0);
+}
+
+#[test]
 fn discount_max_splits_into_threshold_packages() {
     let config = SettlementConfig {
         discounts: vec![threshold_discount(1_000, 10_000, -1)],

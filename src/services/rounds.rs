@@ -7,7 +7,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::ApiState;
-use crate::replay::session::{self, ReplayOverrides};
 use crate::settings::rounds;
 use crate::settings::RoundSettings;
 
@@ -97,6 +96,17 @@ pub async fn create_round(state: &ApiState, body: CreateRoundBody) -> Result<Val
     {
         round.title = title.to_string();
     }
+    if !cfg
+        .gateway
+        .whitelist_groups
+        .iter()
+        .any(|group| group == &round.group_id)
+    {
+        return Err(ServiceError::Unprocessable(format!(
+            "复制出的轮次群号 {} 不在网关群白名单中，请先修正来源轮次",
+            round.group_id
+        )));
+    }
 
     rounds::write_round(&round).map_err(|e| ServiceError::Internal(e.into()))?;
     Ok(json!({ "ok": true, "round": round_summary(&round, false, None) }))
@@ -154,20 +164,11 @@ pub async fn activate_round(
         "replay" => {
             state.pipeline.reset().await;
             reset = true;
-            let cfg_now = state.cfg.get().await;
-            let records = state
-                .messages
-                .read_all(&id)
-                .await
-                .map_err(ServiceError::from)?;
-            let result = session::replay_messages(&cfg_now, &records, ReplayOverrides::default())
-                .await
-                .map_err(ServiceError::from)?;
-            replay::remember_replay(&result);
-            replayed = Some(replay::replay_result_json(&result));
+            replayed = Some(replay::recompute(state).await.map_err(ServiceError::from)?);
         }
         _ => {}
     }
+    crate::services::settlement::restore_persistent_lock(state).await?;
 
     let (version, _) = state.pipeline.board().await;
     Ok(json!({
@@ -181,10 +182,24 @@ pub async fn activate_round(
 }
 
 /// `POST /api/rounds/:id/check`：轮次结构校验。
-pub async fn check_round(_state: &ApiState, id: &str) -> Result<Value, ServiceError> {
+pub async fn check_round(state: &ApiState, id: &str) -> Result<Value, ServiceError> {
     let round = rounds::read_round(id.trim())
         .ok_or_else(|| ServiceError::NotFound(format!("轮次不存在：{id}")))?;
-    let issues = check_issues(&round);
+    let mut issues = check_issues(&round);
+    let cfg = state.cfg.get().await;
+    if !cfg
+        .gateway
+        .whitelist_groups
+        .iter()
+        .any(|group| group == &round.group_id)
+    {
+        issues.push(issue(
+            "error",
+            "group_not_whitelisted",
+            format!("轮次群号 {} 不在网关群白名单中", round.group_id),
+            "round.group_id",
+        ));
+    }
     let ok = !issues.iter().any(|i| i["level"] == "error");
     Ok(json!({ "ok": ok, "issues": issues }))
 }

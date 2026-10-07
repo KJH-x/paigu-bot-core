@@ -17,8 +17,6 @@
     function $(id) { return document.getElementById(id); }
     var state = { messages: [] };
 
-    function rev() { return typeof opts.getRevision === 'function' ? opts.getRevision() : null; }
-    function setRev(v) { if (typeof opts.setRevision === 'function') opts.setRevision(v); }
     function banner(msg, bad) { if (opts.onBanner) opts.onBanner(msg, bad); }
     function toast(msg, kind) { if (opts.onToast) opts.onToast(msg, kind); }
 
@@ -39,7 +37,9 @@
 
       var tdSeq = document.createElement('td');
       tdSeq.className = 'mono';
-      tdSeq.textContent = m.seq;
+      var shortId = String(m.record_id || '').slice(0, 8);
+      tdSeq.textContent = '#' + m.seq + (shortId ? ' · ' + shortId : '');
+      tdSeq.title = (m.record_id || '') + ' / revision ' + (m.record_revision || 1);
       tr.appendChild(tdSeq);
 
       var tdText = document.createElement('td');
@@ -48,6 +48,10 @@
       textInp.style.width = '100%';
       textInp.setAttribute('data-field', 'text');
       tdText.appendChild(textInp);
+      var meta = document.createElement('div');
+      meta.className = 'hint mono';
+      meta.textContent = (m.nickname || m.user_id || '—') + ' · 群 ' + (m.group_id || '—');
+      tdText.appendChild(meta);
       tr.appendChild(tdText);
 
       var tdTs = document.createElement('td');
@@ -59,10 +63,14 @@
       tr.appendChild(tdTs);
 
       var tdStatus = document.createElement('td');
-      var statusInp = document.createElement('input');
-      statusInp.value = m.status == null ? '' : m.status;
-      statusInp.setAttribute('data-field', 'status');
-      tdStatus.appendChild(statusInp);
+      var status = document.createElement('div');
+      status.textContent = m.status == null ? '' : m.status;
+      var route = document.createElement('div');
+      route.className = 'hint mono';
+      route.textContent = m.routed || '—';
+      route.title = m.detail || '';
+      tdStatus.appendChild(status);
+      tdStatus.appendChild(route);
       tr.appendChild(tdStatus);
 
       var tdAct = document.createElement('td');
@@ -71,10 +79,15 @@
       save.textContent = '保存';
       save.addEventListener('click', function () { saveMessage(tr, m); });
       tdAct.appendChild(save);
+      var reroute = document.createElement('button');
+      reroute.className = 'small';
+      reroute.textContent = '重新路由';
+      reroute.addEventListener('click', function () { rerouteMessage(m); });
+      tdAct.appendChild(reroute);
       var del = document.createElement('button');
       del.className = 'danger small';
       del.textContent = '删除';
-      del.addEventListener('click', function () { deleteMessage(m.seq); });
+      del.addEventListener('click', function () { deleteMessage(m); });
       tdAct.appendChild(del);
       tr.appendChild(tdAct);
 
@@ -96,42 +109,52 @@
 
     function saveMessage(tr, m) {
       var seq = m.seq;
+      var key = m.record_id || String(seq);
       var textValue = tr.querySelector('[data-field="text"]').value;
-      var statusValue = tr.querySelector('[data-field="status"]').value;
       var ts = M.localInputToMs(tr.querySelector('[data-field="timestamp_ms"]').value);
       if (!textValue.trim()) { banner('消息 text 不能为空', true); return; }
       if (ts == null) { banner('消息时间非法：请填写有效的本地时间', true); return; }
-      var body = { text: textValue, status: statusValue, timestamp_ms: ts, recompute: true };
-      // 同步不可变字段，避免后端内存记录缺 user_id/group_id 时校验失败
-      if (m.user_id) body.user_id = m.user_id;
-      if (m.nickname) body.nickname = m.nickname;
-      if (m.group_id) body.group_id = m.group_id;
-      if (m.routed) body.routed = m.routed;
-      if (typeof m.is_admin === 'boolean') body.is_admin = m.is_admin;
-      var r = rev();
-      if (r != null) body.revision = r;
-      P.put('/api/messages/' + encodeURIComponent(seq), body).then(function (res) {
-        if (res && res.revision != null) setRev(res.revision);
+      var body = { text: textValue, timestamp_ms: ts, record_revision: m.record_revision, recompute: true };
+      P.put('/api/messages/' + encodeURIComponent(key), body).then(function (res) {
         banner('');
-        toast('消息 ' + seq + ' 已保存并重算', 'ok');
+        var s = res && res.result && res.result.summary;
+        toast('消息 ' + seq + ' 已保存并重算' + (s ? '（应用 ' + s.applied + '，掉落 ' + s.dropped + '）' : ''), 'ok');
         return load();
       }).catch(function (err) {
         if (err.status === 404) banner('消息 ' + seq + ' 不存在（可能已被删除）。', true);
-        else if (err.status === 409) banner('保存冲突（HTTP 409）：revision 已变化，请先「重新载入」配置。', true);
+        else if (err.status === 409) banner('该消息已被其他操作修改，请刷新后重试。', true);
+        else if (err.status === 423) banner('轮次已锁定，请先在结算页解锁。', true);
         else banner('保存消息失败：' + P.errorText(err), true);
       });
     }
 
-    function deleteMessage(seq) {
-      if (!global.confirm('确认删除消息 seq=' + seq + ' 并触发重算？')) return;
-      P.request('/api/messages/' + encodeURIComponent(seq) + '?recompute=true', { method: 'DELETE' }).then(function (res) {
-        if (res && res.revision != null) setRev(res.revision);
+    function deleteMessage(m) {
+      var key = m.record_id || String(m.seq);
+      if (!global.confirm('确认删除消息 seq=' + m.seq + ' 并触发重算？')) return;
+      P.request('/api/messages/' + encodeURIComponent(key) + '?recompute=true&record_revision=' + encodeURIComponent(m.record_revision || 1), { method: 'DELETE' }).then(function () {
         banner('');
-        toast('消息 ' + seq + ' 已删除并重算', 'ok');
+        toast('消息 ' + m.seq + ' 已删除并重算', 'ok');
         return load();
       }).catch(function (err) {
-        if (err.status === 404) banner('消息 ' + seq + ' 不存在。', true);
+        if (err.status === 404) banner('消息 ' + m.seq + ' 不存在。', true);
+        else if (err.status === 409) banner('该消息已变化，请刷新后重试。', true);
+        else if (err.status === 423) banner('轮次已锁定，请先在结算页解锁。', true);
         else banner('删除消息失败：' + P.errorText(err), true);
+      });
+    }
+
+    function rerouteMessage(m) {
+      var key = m.record_id || String(m.seq);
+      if (!global.confirm('按当前群与成员白名单重新判定消息 seq=' + m.seq + ' 的路由？')) return;
+      P.post('/api/messages/' + encodeURIComponent(key) + '/reroute', { record_revision: m.record_revision }).then(function (res) {
+        var s = res && res.result && res.result.summary;
+        banner('');
+        toast('已重新路由' + (s ? '（应用 ' + s.applied + '，掉落 ' + s.dropped + '）' : ''), 'ok');
+        return load();
+      }).catch(function (err) {
+        if (err.status === 409) banner('该消息已变化，请刷新后重试。', true);
+        else if (err.status === 423) banner('轮次已锁定，请先在结算页解锁。', true);
+        else banner('重新路由失败：' + P.errorText(err), true);
       });
     }
 

@@ -89,6 +89,9 @@ async fn run_gateway_stack() -> Result<()> {
         gateway: gateway.clone(),
         messages,
     });
+    services::settlement::restore_persistent_lock(&state)
+        .await
+        .map_err(|error| anyhow::anyhow!("恢复结算锁定状态失败：{error:?}"))?;
     spawn_members_scheduler(state.clone());
     api::serve(state, port).await
 }

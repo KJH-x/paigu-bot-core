@@ -99,6 +99,8 @@
 | POST | `/api/config/reload` | `{}` | `{config,revision}` | `500 {error}` | admin | `config_routes.rs:17,45` |
 | GET | `/api/display?since=<version>` | query `since` | `{version,board,messages,who_whats,status,changed}` | — | display | `display_routes.rs:38,48` |
 | GET | `/api/messages?since=<seq>` | query `since` | `{messages,version}` | — | sim/display | `display_routes.rs:39,77` |
+| PUT/DELETE | `/api/messages/:record_id` | `record_revision` + 可编辑字段 | 单条消息 + 权威重算结果 | `409` 记录冲突/旧 seq 歧义；`423` 已锁定 | 消息编辑器 | `message_routes.rs` |
+| POST | `/api/messages/:record_id/reroute` | `{record_revision}` | 当前白名单重新路由 + 权威重算 | `409`/`423` | 消息编辑器 | `message_routes.rs` |
 | POST | `/api/sim/message` | `{user_id,nickname,text,offset_ms?,group_id?,is_admin?}` | `{outcome,board,version}` | —（业务态在 `outcome.status`） | `web/sim.js`（sim 页已改 **WS 客户端**；此 HTTP 路由保留给脚本/测试） | `sim_routes.rs:29,47` |
 | POST | `/api/sim/identity` | `{user_id,nickname,is_admin?,priority?}` | `{ok,identity,identities}` | — | `web/sim.js:209` | `sim_routes.rs:30,84` |
 | POST | `/api/sim/reset` | `{}` | `{ok,version}` | — | `web/sim.js:257` | `sim_routes.rs:31,97` |
@@ -329,6 +331,10 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `expected_quantities` / `table_quantities` | 两侧数量统计 |
 | `POST /api/settlement/completeness` | 返回 CompletenessReport |
 | `POST /api/settlement/evaluate` | 带 allocation 时未完成排包 -> 400 拒绝计算 |
+| `GET/PUT /api/settlement/draft` | 按轮次持久化订单表、试算、策略、订单号；独立 revision |
+| `POST /api/settlement/lock` | 校验排包、价格、每包唯一订单号后持久化锁定；失败返回 409/422 |
+| `POST /api/settlement/unlock` | 明确解锁并保留草稿与订单号 |
+| `POST /api/settlement/plan` | 订单表价格优先；非赠品零价、价格冲突或规划前后不守恒返回 422 |
 
 ### 8.2 商品目录（src/settings.rs）
 

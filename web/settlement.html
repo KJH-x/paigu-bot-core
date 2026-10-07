@@ -139,11 +139,22 @@
           <button id="load-allocation" class="small">从当前排位生成</button>
           <button id="load-sample" class="small">载入占位示例</button>
           <button id="pkg-add" class="small">添加包</button>
+          <span id="draft-status" class="hint">草稿未载入</span>
           <span class="mobile-sticky"><button id="evaluate" class="primary">试算</button></span>
         </div>
         <div class="panel-body">
           <div id="order-table" class="order-table"></div>
           <div id="order-empty" class="empty">尚无下单表：点「载入占位示例」或「从当前排位生成」。</div>
+          <div class="card" style="margin-top:10px">
+            <div class="card-head">
+              <span>订单号与最终锁定</span>
+              <span class="spacer"></span>
+              <button id="unlock-order" class="small hidden">解锁继续编辑</button>
+              <button id="lock-order" class="primary">保存并最终锁定</button>
+            </div>
+            <div class="hint">每个非空订单包必须填写唯一订单号；锁定后消息、配置和结算草稿都不可修改。</div>
+            <div id="order-numbers" class="rows"></div>
+          </div>
         </div>
       </section>
     </div>

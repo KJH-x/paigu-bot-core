@@ -70,6 +70,9 @@ pub async fn snapshot(state: &ApiState) -> Value {
         for (key, value) in src {
             dst.insert(key.clone(), value.clone());
         }
+        if let Ok(locked) = crate::services::settlement::round_locked(&cfg.round.round_id) {
+            dst.insert("locked".to_string(), json!(locked));
+        }
     }
     body
 }

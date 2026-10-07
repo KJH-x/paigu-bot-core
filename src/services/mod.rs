@@ -15,6 +15,9 @@ pub mod snapshot;
 /// 工作流只读快照（Stepper 用）。
 pub mod workflow;
 
+use axum::{http::StatusCode, Json};
+use serde_json::{json, Value};
+
 use crate::api::{api_bad_request, api_internal, api_not_found, api_stale_revision, ApiError};
 
 /// 服务层错误：由路由映射为与重构前一致的 HTTP 错误响应。
@@ -24,6 +27,9 @@ pub enum ServiceError {
     NotFound(String),
     /// 乐观并发：`revision` 不一致 → 409 `stale_revision`。
     StaleRevision(u64),
+    Conflict(Value),
+    Unprocessable(String),
+    Locked(String),
     Internal(anyhow::Error),
 }
 
@@ -33,6 +39,15 @@ impl ServiceError {
             ServiceError::BadRequest(message) => api_bad_request(message),
             ServiceError::NotFound(message) => api_not_found(message),
             ServiceError::StaleRevision(revision) => api_stale_revision(revision),
+            ServiceError::Conflict(value) => (StatusCode::CONFLICT, Json(value)),
+            ServiceError::Unprocessable(message) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": message })),
+            ),
+            ServiceError::Locked(message) => (
+                StatusCode::LOCKED,
+                Json(json!({ "error": "locked", "message": message })),
+            ),
             ServiceError::Internal(error) => api_internal(error),
         }
     }

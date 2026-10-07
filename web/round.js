@@ -7,6 +7,14 @@
   function esc(s) { return P.esc(s); }
 
   var PHASE_OPTIONS = ['Phase0', 'PhaseI', 'PhaseII', 'PhaseIII', 'Settling', 'Locked'];
+  var PHASE_LABELS = {
+    Phase0: 'Phase0（开团前）',
+    PhaseI: 'PhaseI（优先认购）',
+    PhaseII: 'PhaseII（开放认购）',
+    PhaseIII: 'PhaseIII（全员可改）',
+    Settling: 'Settling（结算中）',
+    Locked: 'Locked（已锁定）'
+  };
 
   var KINDS = [
     { v: 'group', label: '拼团', variants: true },
@@ -1009,8 +1017,27 @@
       var ph = PHASE_OPTIONS.indexOf(p.phase) >= 0 ? p.phase : 'Phase0';
       return { phase: ph, start_ms: intOr0(p.start_ms), end_ms: intOr0(p.end_ms) };
     });
-    cfg.round.items = state.items.map(serializeItem);
+    cfg.round.items = state.items.filter(function (it) { return !isDraftItem(it); }).map(serializeItem);
     return cfg;
+  }
+
+  function isDraftItem(it) {
+    if (!it || String(it.name || '').trim()) return false;
+    if ((it.aliases || []).length || intOr0(it.unit_price_cents) !== 0 || it.max_quantity != null) return false;
+    return !(it.variants || []).some(function (v) {
+      return String(v.name || '').trim() || (v.aliases || []).length ||
+        intOr0(v.unit_price_cents) !== 0 || intOr0(v.adjust_cents) !== 0 || v.capacity != null;
+    });
+  }
+
+  function partialItemError() {
+    for (var i = 0; i < state.items.length; i++) {
+      var it = state.items[i];
+      if (!String(it.name || '').trim() && !isDraftItem(it)) {
+        return '商品 #' + (i + 1) + ' 已填写部分字段但名称为空，请补全或删除该行。';
+      }
+    }
+    return '';
   }
 
   function load() {
@@ -1035,6 +1062,8 @@
 
   function save() {
     if (!state.config) { banner('尚未载入配置，无法保存。', true); return; }
+    var partialError = partialItemError();
+    if (partialError) { banner(partialError, true); return; }
     var hasConflict = paintConflicts();
     var cfg = collectConfig();
     $('save').disabled = true;
@@ -1052,6 +1081,10 @@
     }).catch(function (err) {
       if (err.status === 409) {
         banner('配置冲突（HTTP 409）：服务器 revision 已变化，你的改动未保存。请点「重新载入」获取最新配置后重编辑。', true);
+      } else if (err.status === 422) {
+        banner(P.errorText(err), true);
+      } else if (err.status === 423) {
+        banner('轮次已锁定，请先在结算页解锁。', true);
       } else {
         banner('保存失败：' + P.errorText(err), true);
       }
@@ -1078,7 +1111,7 @@
     var sel = document.createElement('select');
     PHASE_OPTIONS.forEach(function (ph) {
       var op = document.createElement('option');
-      op.value = ph; op.textContent = ph;
+      op.value = ph; op.textContent = PHASE_LABELS[ph] || ph;
       sel.appendChild(op);
     });
     sel.value = PHASE_OPTIONS.indexOf(p.phase) >= 0 ? p.phase : 'Phase0';
