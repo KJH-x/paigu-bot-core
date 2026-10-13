@@ -99,8 +99,8 @@ pub fn can_claim(phase: RoundPhase, class: ItemClass, is_priority: bool) -> bool
             ItemClass::B => true,
             ItemClass::A => is_priority,
         },
-        RoundPhase::PhaseIII | RoundPhase::Settling => true,
-        RoundPhase::Locked => false,
+        RoundPhase::PhaseIII => true,
+        RoundPhase::Settling | RoundPhase::Locked => false,
     }
 }
 

@@ -437,7 +437,7 @@ fn issue(level: &str, code: &str, message: String, where_: &str) -> Value {
 }
 
 /// 轮次类别与群绑定的校验：**测试轮只绑定测试群，正常轮只绑定正常群**。
-fn category_issues(round: &RoundSettings, test_group_id: Option<&str>) -> Vec<Value> {
+pub(crate) fn category_issues(round: &RoundSettings, test_group_id: Option<&str>) -> Vec<Value> {
     let mut issues = Vec::new();
     match round.category {
         RoundCategory::Test => match test_group_id {

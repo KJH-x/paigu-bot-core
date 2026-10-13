@@ -110,6 +110,9 @@ pub fn strip_cq_codes(raw: &str) -> String {
     unescape_cq(&out)
 }
 
+/// 入站文本长度上限（F8）：超出按 `char` 截断。
+const MAX_INBOUND_TEXT_CHARS: usize = 4096;
+
 pub fn normalize_message(ev: &RouteMessageEvent) -> String {
     let mut text = match &ev.message {
         Some(Value::Array(segments)) => {
@@ -140,7 +143,7 @@ pub fn normalize_message(ev: &RouteMessageEvent) -> String {
         }
     }
 
-    text.trim().to_string()
+    text.trim().chars().take(MAX_INBOUND_TEXT_CHARS).collect()
 }
 
 pub fn sanitize(text: &str) -> String {

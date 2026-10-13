@@ -113,6 +113,22 @@ async fn put_config(
             })),
         ));
     }
+    if !crate::settings::rounds::is_valid_round_id(&body.config.round.round_id) {
+        return Err(super::api_bad_request("invalid_round_id"));
+    }
+    if let Some(issue) = crate::services::rounds::category_issues(
+        &body.config.round,
+        body.config.gateway.test_group_id.as_deref(),
+    )
+    .into_iter()
+    .find(|issue| issue["level"] == "error")
+    {
+        return Err(super::api_bad_request(
+            issue["message"]
+                .as_str()
+                .unwrap_or("category_binding_invalid"),
+        ));
+    }
     match state.cfg.put(body.config, body.revision).await {
         Ok(revision) => {
             let config = state.cfg.get().await;

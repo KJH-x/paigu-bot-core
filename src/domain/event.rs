@@ -17,6 +17,7 @@ pub enum DomainEvent {
     RoundClosed(RoundClosed),
     RoundOpened(RoundOpened),
     ParseOverride(ParseOverrideEvent),
+    RoundPhaseSet(RoundPhaseSet),
 }
 
 impl DomainEvent {
@@ -32,6 +33,7 @@ impl DomainEvent {
             DomainEvent::RoundClosed(_) => "round_closed",
             DomainEvent::RoundOpened(_) => "round_opened",
             DomainEvent::ParseOverride(_) => "parse_override",
+            DomainEvent::RoundPhaseSet(_) => "round_phase_set",
         }
     }
 }
@@ -150,6 +152,12 @@ pub struct RoundClosed {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoundOpened {
     pub opened_by: UserId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoundPhaseSet {
+    pub phase: crate::round::RoundPhase,
+    pub set_by: crate::domain::ids::UserId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

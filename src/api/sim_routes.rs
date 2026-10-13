@@ -88,13 +88,12 @@ fn ensure_test_round(cfg: &AppConfig) -> Result<(), ApiError> {
     }
 }
 
-/// 测试群：优先 `gateway.test_group_id`，缺省回退当前轮群号。
-fn test_group(cfg: &AppConfig) -> String {
+/// 测试群：仅取 `gateway.test_group_id`；未配置则无测试群（不再回退轮次群号）。
+fn test_group(cfg: &AppConfig) -> Option<String> {
     cfg.gateway
         .test_group_id
         .clone()
         .filter(|g| !g.trim().is_empty())
-        .unwrap_or_else(|| cfg.round.group_id.clone())
 }
 
 enum Prepared {
@@ -110,7 +109,9 @@ fn prepare(msg: &TestMessage, cfg: &AppConfig) -> Prepared {
     let Some(timestamp_ms) = msg.timestamp.as_ref().and_then(parse_timestamp_ms) else {
         return Prepared::Dropped("missing_timestamp");
     };
-    let group = test_group(cfg);
+    let Some(group) = test_group(cfg) else {
+        return Prepared::Dropped("not_test_group");
+    };
     let group_id = msg
         .group_id
         .clone()

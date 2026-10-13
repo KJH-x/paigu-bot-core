@@ -76,6 +76,9 @@ pub fn phase_rejection(
     if phase == RoundPhase::Locked {
         return Some(format!("阶段越权：{label}阶段已锁定，禁止操作"));
     }
+    if phase == RoundPhase::Settling {
+        return Some(format!("阶段越权：{label}阶段结算中，禁止操作"));
+    }
     match &event.payload {
         DomainEvent::ClaimCreated(c) => c.items.iter().find_map(|line| {
             let class = cfg.round.item_class(&line.item_id.0);
