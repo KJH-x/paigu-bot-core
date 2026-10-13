@@ -1,4 +1,5 @@
 pub mod alias_match;
+pub mod coalesce;
 pub mod normalize;
 pub mod parsed_event;
 pub mod policy;

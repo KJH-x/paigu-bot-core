@@ -151,6 +151,7 @@
 | POST | `/api/sim/messages` | 裸数组 或 `{messages:[…]}` → `{ok, round_id, category, count, summary, results, board, version}`（**仅测试轮**，逐条） |
 | POST | `/api/sim/identity` | `{user_id, nickname, is_admin?, priority?}` |
 | POST | `/api/sim/reset` | 清空测试会话（手动） |
+| — | `AppConfig.merge` | `{enabled, same_sender}`：临近同发送者消息合并（实验，默认关）；实时/重放共用 `parser::coalesce`，统一经 `Pipeline::ingest` |
 | GET | `/api/members` | 成员列表（刷新缓存 → `data/members.seed.json` → `data/members.example.json` → 空；每项附 `cn`/`resolved`） |
 | POST | `/api/members/refresh` | 经 Gateway 拉取 `get_group_member_list` |
 | GET | `/api/gateway/status` | WS 连接状态 |

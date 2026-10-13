@@ -13,7 +13,7 @@
 | `trait EventSink` | `async fn handle(&self, ev: IncomingEvent)`；Gateway 只依赖此 trait |
 | `PipelineOutcome` | `status: String`、`detail: String`、`reply: Option<String>`、`version: i64`、`snapshot: Option<serde_json::Value>`（`serde::Serialize`） |
 
-`status` 取值：`Applied | Duplicate | Ignored | Rejected | NeedConfirm | Error`。
+`status` 取值：`Applied | Duplicate | Ignored | Rejected | NeedConfirm | Error | Merged`（`Merged` = 合并组成员行，2026-10-13）。
 
 ### `src/settings.rs` — 配置与热载
 

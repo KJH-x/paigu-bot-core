@@ -2,7 +2,7 @@ use super::*;
 use crate::messages::JsonlMessageStore;
 use crate::replay::session::ReplayOverrides;
 use crate::round::{PhaseWindow, RoundPhase};
-use crate::settings::{default_config, AppConfig, LlmSettings};
+use crate::settings::{default_config, AppConfig, LlmSettings, PriorityWindow};
 use std::path::PathBuf;
 
 struct MockClient {
@@ -152,6 +152,8 @@ fn event(user_id: &str, nickname: &str, text: &str, timestamp_ms: i64) -> Incomi
         text: text.to_string(),
         timestamp_ms,
         is_admin: false,
+        sender_user_id: None,
+        sender_nickname: None,
         raw: None,
     }
 }
@@ -788,4 +790,30 @@ fn gate_nc_unwraps_only_for_test_round_and_test_group() {
         gate_nc(&cfg, event("10000", "测试号", env, 1)).user_id,
         "10000"
     );
+}
+
+#[tokio::test]
+async fn anonymous_proxy_uses_sender_permission() {
+    let mut cfg = base_config();
+    cfg.llm.enabled = false;
+    cfg.round.priority_users = vec!["1000".to_string()];
+    cfg.round.priority_window = Some(PriorityWindow {
+        start_ms: 0,
+        end_ms: i64::MAX,
+    });
+    let (pipeline, _d) = test_pipeline_with_dir(&cfg, MockClient::ok("{}"));
+
+    // 发送者 id「1000」是预存用户 → `小明(代)` 可排；席位填 `小明(代)`。
+    let ok = pipeline
+        .ingest(event("1000", "小明", "排 通行证 结城理 1(代)", 1_000))
+        .await;
+    assert_eq!(ok.status, "Applied", "{}", ok.detail);
+    let snap = serde_json::to_string(&ok.snapshot).unwrap();
+    assert!(snap.contains("小明(代)"), "席位应填 发送者(代)：{snap}");
+
+    // 发送者 id「2000」非预存 → 代排项按发送者权限拒绝。
+    let denied = pipeline
+        .ingest(event("2000", "小红", "排 通行证 结城理 1(代)", 2_000))
+        .await;
+    assert_eq!(denied.status, "Rejected", "{}", denied.detail);
 }

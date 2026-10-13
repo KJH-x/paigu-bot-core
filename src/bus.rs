@@ -11,6 +11,9 @@ pub struct IncomingEvent {
     pub text: String,
     pub timestamp_ms: i64,
     pub is_admin: bool,
+    /// 匿名代排（`X(代)`）的**真实发送者**身份（权限/白名单按发送者判定）；普通消息为 `None`。
+    pub sender_user_id: Option<String>,
+    pub sender_nickname: Option<String>,
     /// 原始 OneBot 事件 JSON（C-3：保留所有成员原始事件，供事件溯源）。
     pub raw: Option<serde_json::Value>,
 }

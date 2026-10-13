@@ -128,7 +128,7 @@ impl Pipeline {
     }
 
     /// 把澄清修复结果写成 `ParseOverride` 事件并持久化到该轮次事件日志。
-    async fn emit_parse_override(
+    pub(super) async fn emit_parse_override(
         &self,
         cfg: &AppConfig,
         ev: &IncomingEvent,

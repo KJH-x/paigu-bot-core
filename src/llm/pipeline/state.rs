@@ -37,6 +37,7 @@ impl Pipeline {
     pub async fn reset(&self) {
         let mut state = self.state.lock().await;
         *state = State::default();
+        *self.merge_open.lock().await = None;
     }
 
     pub async fn board(&self) -> (i64, Value) {

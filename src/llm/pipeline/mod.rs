@@ -14,8 +14,10 @@ use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
 use crate::messages::{MessageLog, MessageRecord as LogMessageRecord};
 use crate::parser::parsed_event::ParsedIntent;
 use crate::parser::policy;
+use crate::parser::coalesce::{Classification, GroupIntent};
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
+use crate::replay::session::{ReplayOverrides, ReplayResult};
 use crate::settings::{AppConfig, ConfigStore};
 
 use super::client::{LlmClient, OpenAiClient};
@@ -52,6 +54,8 @@ fn unwrap_forged_envelope(ev: IncomingEvent) -> IncomingEvent {
         text: envelope.text,
         timestamp_ms: envelope.timestamp_ms.unwrap_or(ev.timestamp_ms),
         is_admin: envelope.is_admin.unwrap_or(false),
+        sender_user_id: None,
+        sender_nickname: None,
         raw: ev.raw,
     }
 }
@@ -228,6 +232,19 @@ pub struct Pipeline {
     llm: Arc<dyn LlmClient>,
     state: Mutex<State>,
     messages: Arc<MessageLog>,
+    /// 当前"打开"的合并组（同发送者、相邻、同意图）。
+    merge_open: Mutex<Option<OpenGroup>>,
+    /// 串行化合并摄取（避免并发 `recompute` 的读改写竞态）。
+    ingest_lock: Mutex<()>,
+}
+
+/// 合并组状态（实验特性 2026-10-13）。
+struct OpenGroup {
+    round_id: String,
+    revision: u64,
+    user_id: String,
+    intent: GroupIntent,
+    events: Vec<IncomingEvent>,
 }
 
 impl Pipeline {
@@ -272,6 +289,8 @@ impl Pipeline {
             llm,
             state: Mutex::new(State::default()),
             messages: messages.unwrap_or_else(MessageLog::from_env),
+            merge_open: Mutex::new(None),
+            ingest_lock: Mutex::new(()),
         })
     }
 
@@ -598,8 +617,10 @@ impl Pipeline {
             }
         };
 
-        // U4：优先用户候选含 CN/别名。
-        let is_priority = policy::is_priority(&cfg, &ev.user_id, &ev.nickname);
+        // U4：优先用户候选含 CN/别名；匿名代排按**发送者**判定（R8）。
+        let perm_uid = ev.sender_user_id.as_deref().unwrap_or(&ev.user_id);
+        let perm_nick = ev.sender_nickname.as_deref().unwrap_or(&ev.nickname);
+        let is_priority = policy::is_priority(&cfg, perm_uid, perm_nick);
         if policy::in_priority_at(&cfg, ev.timestamp_ms) && !is_priority {
             return self
                 .finish(
@@ -713,6 +734,171 @@ impl Pipeline {
         }
     }
 
+    /// 统一接收入口（NC / 测试注入共用，R6）。
+    pub async fn ingest(&self, ev: IncomingEvent) -> PipelineOutcome {
+        let cfg = self.cfg.get().await;
+        let mut ev = gate_nc(&cfg, ev);
+        // 匿名代排 `X(代)`：席位填 `发送者(代)`，权限按发送者（`proxy_base`）。
+        if crate::parser::coalesce::is_anonymous_proxy(&ev.text)
+            && crate::settings::proxy_base(&ev.user_id).is_none()
+        {
+            let base = crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname)
+                .unwrap_or_else(|| ev.user_id.clone());
+            ev.sender_user_id = Some(ev.user_id.clone());
+            ev.sender_nickname = Some(ev.nickname.clone());
+            ev.user_id = format!("{base}(代)");
+            ev.nickname = String::new();
+        }
+        if !(cfg.merge.enabled && cfg.merge.same_sender) {
+            return self.process(ev).await;
+        }
+        self.ingest_merged(cfg, ev).await
+    }
+
+    /// 合并摄取（急切 + 更新，R5）：以日志为准 `recompute`，保证 测试==实际、追加==新消息。
+    async fn ingest_merged(&self, cfg: AppConfig, ev: IncomingEvent) -> PipelineOutcome {
+        let _serial = self.ingest_lock.lock().await; // 串行化（C8）
+        // 锁定：仍按旧路径拒绝，不触发 recompute。
+        if self.state.lock().await.locked {
+            return self.process(ev).await;
+        }
+        let items = cfg.round.to_items();
+        let kind = {
+            let cand = crate::parser::coalesce::Candidate {
+                user_id: &ev.user_id,
+                text: &ev.text,
+                is_admin: ev.is_admin,
+                force_boundary: false,
+            };
+            crate::parser::coalesce::classify(&cand, &items)
+        };
+
+        let Classification::Join(intent) = kind else {
+            // 边界 / 闲聊：断开当前组，走旧路径。
+            *self.merge_open.lock().await = None;
+            return self.process(ev).await;
+        };
+
+        // 追加或新建当前组；代表 = 组内 `timestamp` 最大者（并列取较晚到达）。
+        let (joined, rep_message_id, rep_ts, rep_nick) = {
+            let mut open = self.merge_open.lock().await;
+            let stale = open
+                .as_ref()
+                .map(|g| {
+                    g.round_id != cfg.round.round_id
+                        || g.revision != cfg.revision
+                        || g.user_id != ev.user_id
+                        || g.intent != intent
+                })
+                .unwrap_or(true);
+            if stale {
+                *open = Some(OpenGroup {
+                    round_id: cfg.round.round_id.clone(),
+                    revision: cfg.revision,
+                    user_id: ev.user_id.clone(),
+                    intent,
+                    events: Vec::new(),
+                });
+            }
+            let g = open.as_mut().unwrap();
+            g.events.push(ev.clone());
+            let rep_idx = g
+                .events
+                .iter()
+                .enumerate()
+                .max_by_key(|(i, e)| (e.timestamp_ms, *i))
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            let rep = g.events[rep_idx].clone();
+            let cands: Vec<crate::parser::coalesce::Candidate> = g
+                .events
+                .iter()
+                .map(|e| crate::parser::coalesce::Candidate {
+                    user_id: &e.user_id,
+                    text: &e.text,
+                    is_admin: e.is_admin,
+                    force_boundary: false,
+                })
+                .collect();
+            let all: Vec<usize> = (0..cands.len()).collect();
+            let joined = crate::parser::coalesce::joined_text(&cands, &all);
+            (joined, rep.message_id.clone(), rep.timestamp_ms, rep.nickname.clone())
+        };
+
+        // C-3：保留原始事件。
+        if let Some(raw) = &ev.raw {
+            if let Err(e) = self.messages.append_raw_event(&cfg.round.round_id, raw).await {
+                warn!("原始事件写入失败: {e}");
+            }
+        }
+        // 落原始记录（状态占位，recompute 回写）。
+        self.persist(&ev, "Pending", "pending", "message").await;
+
+        // LLM 解析合并文本 → ParseOverride（键=代表 message_id），保证重放一致。
+        if cfg.llm.enabled {
+            let rule = RuleParser::parse(&joined, &items, ev.is_admin);
+            if looks_like_order(&joined, &rule) {
+                let mut synthetic = ev.clone();
+                synthetic.text = joined.clone();
+                if let Ok(parsed) = self.llm_parse(&cfg, &synthetic).await {
+                    let mut rep_ev = ev.clone();
+                    rep_ev.message_id = rep_message_id.clone();
+                    rep_ev.nickname = rep_nick.clone();
+                    rep_ev.timestamp_ms = rep_ts;
+                    self.emit_parse_override(
+                        &cfg,
+                        &rep_ev,
+                        crate::messages::next_seq(),
+                        Utc::now(),
+                        &parsed,
+                    )
+                    .await;
+                }
+            }
+        }
+
+        // 权威重算（追加更新 == 新消息更新）。
+        let _ = self.recompute().await;
+
+        let state = self.state.lock().await;
+        let last = state.messages.last();
+        let (status, detail) = last
+            .map(|m| (m.status.clone(), m.detail.clone()))
+            .unwrap_or_else(|| ("Ignored".to_string(), String::new()));
+        PipelineOutcome {
+            status,
+            detail,
+            reply: None,
+            version: state.version,
+            snapshot: state
+                .snapshot
+                .as_ref()
+                .and_then(|s| serde_json::to_value(s).ok()),
+        }
+    }
+
+    /// 以消息日志为准的权威重算（实时/重放同源）；返回重放结果。
+    pub async fn recompute(&self) -> anyhow::Result<ReplayResult> {
+        let cfg = self.cfg.get().await;
+        let result =
+            crate::replay::session::replay(&self.messages, &cfg, ReplayOverrides::default()).await?;
+        let mut records = self.messages.read_all(&cfg.round.round_id).await?;
+        let outcomes: std::collections::HashMap<&str, (&str, &str)> = result
+            .outcomes
+            .iter()
+            .map(|o| (o.record_id.as_str(), (o.status.as_str(), o.detail.as_str())))
+            .collect();
+        for record in &mut records {
+            if let Some((status, detail)) = outcomes.get(record.record_id.as_str()) {
+                record.status = (*status).to_string();
+                record.detail = (*detail).to_string();
+            }
+        }
+        self.messages.replace_all(&cfg.round.round_id, &records).await?;
+        self.apply_replay(&result, &records).await;
+        Ok(result)
+    }
+
     /// 持久化一条入站消息日志（`routed=message`，`status` 记处理结果）。
     async fn persist(&self, ev: &IncomingEvent, status: &str, detail: &str, routed: &str) {
         let round_id = self.cfg.get().await.round.round_id.clone();
@@ -730,6 +916,8 @@ impl Pipeline {
             routed: routed.to_string(),
             status: status.to_string(),
             detail: detail.to_string(),
+            sender_user_id: ev.sender_user_id.clone(),
+            sender_nickname: ev.sender_nickname.clone(),
         };
         if let Err(e) = self.messages.append(&round_id, &rec).await {
             warn!("消息日志写入失败: {e}");
@@ -770,9 +958,7 @@ impl Pipeline {
 #[async_trait]
 impl EventSink for Pipeline {
     async fn handle(&self, ev: IncomingEvent) {
-        let cfg = self.cfg.get().await;
-        let ev = gate_nc(&cfg, ev);
-        self.process(ev).await;
+        self.ingest(ev).await;
     }
 
     fn messages(&self) -> Arc<MessageLog> {

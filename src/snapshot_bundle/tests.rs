@@ -92,6 +92,8 @@ async fn imported_bundle_replays_to_same_board() {
         routed: "message".to_string(),
         status: "Applied".to_string(),
         detail: String::new(),
+        sender_user_id: None,
+        sender_nickname: None,
     };
 
     let result = replay_messages(

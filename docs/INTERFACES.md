@@ -374,6 +374,10 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `POST /api/config/admin-commands` | 热切换 gateway.admin_commands_enabled（D-1） |
 | `GatewayConfig.accept_forged_messages` + `GatewayConfig.test_group_id` + `RoundSettings.category` | **伪造来源消息**（测试用，默认 false）：仅当 `accept_forged_messages=true` **且** 当前轮为**测试轮**（`category:"test"`）**且** 消息来自**测试群**（`gateway.test_group_id`）时，`Pipeline::handle`（**NC 入口**）才解包 `{"id":"<qq>","text":"<内容>","timestamp":<时间>}` 双层 JSON（`unwrap_forged_envelope`）；`process` 核心不再感知伪造（隔离只作用于来自 NC 的消息）。`timestamp` 支持整数毫秒 / 纯数字串 / RFC3339 / 本地 `YYYY-MM-DD HH:MM[:SS]`，缺省用外层时间；群/消息 id 沿用外层 |
 | `RoundSettings.category` | 轮次类别 `"test" \| "normal"`（默认 `normal`）：**测试轮只绑定测试群、正常轮只绑定正常群**（`test_round_group_mismatch` / `normal_round_uses_test_group`） |
+| `MergeSettings`（`AppConfig.merge`） | **临近同发送者消息合并**（实验，默认关）：`enabled` + `same_sender`；实时/重放共用 `parser::coalesce` 分组（相邻、同人、同意图合并；代表=组内 `(ts,seq)` 最大者）；成员状态 `Merged`。 |
+| `Pipeline::ingest` | **统一接收入口**（NC `handle` 与 sim 注入共用）：`gate_nc` → 匿名代排改写 → 启用合并时 `recompute`（以日志为准），否则旧逐条 `process`。 |
+| 匿名代排 `X(代)` | 席位填 `发送者(代)`（合成 `user_id`、昵称留空）；权限按发送者（`settings::proxy_base` 取基名）；锁定仍生效。 |
+| 状态 `Merged` | 合并组成员行（`MessageRecord.status`）；消息流**逐条展示、不过滤**。 |
 | `GatewayConfig.react_emoji_id` | 收到**已路由**消息后以 `set_msg_emoji_like` 回应（如 `76`=👍），**不发文本**（默认 None 关闭）；经 `Gateway::dispatch` 下发（该内部路径不受 `allowed_actions` 限制，由本配置显式授权） |
 | `Pipeline::run_admin_command` | /开团 /锁位 /结团 /状态 /导出；锁定后拒绝排/撤/改 |
 | `ParsedIntent::Modify` | 改单：撤销本人该商品既有认购 + 重新认购（cancel_for_modify） |

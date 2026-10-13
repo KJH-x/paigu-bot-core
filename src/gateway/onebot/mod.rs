@@ -239,6 +239,8 @@ pub fn to_message_record(
         routed: routed.to_string(),
         status: status.to_string(),
         detail: detail.to_string(),
+        sender_user_id: None,
+        sender_nickname: None,
     }
 }
 
@@ -259,6 +261,8 @@ pub fn to_incoming_event(ev: &RouteMessageEvent) -> IncomingEvent {
         text,
         timestamp_ms,
         is_admin: id.is_admin,
+        sender_user_id: None,
+        sender_nickname: None,
         raw: serde_json::to_value(ev).ok(),
     }
 }

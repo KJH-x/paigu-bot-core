@@ -57,6 +57,30 @@
 - **回复**：用户拍板"按推荐、sim 不再保留、字段用 `category`、缺失字段直接 drop、一并改测试脚本、e2e 需 1920×1080/100% 验证排版"。
 - **影响**：`src/round/mod.rs`、`src/settings/mod.rs`、`src/services/rounds.rs`、`src/llm/pipeline/mod.rs`、`src/api/{mod,sim_routes}.rs`、`web/**`、`tests/e2e/sim.mjs`。详见 [SPEC-TEST-ROUND-ISOLATION.md](./SPEC-TEST-ROUND-ISOLATION.md)。
 
+### B-5 临近同发送者消息合并理解 + 匿名代排 `已决策`（2026-10-13）
+- **结论**：
+  - **合并**：同发送者、消息流**相邻**（无他人插话）、**同意图**（Claim/Cancel/Modify 各自成组）的多条消息视为一个理解单元；**无时间窗口**；**普通闲聊/模糊表述（如"想要"）不算 claim、保持 `Ignored`、单例且断开**；`代排` 计为 Claim 修饰。组文本按时间序 `\n` 连接、**代表=最后一条**。
+  - **处理不推迟**：首条立即处理；**补充到达即更新**（同一分组重算），"追加更新"与"新消息更新"同源一致。**测试==实际**、**实时==重放**（分组为日志的确定性函数，共用 `src/parser/coalesce.rs`）。
+  - **匿名代排 `X(代)`**：该行填 `发送者(代)`（匿名、代群外）；**校验按代排者（发送者）**——发送者可排 ⇒ 可排；**锁定仍生效**；`代排` 不改变归属显示的被代人名（匿名无名字）。
+  - **展示**：消息流**逐条不合并**；成员行标 `Merged`。
+  - **配置**：`merge.enabled`（默认关，实验）+ `merge.same_sender`。
+  - 实现路径：统一入口 `Pipeline::ingest`（NC 与 sim 共用）+ 以日志为准的 `recompute`；重放 `compute` 同函数分组。
+- **回复**：用户确认"同意图/无窗口/相邻/不推迟/测试同路径/代排视为 Claim 修饰/闲聊保持 Ignored/代排校验按发送者/展示不合并/代表取最后一条"，并要求 README 加开发中告警。
+- **影响**：`src/parser/coalesce.rs`(新)、`src/llm/pipeline/mod.rs`(+`state.rs`)、`src/replay/session/mod.rs`、`src/services/replay.rs`、`src/settings/mod.rs`、`src/api/sim_routes.rs`、`web/{display.js,replay.js,display.css,theme.css}`、`README.md`、`tests/e2e/sim.mjs`。详见 [SPEC-MESSAGE-MERGE.md](./SPEC-MESSAGE-MERGE.md)。
+
+### B-6 唯一事件处理链（统一处理 + 阶段锁 + computed 缓存）`已决策`（2026-10-13）
+- **结论**：
+  - **只有唯一事件处理**：`传入消息 → 落盘储存 → 即时重算(live) / 分步重算检查(复盘)`；禁止实时/重放双路径。
+  - 数据流：NC→原始消息落盘→LLM 处理→override 落盘→compute(日志) 产生动作记录→**增量 compute**（除非 override 刷新，否则不全量）→读取(Live/复盘)。**前端只读取不计算**。
+  - **`State.locked` 移除**，改用**阶段锁**（"快进到下一阶段"；阶段 ∈ {Settling, Locked} 即锁）；**未到结算阶段也可模拟分包**（试算/分包不受阶段锁门禁）。
+  - **动作记录/看板持久化**到 `data/computed/<round>.json`（读取层缓存，含完整性哈希）；activate：`continue`=加载 / `fresh`=清空 / `replay`=全量。
+  - `merge.enabled` 保留、**默认开**；复盘分步**按消息组**（组内追加不产生新步）。
+  - 增量粒度：**解析级增量 + 看板全量重建**（引擎级增量留作后续优化）。
+  - **消息编辑受阶段锁控制**；**不引入本机会话 token**。
+  - Git：**先清洗历史（filter-repo 去真实群号/昵称/IP）→ 再重签全部分支提交 → 协调 force-push**。
+- **回复**：用户确认方案 B 完整版、清后重签、接受 merge 默认开、编辑受锁、不加 token；activate 缓存策略按默认（continue/fresh/replay）。
+- **影响**：见 [SPEC-UNIFIED-PIPELINE.md](./SPEC-UNIFIED-PIPELINE.md) §6。
+
 ---
 
 ## C. 存储 / 部署

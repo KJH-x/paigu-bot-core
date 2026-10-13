@@ -166,7 +166,7 @@
     var prev = null;
     for (i = 0; i < desired.length; i++) {
       var item = desired[i];
-      var k = getKey(item);
+      var k = getKey(item, i);
       seen[k] = true;
       node = existing[k];
       if (!node) {
@@ -188,17 +188,31 @@
   function createBoardRenderer(host, options) {
     var changeMap = {};
     var persistent = !!(options && options.persistent);
+    var layout = global.PAIGU.boardLayout;
+    var lastItems = [], widthSource = [], tracks = {};
+    host.classList.add('board-grid');
 
-    var REASON_META = {
-      NewClaimFilled: { cls: 'changed-new', icon: '▲' },
-      CancelReleased: { cls: 'changed-release', icon: '▼' },
-      AutoMovedForward: { cls: 'changed-fwd', icon: '↷' },
-      TailSegmentCreated: { cls: 'changed-tail', icon: '⛓' },
-      TailSegmentUpdated: { cls: 'changed-tail', icon: '⛓' },
-      AdminFixed: { cls: 'changed-admin', icon: '✚' },
-      AdminUnlocked: { cls: 'changed-admin', icon: '✚' },
-      RecomputedByRuleChange: { cls: 'changed-fwd', icon: '↻' }
-    };
+    function positionRow(node, row) {
+      var grid = tracks[row.item_id];
+      if (!grid) return;
+      node.style.setProperty('--board-track-width', grid.total + 'px');
+      node.__extra.style.setProperty('--queue-width', grid.queueWidth + 'px');
+      node.__cells.style.gridTemplateColumns = grid.tracks;
+      Array.from(node.__cells.children).forEach(function (cell) {
+        var data = cell.__data;
+        cell.style.gridColumn = grid.columns[data.box_index] + data.index - 1;
+        cell.style.gridRow = '1';
+        cell.style.width = grid.widths[data.box_index] + 'px';
+      });
+    }
+
+    function reflow() {
+      tracks = layout.layout(host, widthSource.concat(lastItems));
+      host.querySelectorAll('.vrow').forEach(function (row) { positionRow(row, row.__data); });
+    }
+    layout.onMode(reflow);
+
+    var REASON_META = layout.reasons;
 
     var KIND_TEXT = {
       split: '拼团',
@@ -221,22 +235,29 @@
 
     function clearHighlight(node) {
       node.__changedCls = null;
+      node.__change = null;
       setCellClass(node);
       if (node.__badge) node.__badge.hidden = true;
+      describeCell(node);
+    }
+
+    function describeCell(node) {
+      var title = layout.describe(node.__data, node.__change);
+      node.title = title;
+      node.setAttribute('aria-label', title);
     }
 
     function applyHighlight(node, info) {
       var meta = REASON_META[info && info.reason] ||
         (info && info.after ? REASON_META.NewClaimFilled : REASON_META.CancelReleased);
       node.__changedCls = meta.cls;
+      node.__change = info;
       setCellClass(node);
       if (node.__badge) {
         node.__badge.hidden = false;
         node.__badge.textContent = meta.icon;
       }
-      var before = info && info.before != null ? info.before : '空';
-      var after = info && info.after != null ? info.after : '空';
-      node.title = (info && info.reason ? info.reason + '：' : '') + before + ' → ' + after;
+      describeCell(node);
       if (persistent) return;
       if (node.__hl) global.clearTimeout(node.__hl);
       node.__hl = global.setTimeout(function () { clearHighlight(node); }, 3000);
@@ -245,28 +266,47 @@
     function createCell(cell, key) {
       var node = document.createElement('div');
       node.className = 'cell empty';
+      var boxMark = document.createElement('span');
+      boxMark.className = 'cell-box-mark';
+      boxMark.setAttribute('aria-hidden', 'true');
+      node.appendChild(boxMark);
       var user = document.createElement('span');
       user.className = 'cell-user';
       node.appendChild(user);
       var badge = document.createElement('span');
       badge.className = 'badge';
       badge.hidden = true;
-      node.appendChild(badge);
+      var marks = document.createElement('span');
+      marks.className = 'cell-marks';
+      marks.setAttribute('aria-hidden', 'true');
+      var status = document.createElement('span');
+      status.className = 'cell-state';
+      var tail = document.createElement('span');
+      tail.className = 'cell-state tail-mark';
+      marks.appendChild(status);
+      marks.appendChild(tail);
+      marks.appendChild(badge);
+      node.appendChild(marks);
+      node.__status = status;
+      node.__tail = tail;
       node.__badge = badge;
       node.__user = user;
       return node;
     }
 
     function boxColor(i) {
-      var h = ((Number(i) || 0) * 67) % 360;
-      return 'hsl(' + h + ' 72% 55%)';
+      return layout.boxColor(i);
     }
 
     function updateCell(node, cell) {
+      node.__data = cell;
       var occupied = !!(cell.user && cell.status !== 'empty');
       node.__occupied = occupied;
       node.__locked = cell.status === 'locked' || cell.status === 'locked_empty';
       node.__reserved = cell.status === 'admin_reserved';
+      node.__status.className = 'cell-state' + (node.__locked ? ' lock-mark' : ' reserve-mark');
+      node.__status.hidden = !node.__locked && !node.__reserved;
+      node.__tail.hidden = !(cell.segment_id || /tail/i.test(cell.policy || ''));
       if (cell.box_index != null) {
         node.setAttribute('data-box', cell.box_index);
         node.style.setProperty('--bx', boxColor(cell.box_index));
@@ -274,7 +314,7 @@
       setCellClass(node);
       var label = occupied ? cell.user : '';
       if (node.__user.textContent !== label) node.__user.textContent = label;
-      if (!occupied) node.title = cell.status === 'locked_empty' ? '包尾锁定空位' : '';
+      describeCell(node);
     }
 
     function createRow() {
@@ -296,14 +336,13 @@
     }
 
     function updateRow(node, row) {
+      node.__data = row;
       var labelText = (row.variant_name || '单领') + (row.capacity ? '（' + row.capacity + '）' : '');
       if (node.__label.textContent !== labelText) node.__label.textContent = labelText;
 
       var desired = [];
-      var multiBox = row.boxes.length > 1;
       for (var b = 0; b < row.boxes.length; b++) {
         var box = row.boxes[b];
-        if (multiBox) desired.push({ kind: 'box', box_index: box.box_index });
         var cap = row.capacity != null ? row.capacity : 0;
         var maxIndex = cap;
         for (var s = 0; s < box.slots.length; s++) {
@@ -329,36 +368,26 @@
       syncKeyedChildren(
         node.__cells,
         desired,
-        function (c) { return c.kind === 'box' ? 'box:' + c.box_index : rowKey + '#' + c.box_index + ':' + c.index; },
-        function (c) {
-          if (c.kind === 'box') {
-            var t = document.createElement('span');
-            t.className = 'box-sep';
-            t.setAttribute('data-box', c.box_index);
-            t.setAttribute('aria-hidden', 'true');
-            t.style.background = boxColor(c.box_index);
-            return t;
-          }
-          return createCell(c);
-        },
+        function (c) { return rowKey + '#' + c.box_index + ':' + c.index; },
+        createCell,
         function (n, c, k) {
-          if (c.kind === 'box') return;
           updateCell(n, c);
           var info = changeMap[k];
           if (info) applyHighlight(n, info);
           else if (persistent) clearHighlight(n);
         }
       );
+      positionRow(node, row);
 
       var extra = '';
       if (row.singles.length) {
         extra += '<div class="singles">单领：' + row.singles.map(function (s) {
-          return '<span class="chip">' + esc(s.display) + ' ×' + esc(s.quantity) + '</span>';
+          return '<span class="chip" title="' + esc('单领：' + s.display + ' ×' + s.quantity) + '" aria-label="' + esc('单领：' + s.display + ' ×' + s.quantity) + '"><span class="chip-user">' + esc(s.display) + '</span><span class="chip-qty">×' + esc(s.quantity) + '</span></span>';
         }).join('') + '</div>';
       }
       if (row.waiting.length) {
         extra += '<div class="waiting">等待：' + row.waiting.map(function (w) {
-          return '<span class="chip">' + esc(w.display) + ' ×' + esc(w.quantity) + '</span>';
+          return '<span class="chip" title="' + esc('等待：' + w.display + ' ×' + w.quantity) + '" aria-label="' + esc('等待：' + w.display + ' ×' + w.quantity) + '"><span class="chip-user">' + esc(w.display) + '</span><span class="chip-qty">×' + esc(w.quantity) + '</span></span>';
         }).join('') + '</div>';
       }
       if (node.__extra.__html !== extra) {
@@ -395,6 +424,8 @@
     }
 
     function render(items, changes) {
+      lastItems = items;
+      tracks = layout.layout(host, widthSource.concat(items));
       changeMap = changes || {};
       var groups = [];
       var groupMap = {};
@@ -412,10 +443,12 @@
     }
 
     function clear() {
+      lastItems = [];
+      widthSource = [];
       while (host.firstChild) host.removeChild(host.firstChild);
     }
 
-    return { render: render, clear: clear };
+    return { render: render, clear: clear, setWidthSource: function (rows) { widthSource = rows || []; reflow(); } };
   }
 
   function createSmartScroll(opts) {

@@ -7,6 +7,8 @@
 
 > 🧪 **测试轮隔离与批量测试消息（2026-10-13，已实现）**：[SPEC-TEST-ROUND-ISOLATION.md](./SPEC-TEST-ROUND-ISOLATION.md)。要点：轮次新增 `category: "test"|"normal"`；`gateway.test_group_id`；伪造解包**仅测试轮+测试群的 NC 消息**；新增 `POST /api/sim/messages`（裸数组 / `messages` 包装，逐条处理，缺字段即 drop）；移除模拟器页（保留消息编辑）；e2e 增加 1920×1080/100% 排版验收。
 
+> 🔗 **临近同发送者消息合并 + 匿名代排（2026-10-13）**：[SPEC-MESSAGE-MERGE.md](./SPEC-MESSAGE-MERGE.md)。要点：同人相邻同意图消息合并理解（无时间窗口、打断即断、不推迟处理、追加即更新）；`X(代)` = 匿名代群外代排，行填 `发送者(代)`、校验按发送者；消息流逐条不合并；`merge.enabled` 默认关（实验）。
+
 ## 一、必读顺序（接手工作前）
 
 | 序 | 文档 | 内容 | 必读 |

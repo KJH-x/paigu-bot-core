@@ -50,6 +50,8 @@ fn record(seq: i64, user_id: &str, text: &str, ts: i64) -> MessageRecord {
         routed: "message".to_string(),
         status: "Applied".to_string(),
         detail: String::new(),
+        sender_user_id: None,
+        sender_nickname: None,
     }
 }
 
@@ -235,6 +237,8 @@ fn incoming(message_id: &str, text: &str, ts: i64) -> crate::bus::IncomingEvent 
         text: text.to_string(),
         timestamp_ms: ts,
         is_admin: false,
+        sender_user_id: None,
+        sender_nickname: None,
         raw: None,
     }
 }
@@ -307,6 +311,59 @@ async fn realtime_and_replay_modify_boards_match() {
         canonical_board(live_board),
         canonical_board(serde_json::to_value(&replayed.board).unwrap()),
         "实时 = 重放"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 合并（同人相邻同意图）实时 == 重放。
+#[tokio::test]
+async fn realtime_and_replay_merge_match() {
+    let mut cfg = test_config();
+    cfg.merge.enabled = true;
+    cfg.merge.same_sender = true;
+    cfg.llm.enabled = false;
+    let dir = temp_dir("merge-parity");
+    let pipeline = crate::llm::Pipeline::new_with_client_dir(
+        config_store(&cfg),
+        std::sync::Arc::new(DisabledLlm),
+        dir.clone(),
+    );
+
+    pipeline
+        .ingest(incoming("merge-1", "排 徽章 甲 1", 1_000))
+        .await;
+    let second = pipeline
+        .ingest(incoming("merge-2", "排 徽章 甲 1", 2_000))
+        .await;
+    assert_eq!(second.status, "Applied", "{}", second.detail);
+
+    let (live_version, live_board) = pipeline.board().await;
+
+    let log = MessageLog::new(&dir, dir.join("events"));
+    let records = log.read_all(&cfg.round.round_id).await.unwrap();
+    assert_eq!(
+        records.iter().filter(|r| r.status == "Merged").count(),
+        1,
+        "首条应标记 Merged"
+    );
+
+    let replayed = replay_messages(&cfg, &records, ReplayOverrides::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        replayed
+            .outcomes
+            .iter()
+            .filter(|o| o.status == "Merged")
+            .count(),
+        1
+    );
+    assert_eq!(live_version, replayed.version, "实时与重放版本应一致");
+    assert_eq!(
+        canonical_board(live_board),
+        canonical_board(serde_json::to_value(&replayed.board).unwrap()),
+        "合并：实时 == 重放"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -404,6 +461,8 @@ async fn realtime_and_replay_whitelist_decisions_match() {
             routed: "drop:not_whitelisted_member".to_string(),
             status: "Dropped".to_string(),
             detail: "not_whitelisted_member".to_string(),
+            sender_user_id: None,
+            sender_nickname: None,
         },
     ];
     let replayed = replay_messages(&cfg, &records, ReplayOverrides::default())

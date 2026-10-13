@@ -25,6 +25,9 @@ pub struct AppConfig {
     pub members: MembersSettings,
     #[serde(default)]
     pub settlement: crate::settlement::SettlementConfig,
+    /// 临近同发送者消息合并（实验特性，2026-10-13；默认关）。
+    #[serde(default)]
+    pub merge: MergeSettings,
     /// 当前激活轮次 id（U3）：指向 `data/rounds/<id>.json`。
     #[serde(default)]
     pub active_round_id: Option<String>,
@@ -86,7 +89,6 @@ pub struct LlmSettings {
     #[serde(default)]
     pub prompt_template: String,
 }
-
 fn default_true() -> bool {
     true
 }
@@ -98,6 +100,26 @@ fn default_max_tokens() -> u32 {
 }
 fn default_temperature() -> f32 {
     0.1
+}
+
+/// 临近同发送者消息合并（实验特性，2026-10-13）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeSettings {
+    /// 总开关（默认关）。
+    #[serde(default)]
+    pub enabled: bool,
+    /// 同发送者合并（唯一模式；默认 true，受 `enabled` 总闸）。
+    #[serde(default = "default_true")]
+    pub same_sender: bool,
+}
+
+impl Default for MergeSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            same_sender: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -490,6 +512,14 @@ pub fn member_user_id_by_name(cfg: &AppConfig, name: &str) -> Option<String> {
     .flatten()
 }
 
+/// 匿名/具名代排标签 `发送者(代…)` → 发送者基名（供权限/白名单按发送者判定）。
+pub fn proxy_base(id_or_nick: &str) -> Option<&str> {
+    let s = id_or_nick.trim();
+    let (base, _) = s.split_once("(代")?;
+    let base = base.trim();
+    (!base.is_empty()).then_some(base)
+}
+
 /// 优先用户判定候选串（U4）：`user_id`/昵称/归一化昵称，并加入 CN 与别名。
 #[allow(dead_code)] // 供 pipeline/replay 后续接线（当前仅测试与 helper 内部使用）
 pub fn priority_candidates(cfg: &AppConfig, user_id: &str, raw_nickname: &str) -> Vec<String> {
@@ -497,6 +527,13 @@ pub fn priority_candidates(cfg: &AppConfig, user_id: &str, raw_nickname: &str) -
     let (identity, display) = crate::parser::normalize::clean_nickname(raw_nickname);
     out.push(identity);
     out.push(display);
+    // 代排标签 `发送者(代)`：权限按发送者（基名）判定。
+    if let Some(base) = proxy_base(user_id) {
+        out.push(base.to_string());
+    }
+    if let Some(base) = proxy_base(raw_nickname) {
+        out.push(base.to_string());
+    }
     if let Some(over) = cfg
         .members
         .cn_overrides

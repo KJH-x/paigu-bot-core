@@ -59,6 +59,7 @@
     var lastChange = {};
     var changes = [];
     var previousRows = [];
+    var widthRows = [];
     for (var i = 0; i < steps.length; i++) {
       var next = {};
       if (!Array.isArray(cur.item_allocations)) {
@@ -79,6 +80,7 @@
       }
       boards.push(next);
       var rows = P.normalizeBoard({ board: next }, state.meta);
+      widthRows = widthRows.concat(rows);
       var map = steps[i].changed ? P.normalizeChanged(steps[i]) : P.diffBoardItems(previousRows, rows);
       if (!steps[i].changed) {
         steps[i].changed = Object.keys(map).map(function (key) {
@@ -96,6 +98,7 @@
     state.cumulative = boards;
     state.lastChange = lastChange;
     state.changes = changes;
+    boardRenderer.setWidthSource(widthRows.concat(P.normalizeBoard({board:state.data.board || {}}, state.meta)));
   }
 
   function renderHeader() {
@@ -138,7 +141,7 @@
         li.__who.textContent = display;
         li.__txt.textContent = text;
         li.__txt.title = text;
-        li.__st.textContent = ({Applied:'已记录', Rejected:'已拒绝', Ignored:'已忽略', Duplicate:'已去重', NeedConfirm:'待确认', Error:'错误'})[status] || status;
+        li.__st.textContent = ({Applied:'已记录', Rejected:'已拒绝', Ignored:'已忽略', Duplicate:'已去重', Merged:'已合并', NeedConfirm:'待确认', Error:'错误'})[status] || status;
         li.__st.className = 'status' + (status ? ' st-' + String(status).toLowerCase() : '');
         li.onclick = function () { setPlaying(false); goToStep(i); };
       }
@@ -316,30 +319,58 @@
     var stepCells = [];
     for (var j = 0; j < steps.length; j++) {
       var map = {};
+      var slotMap = {};
+      P.normalizeBoard({board:state.cumulative[j]}, state.meta).forEach(function (row) {
+        row.boxes.forEach(function (box) { box.slots.forEach(function (slot) {
+          slotMap[row.key + '#' + box.box_index + ':' + slot.index] = slot;
+        }); });
+      });
       Object.keys(state.changes[j] || {}).forEach(function (key) {
         var change = state.changes[j][key];
-        if (change.after) map[key.split('#')[0]] = change.after;
+        if (change.after) {
+          var pos = key.slice(key.lastIndexOf('#') + 1).split(':');
+          var slot = slotMap[key] || {};
+          map[key.split('#')[0]] = {user:change.after, box_index:+pos[0], index:+pos[1], change:change,
+            status:slot.status,policy:slot.policy,segment_id:slot.segment_id};
+        }
       });
       stepCells.push(map);
     }
 
-    var html = '<div class="col-wrap"><table class="col-table"><thead><tr>' +
+    var widths = steps.map(function (step, index) {
+      var msg = msgBySeq(step.message_seq);
+      var nameWidth = P.boardLayout.measure(root, P.boardLayout.mode() === 'compact' ? '汉汉汉' : ((msg && (msg.display || msg.user)) || '汉'));
+      if (P.boardLayout.mode() === 'full') Object.keys(stepCells[index]).forEach(function (key) {
+        nameWidth = Math.max(nameWidth, P.boardLayout.measure(root, stepCells[index][key].user));
+      });
+      return nameWidth + 6;
+    });
+    var totalWidth = 220 + widths.reduce(function (sum, width) { return sum + width; }, 0);
+    var html = '<div class="col-wrap"><table class="col-table" style="width:' + totalWidth + 'px"><colgroup><col style="width:220px">' +
+      widths.map(function (width) { return '<col style="width:' + width + 'px">'; }).join('') + '</colgroup><thead><tr>' +
       '<th class="rowhead">商品 / 变体</th>';
     for (var j2 = 0; j2 < steps.length; j2++) {
       var msg = msgBySeq(steps[j2].message_seq);
       var disp = msg ? (msg.display || msg.user) : ('#' + steps[j2].message_seq);
       var cur = (j2 === state.current) ? ' current' : '';
       html += '<th class="colhead' + cur + '" data-idx="' + j2 + '" title="' + esc(disp) + '：' +
-        esc(msg ? msg.text : '') + '">#' + esc(steps[j2].message_seq) +
-        '<br><span>' + esc(disp) + '</span></th>';
+        esc(msg ? msg.text : '') + '"><span class="col-seq">#' + esc(steps[j2].message_seq) +
+        '</span><span class="col-name">' + esc(disp) + '</span></th>';
     }
     html += '</tr></thead><tbody>';
     for (var r = 0; r < rows.length; r++) {
       html += '<tr><th class="rowhead">' + esc(rows[r].label) + '</th>';
       for (var j3 = 0; j3 < steps.length; j3++) {
-        var user = stepCells[j3][rows[r].key];
+        var cell = stepCells[j3][rows[r].key];
+        var user = cell && cell.user;
         var cls = 'colcell' + (j3 === state.current ? ' current' : '') + (user ? ' filled' : '');
-        html += '<td class="' + cls + '" data-idx="' + j3 + '">' + (user ? esc(user) : '') + '</td>';
+        var reasonClass = cell ? (P.boardLayout.reasons[cell.change.reason] || P.boardLayout.reasons.NewClaimFilled).cls : '';
+        var description = cell ? P.boardLayout.describe(cell, cell.change) : '本步无新增填入';
+        var stateMark = cell && cell.status === 'locked' ? '<span class="cell-state lock-mark"></span>' :
+          (cell && cell.status === 'admin_reserved' ? '<span class="cell-state reserve-mark"></span>' : '');
+        if (cell && (cell.segment_id || /tail/i.test(cell.policy || ''))) stateMark += '<span class="cell-state tail-mark"></span>';
+        html += '<td class="' + cls + '" data-idx="' + j3 + '"><div class="cell ' + reasonClass + '" title="' + esc(description) + '" aria-label="' + esc(description) + '" style="--bx:' + (cell ? P.boardLayout.boxColor(cell.box_index) : 'transparent') + '">' +
+          '<span class="cell-box-mark" aria-hidden="true"></span><span class="cell-user">' + esc(user || '') + '</span><span class="cell-marks" aria-hidden="true">' + stateMark + '<span class="badge"' + (cell ? '' : ' hidden') + '></span></span></div></td>';
       }
       html += '</tr>';
     }
@@ -629,6 +660,15 @@
     });
     tableEl = $('table-view');
     boardRenderer = P.createBoardRenderer(tableEl, { persistent: true });
+    P.boardLayout.bindControls($('board-width'));
+    P.boardLayout.onMode(function () {
+      if (!state.data || state.view !== 'column') return;
+      var root = $('column-view'), scroll = root.querySelector('.col-wrap');
+      var left = scroll ? scroll.scrollLeft : 0;
+      renderColumn();
+      scroll = root.querySelector('.col-wrap');
+      if (scroll) scroll.scrollLeft = left;
+    });
 
     tableEl.addEventListener('click', function (ev) {
       var cell = ev.target && ev.target.closest ? ev.target.closest('.cell') : null;

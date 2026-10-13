@@ -30,6 +30,11 @@ pub struct MessageRecord {
     pub routed: String,
     pub status: String,
     pub detail: String,
+    /// 匿名代排（`X(代)`）的**真实发送者**身份（权限按发送者判定）；普通消息为 `None`。
+    #[serde(default)]
+    pub sender_user_id: Option<String>,
+    #[serde(default)]
+    pub sender_nickname: Option<String>,
 }
 
 pub const DEFAULT_MESSAGES_DIR: &str = "data/messages";

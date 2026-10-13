@@ -131,6 +131,8 @@ fn prepare(msg: &TestMessage, cfg: &AppConfig) -> Prepared {
         text: msg.text.clone(),
         timestamp_ms,
         is_admin: msg.is_admin.unwrap_or(false),
+        sender_user_id: None,
+        sender_nickname: None,
         raw: None,
     }))
 }
@@ -141,6 +143,7 @@ struct Summary {
     dropped: usize,
     rejected: usize,
     ignored: usize,
+    merged: usize,
 }
 
 impl Summary {
@@ -149,6 +152,7 @@ impl Summary {
             "Applied" => self.applied += 1,
             "Dropped" => self.dropped += 1,
             "Rejected" => self.rejected += 1,
+            "Merged" => self.merged += 1,
             "Ignored" | "Duplicate" => self.ignored += 1,
             _ => {}
         }
@@ -160,6 +164,7 @@ impl Summary {
             "dropped": self.dropped,
             "rejected": self.rejected,
             "ignored": self.ignored,
+            "merged": self.merged,
         })
     }
 }
@@ -180,7 +185,7 @@ async fn sim_message(
             })))
         }
         Prepared::Event(ev) => {
-            let outcome = state.pipeline.process(*ev).await;
+            let outcome = state.pipeline.ingest(*ev).await;
             let version = outcome.version;
             let board = outcome.snapshot.clone().unwrap_or(Value::Null);
             Ok(Json(
@@ -217,7 +222,7 @@ async fn sim_messages(
                 }));
             }
             Prepared::Event(ev) => {
-                let outcome = state.pipeline.process(*ev).await;
+                let outcome = state.pipeline.ingest(*ev).await;
                 version = outcome.version;
                 if let Some(snapshot) = outcome.snapshot {
                     board = snapshot;

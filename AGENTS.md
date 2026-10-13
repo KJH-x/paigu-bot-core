@@ -115,6 +115,7 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 - **总入口**：[docs/README.md](./docs/README.md)（LLM 接手工作入口，含必读顺序与红线）。
 - ✅ **SPEC-UPDATE-2026-09-24 已实现（正文已更新）**：[docs/SPEC-UPDATE-2026-09-24.md](./docs/SPEC-UPDATE-2026-09-24.md)（U1–U9 现为现行口径；未落地差距见 [docs/TODOS.md](./docs/TODOS.md)「本轮遗留（Wave G2）」）。
 - ✅ **测试轮隔离与批量测试消息（2026-10-13）**：[docs/SPEC-TEST-ROUND-ISOLATION.md](./docs/SPEC-TEST-ROUND-ISOLATION.md)（已实现）。
+- ✅ **临近同发送者消息合并 + 匿名代排（2026-10-13）**：[docs/SPEC-MESSAGE-MERGE.md](./docs/SPEC-MESSAGE-MERGE.md)（已实现；实验特性 `merge.enabled` 默认关）。
 - 现行：[POLICY.md](./docs/POLICY.md) / [DESIGN.md](./docs/DESIGN.md) / [REQUIREMENTS.md](./docs/REQUIREMENTS.md) / [INTERFACES.md](./docs/INTERFACES.md) / [FUNCTIONAL.md](./docs/FUNCTIONAL.md) / [MODULES.md](./docs/MODULES.md) / [TASKS.md](./docs/TASKS.md) / [AGENT-RULES.md](./docs/AGENT-RULES.md) / [GAP-ANALYSIS.md](./docs/GAP-ANALYSIS.md) / [DECISIONS.md](./docs/DECISIONS.md) / [TODOS.md](./docs/TODOS.md)。
 - 归档：`docs/archive/README-legacy.md`（旧 README）。
 

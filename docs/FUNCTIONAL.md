@@ -404,6 +404,13 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 ```
 - **注意**：`POST /api/sim/identity` 仅把身份存入进程内 `BTreeMap`（`src/api/sim_routes.rs`），**不参与消息处理**；重置 `POST /api/sim/reset` 仅手动。
 
+### F11.5 消息合并与匿名代排（实验，2026-10-13）
+
+- **合并**：`merge.enabled=true` 时，同发送者、消息流**相邻**、**同意图**（Claim/Cancel/Modify）的多条消息合并理解：代表 = 组内 `(timestamp_ms, seq)` 最大者（结果归属代表），成员行标 `Merged`；**无时间窗口**、**被其他 user 打断即断**；**处理不推迟**（首条立即、补充到达即 `recompute` 更新）。`代排` 计为 Claim 修饰；普通闲聊/模糊表述（如"想要"）不算 Claim、保持 `Ignored`。
+- **统一入口**：`Pipeline::ingest`（NC `handle` 与测试注入 `POST /api/sim/message(s)` **共用**；测试 == 实际）。实时/重放共用 `src/parser/coalesce.rs` 分组，保证 **实时 == 重放**。
+- **匿名代排 `X(代)`**：席位填 **`发送者(代)`**（合成身份、昵称留空）；**权限按发送者**判定（`settings::proxy_base` 取基名）；**锁定仍生效**。
+- **展示**：消息流**逐条不合并**（代表显示本条原始文本，成员显示"已合并"徽标）。
+
 ### F12 配置热载
 
 - **触发**：`PUT /api/config`、`POST /api/config/reload`，或 `config/app.json` 文件变更。

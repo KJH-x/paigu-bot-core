@@ -6,6 +6,12 @@
 
 ## 已完成（Wave 1–4，2026-09-17）
 
+### 排表固定宽度（2026-10-13）
+
+- 已完成：展示/复盘表格与列视图增加「三字宽 / 全长」，偏好跨页/标签页共享；实际字体测宽，商品内共享盒列轨道；盒色在上、锁定/预留/包尾/变化标记在下；空位同宽、超宽商品内横滚；复盘按全历史定宽、保留增量格子身份与追溯。
+- 冲突检查：基于 `fb9fb53` 的干净工作区实施，保留测试轮隔离、批量注入与模拟器移除，不修改 Rust 或 API/消息处理。修正复盘列表缺少索引参数造成的重复渲染键。
+- 验证：223 项 Rust 单测、17 项端到端测试通过；1920×1080、100% 下验证盒列误差 ≤1px、全长不裁切、明暗截图、跨标签同步和高亮时效；只使用隔离服务/占位夹具，未部署或重启常驻实例。
+
 | ID | 任务 | 验收 |
 |---|---|---|
 | T-01 | **减均重构（A-1）**：`B`=Σ各包实付价、`C`=无折扣商品总价、`D=C−B+G`，按「件×标价」加权分摊；整数分 + 残差校正；校验 `Σfinal + G = B` | ✅ 单测含校验式/边界/逐件精度 |
@@ -73,6 +79,38 @@
 | TR-05 | done ✅ | **移除模拟器页与伪造发送**（`sim.html`/`sim.js`/导航/`buildOneBotEvent`/`/sim` 路由/`_tools` 行）；保留消息编辑 | 全站无 `sim.html` 链接；e2e 断言 `/sim`、`/sim.js` 404 |
 | TR-06 | done ✅ | **改写 `tests/e2e/sim.mjs`**：改走 HTTP 注入 + **1920×1080/100% 排版验收** | e2e 16/16；`devicePixelRatio===1`、无横向溢出 |
 | TR-07 | done ✅ | **文档同步**（INTERFACES/FUNCTIONAL/DESIGN/GAP/web README/AGENTS/config.example/round-setup.template/e2e README） | 文档与实现一致 |
+
+### 消息合并与匿名代排（2026-10-13，**已实现**）
+
+> 口径见 [DECISIONS.md](./DECISIONS.md) §B-5；计划与校验修正见 [SPEC-MESSAGE-MERGE.md](./SPEC-MESSAGE-MERGE.md)。
+> 验收：`cargo test` 230 passed · `cargo clippy -- -D warnings` 通过 · e2e 17/17。
+
+| ID | 状态 | 任务 | 验收 |
+|---|---|---|---|
+| MR-01 | done ✅ | **配置 `merge.{enabled,same_sender}`** + `config.example.json` | 旧配置反序列化兼容 |
+| MR-02 | done ✅ | **共享纯分组 `src/parser/coalesce.rs`**（同意图/相邻/边界/闲聊断开） | 单测 5 项 |
+| MR-03 | done ✅ | **重放分组**（`session::compute` 代表处理+成员 `Merged`） | 组文本=join、状态正确 |
+| MR-04 | done ✅ | **统一入口 `ingest` + `Pipeline::recompute`**（实时与 sim 共用；急切更新） | 追加==新消息一致 |
+| MR-05 | done ✅ | **实时==重放 parity**（合并路径） | `realtime_and_replay_merge_match` 通过 |
+| MR-06 | done ✅ | **匿名代排 `X(代)`**（身份 `发送者(代)`、`proxy_base` 按发送者校验、锁定仍生效） | `anonymous_proxy_uses_sender_permission` 通过 |
+| MR-07 | done ✅ | **展示逐条 + `Merged` 徽标**（`display.js`/`replay.js`/`display.css`/`theme.css`；`state::messages_since` 不过滤） | 不合并展示；成员行可见 |
+| MR-08 | done ✅ | **README 告警 + 文档同步** | 一致 |
+| MR-09 | done ✅ | **e2e 适配**（`sim_routes` 走 `ingest`） | e2e 17/17 |
+
+### 唯一事件处理链（2026-10-13）
+
+> 口径见 [DECISIONS.md](./DECISIONS.md) §B-6；计划见 [SPEC-UNIFIED-PIPELINE.md](./SPEC-UNIFIED-PIPELINE.md)。
+
+| ID | 状态 | 任务 | 验收 |
+|---|---|---|---|
+| UP-01 | todo | **阶段锁**（`RoundPhaseSet` 事件 + `can_claim(Settling/Locked)=false` + 移除 `State.locked`） | 单测：Settling/Locked 拒绝；锁后不复活 |
+| UP-02 | todo | **computed 缓存**（`data/computed/<round>.json` + 完整性 + 失效 + activate 三模式） | 读写/哈希/失效单测 |
+| UP-03 | todo | **唯一 ingest**（预处理全落盘→LLM override 落盘→增量 compute；删双路径） | 实时==重放；追加==新消息 |
+| UP-04 | todo | **增量**（追加→尾部组；编辑/改时间→全量） | parity + 性能 |
+| UP-05 | todo | **安全加固** F1/F2/F3/F7/F8 | 单测：伪造降权、round_id 校验、长度上限 |
+| UP-06 | todo | **复盘按组**（computed 分步；组内追加不产生新步） | e2e/前端 |
+| UP-07 | todo | **文档 + 测试** + e2e + 全量回归 | 全绿 |
+| UP-08 | todo | **Git 历史清洗 → 重签 → force-push** | `%G?` 全 G、`git log -S` 0 命中 |
 
 ### P1
 

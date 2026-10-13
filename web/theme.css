@@ -139,6 +139,7 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .msg .st.applied, .msg .st.ok { background: var(--ok-soft); border-color: var(--ok-border); color: var(--ok); }
 .msg .st.rejected, .msg .st.reject, .msg .st.needconfirm { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 .msg .st.ignored, .msg .st.ignore { background: var(--panel-2); }
+.msg .st.merged { background: var(--panel-2); opacity: 0.75; }
 
 .turn .out.applied, .turn .out.ok { background: var(--ok-soft); border-color: var(--ok-border); color: var(--ok); }
 .turn .out.rejected, .turn .out.needconfirm { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }

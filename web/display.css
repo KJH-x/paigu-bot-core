@@ -273,6 +273,7 @@ label.field input, label.field select { width: 100%; }
 .msg .st.applied, .msg .st.ok { background: var(--ok-soft); border-color: #b7e0c4; color: var(--ok); }
 .msg .st.rejected, .msg .st.reject, .msg .st.needconfirm { background: var(--danger-soft); border-color: #eeb9b9; color: var(--danger); }
 .msg .st.ignored, .msg .st.ignore { background: var(--panel-2); }
+.msg .st.merged { background: var(--panel-2); opacity: 0.75; }
 .msg .detail { flex: 1 1 100%; color: var(--muted); font-size: 12px; padding-left: 42px; }
 
 .new-content {

@@ -31,6 +31,7 @@ pwsh tests/e2e/run.ps1
 |---|---|
 | `PAIGU_HTTP_PORT` | 不读取；脚本自动选择一个空闲高位端口并注入子进程 |
 | `RUST_LOG` | 透传给服务进程，默认 `warn` |
+| `PAIGU_UI_CAPTURE_DIR` | 可选：保存 1920×1080、100% 页面与排表两种宽度/明暗主题截图 |
 | `PAIGU_CONFIG_PATH` / `PAIGU_WEB_DIR` | 由脚本设置为临时配置与仓库 `web/`，无需手动指定 |
 
 ## 测试配置（临时，不落库）
@@ -52,6 +53,8 @@ pwsh tests/e2e/run.ps1
 
 ## 用例
 
+排表专项见 `board-layout.mjs`：前端请求夹具只包含占位数据，验证三字实际测量、空位同宽、多盒/不同容量对齐、全长不裁切、商品内部横滚、上下状态标记、格子身份与高亮时效、跨页/跨标签页偏好共享、复盘历史定宽与点击追溯。全套当前为 17 项；测试不恢复已移除的模拟器页。
+
 每例前经 `POST /api/sim/reset` 重置服务端状态。
 
 1. **Gateway 监听**：`/api/gateway/status` `listening === true`。
@@ -69,6 +72,7 @@ pwsh tests/e2e/run.ps1
 13. **`POST /api/rounds/:id/setup` 开团前填写**：`dry_run` 不落盘、落盘回显 `category`、`round_id` 不一致 400。
 14. **`/api/members` 回退**：seed 缺失时返回 `source=example` 的 5 个占位成员。
 15. **桌面布局（1920×1080 / 100%）与元金额联动保存**：逐页断言 `devicePixelRatio===1`、画布 1920×1080、无横向溢出；元金额联动、别名切分、阶段归属。
-16. **`remote` 数据源**：本地静态服务提供 `rounds/<id>/current`（无 `.json`），`/display?source=remote` 渲染远程快照。
+16. **固定宽度、盒列对齐与复盘切步**：排表两模式、上下标记、多盒对齐和复盘稳定性（见专项说明）。
+17. **`remote` 数据源**：本地静态服务提供 `rounds/<id>/current`（无 `.json`），`/display?source=remote` 渲染远程快照。
 
 断言以 `/api/display`（服务端日志/展示）为主，页面转录/表格文本为辅。

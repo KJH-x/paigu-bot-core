@@ -5,6 +5,8 @@ QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。�
 > 定位：**本地处理 + 远程展示**。本地（本机 `部署主机`）负责接入、解析、排谷；远程只负责只读展示。
 > 安全红线：`reply_enabled` 默认 `false`，**绝不主动发消息给真实群**（只读拉取成员名单允许）。
 > 必读文档：**[docs/POLICY.md](./docs/POLICY.md)**（业务政策）· **[docs/DESIGN.md](./docs/DESIGN.md)**（程序路线）· **[docs/TASKS.md](./docs/TASKS.md)**（任务拆分）· **[docs/AGENT-RULES.md](./docs/AGENT-RULES.md)**（协作规则）· **[docs/FUNCTIONAL.md](./docs/FUNCTIONAL.md)**（功能描述）· **[docs/MODULES.md](./docs/MODULES.md)**（模块契约与文件所有权）。
+>
+> **Warning:** This project is under active development — large, unexpected diffs may appear at any time as message merging (same-sender coalescing) evolves. Contribute at your own risk.
 
 ## 运行时架构
 

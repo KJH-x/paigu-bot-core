@@ -35,7 +35,8 @@
     needconfirm: '待确认',
     ignored: '已忽略',
     ignore: '已忽略',
-    duplicate: '已去重'
+    duplicate: '已去重',
+    merged: '已合并'
   };
 
   var SYSTEM_LABELS = {
@@ -378,6 +379,7 @@
     statusEl = $('status');
 
     boardRenderer = P.createBoardRenderer(boardEl);
+    P.boardLayout.bindControls($('board-width'));
     smart = P.createSmartScroll({ container: messagesEl, button: $('new-content'), threshold: 60 });
     renderStatus({});
 

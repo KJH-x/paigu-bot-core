@@ -22,13 +22,17 @@ pub fn group_allowed(whitelist_groups: &[String], group_id: &str) -> bool {
 }
 
 /// 成员白名单：空名单 = 不限制；否则任一「去空白、非空」条目命中候选串即放行。
+/// 代排标签 `发送者(代…)`：按发送者基名（`proxy_base`）判定。
 pub fn member_allowed(whitelist_members: &[String], candidates: &[&str]) -> bool {
     if whitelist_members.is_empty() {
         return true;
     }
     whitelist_members.iter().any(|m| {
         let m = m.trim();
-        !m.is_empty() && candidates.contains(&m)
+        !m.is_empty()
+            && candidates
+                .iter()
+                .any(|c| c.trim() == m || crate::settings::proxy_base(c) == Some(m))
     })
 }
 

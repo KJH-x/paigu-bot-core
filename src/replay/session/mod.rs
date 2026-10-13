@@ -13,6 +13,7 @@ use crate::messages::{MessageLog, MessageRecord};
 use crate::parser::parsed_event::{
     apply_parse_override, collect_parse_overrides, ParsedIntent, ParsedMessage,
 };
+use crate::parser::coalesce::{self, Candidate};
 use crate::parser::policy;
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
@@ -244,55 +245,114 @@ async fn compute(
     let mut ordered: Vec<&MessageRecord> = records.iter().collect();
     ordered.sort_by_key(|r| (r.timestamp_ms, r.seq));
 
+    // 合并分组（R1–R4）：`routed=="message"` 按相邻同人同意图分组；其余各自单例。
+    // 未启用合并时每条各自单例（保持旧行为）。
+    let groups: Vec<Vec<usize>> = if cfg.merge.enabled && cfg.merge.same_sender {
+        let cands: Vec<Candidate> = ordered
+            .iter()
+            .map(|r| Candidate {
+                user_id: &r.user_id,
+                text: &r.text,
+                is_admin: r.is_admin,
+                force_boundary: !r.routed.eq_ignore_ascii_case("message"),
+            })
+            .collect();
+        coalesce::group_candidates(&cands, &items)
+    } else {
+        (0..ordered.len()).map(|i| vec![i]).collect()
+    };
+
     let mut events: Vec<EventEnvelope> = Vec::new();
     let mut eligibilities: Vec<Eligibility> = Vec::new();
     let mut messages = Vec::with_capacity(ordered.len());
     let mut outcomes = Vec::with_capacity(ordered.len());
     let mut latest_ts: i64 = 0;
 
-    for rec in ordered {
-        latest_ts = latest_ts.max(rec.timestamp_ms);
-        let processed = process_one(
-            cfg,
-            rec,
-            &items,
-            &round_contexts,
-            &validator,
-            parse_overrides,
-            &display_names,
-        )
-        .await;
+    for group in &groups {
+        // 代表 = 组内 `(timestamp_ms, seq)` 最大者。
+        let rep_pos = group
+            .iter()
+            .copied()
+            .max_by_key(|&i| (ordered[i].timestamp_ms, ordered[i].seq))
+            .unwrap_or(group[0]);
+        latest_ts = latest_ts.max(
+            group
+                .iter()
+                .map(|&i| ordered[i].timestamp_ms)
+                .max()
+                .unwrap_or(0),
+        );
 
+        let processed = if group.len() == 1 {
+            process_one(
+                cfg,
+                ordered[group[0]],
+                &items,
+                &round_contexts,
+                &validator,
+                parse_overrides,
+                &display_names,
+            )
+            .await
+        } else {
+            let joined = group
+                .iter()
+                .map(|&i| ordered[i].text.trim())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut synthetic: MessageRecord = (*ordered[rep_pos]).clone();
+            synthetic.text = joined;
+            process_one(
+                cfg,
+                &synthetic,
+                &items,
+                &round_contexts,
+                &validator,
+                parse_overrides,
+                &display_names,
+            )
+            .await
+        };
+
+        let rep_uid = ordered[rep_pos].user_id.clone();
         if !processed.events.is_empty() {
-            if processed.priority_claim && !eligibilities.iter().any(|e| e.user_id.0 == rec.user_id)
-            {
-                eligibilities.push(priority_eligibility(&round_id, &rec.user_id));
+            if processed.priority_claim && !eligibilities.iter().any(|e| e.user_id.0 == rep_uid) {
+                eligibilities.push(priority_eligibility(&round_id, &rep_uid));
             }
-            events.extend(processed.events);
+            events.extend(processed.events.clone());
         }
 
-        messages.push(ReplayMessageView {
-            record_id: rec.record_id.clone(),
-            seq: rec.seq,
-            group_id: rec.group_id.clone(),
-            user_id: rec.user_id.clone(),
-            nickname: display_names
-                .get(&UserId(rec.user_id.clone()))
-                .cloned()
-                .unwrap_or_else(|| rec.nickname.clone()),
-            text: rec.text.clone(),
-            timestamp_ms: rec.timestamp_ms,
-            is_admin: rec.is_admin,
-            status: processed.status.clone(),
-            detail: processed.detail.clone(),
-        });
-        outcomes.push(ReplayOutcome {
-            record_id: rec.record_id.clone(),
-            seq: rec.seq,
-            applied: processed.status == "Applied",
-            status: processed.status,
-            detail: processed.detail,
-        });
+        for &i in group {
+            let rec = ordered[i];
+            let is_rep = i == rep_pos;
+            let (status, detail) = if is_rep {
+                (processed.status.clone(), processed.detail.clone())
+            } else {
+                ("Merged".to_string(), format!("并入 #{}", ordered[rep_pos].seq))
+            };
+            messages.push(ReplayMessageView {
+                record_id: rec.record_id.clone(),
+                seq: rec.seq,
+                group_id: rec.group_id.clone(),
+                user_id: rec.user_id.clone(),
+                nickname: display_names
+                    .get(&UserId(rec.user_id.clone()))
+                    .cloned()
+                    .unwrap_or_else(|| rec.nickname.clone()),
+                text: rec.text.clone(),
+                timestamp_ms: rec.timestamp_ms,
+                is_admin: rec.is_admin,
+                status: status.clone(),
+                detail: detail.clone(),
+            });
+            outcomes.push(ReplayOutcome {
+                record_id: rec.record_id.clone(),
+                seq: rec.seq,
+                applied: is_rep && status == "Applied",
+                status,
+                detail,
+            });
+        }
     }
 
     let mut board = rebuild_allocation_snapshot(&items, &events, &eligibilities, &display_names);
@@ -310,13 +370,13 @@ async fn compute(
     }
 }
 
+#[derive(Clone)]
 struct Processed {
     status: String,
     detail: String,
     events: Vec<EventEnvelope>,
     priority_claim: bool,
 }
-
 fn skipped(status: &str, detail: impl Into<String>) -> Processed {
     Processed {
         status: status.to_string(),
@@ -350,11 +410,15 @@ async fn process_one(
         return skipped("Dropped", "非白名单/Drop");
     }
 
+    let sender_uid = rec.sender_user_id.as_deref().unwrap_or(rec.user_id.as_str());
+    let sender_nick = rec.sender_nickname.as_deref().unwrap_or(rec.nickname.as_str());
     if !policy::member_allowed(
         &cfg.gateway.whitelist_members,
         &[
             rec.user_id.as_str(),
             rec.nickname.as_str(),
+            sender_uid,
+            sender_nick,
             identity.as_str(),
             display.as_str(),
             cn.map(String::as_str).unwrap_or(""),
@@ -431,8 +495,8 @@ async fn process_one(
         Err(e) => return skipped("Error", format!("处理失败: {e}")),
     };
 
-    // U4：优先用户候选含 CN/别名。
-    let is_priority = policy::is_priority(cfg, &rec.user_id, &rec.nickname);
+    // U4：优先用户候选含 CN/别名；匿名代排按**发送者**判定（R8）。
+    let is_priority = policy::is_priority(cfg, sender_uid, sender_nick);
     if policy::in_priority_at(cfg, rec.timestamp_ms) && !is_priority {
         return skipped("Rejected", "优先时段仅限预存(购物金)用户");
     }

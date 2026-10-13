@@ -18,7 +18,9 @@ fn record(seq: i64, text: &str) -> MessageRecord {
         is_admin: false,
         routed: "message".to_string(),
         status: "Applied".to_string(),
-        detail: "ok".to_string(),
+        detail: "claim".to_string(),
+        sender_user_id: None,
+        sender_nickname: None,
     }
 }
 

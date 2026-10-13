@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { verifyBoardLayout } from './board-layout.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -690,6 +691,7 @@ function buildCases() {
         }
       },
     },
+    { name: '固定宽度、盒列对齐与复盘切步', fn: verifyBoardLayout },
     {
       name: 'remote 数据源',
       fn: async (page, ctx) => {
