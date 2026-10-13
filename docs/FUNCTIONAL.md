@@ -320,7 +320,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 { "board": null, "version": 0,
   "status": { "listening": true, "bound_addr": "127.0.0.1:0", "clients": 0, "last_error": null } }
 ```
-- **限制**：无持久化（重启丢失）；`GET /api/replay` 与 `/api/replay/*` 恒返回 `501 {"error":"not_implemented"}`（`src/api/mod.rs:50-55,69-70`）。
+- **当前轮次复盘（2026-10-13）**：`GET /api/replay/view` 只读输出当前激活管线的实际消息与领域事件步骤。每步包含完整排位和该步成员汇总，默认显示最新一步；新消息、配置或轮次变化触发页面刷新。不会重跑 LLM、改写日志或替换实时管线。示例文件仅由用户手动导入；空轮次与接口错误不回退为示例。旧服务缺少该接口时仅显示实际当前快照并提示逐步历史不可用。消息日志持久化与 `POST /api/replay` 的权威重算见现行接口文档。
 
 ### F7 who-whats
 
@@ -376,7 +376,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
   "changed": []
 }
 ```
-- **静态资源实测**：`/sim`、`/common.js`、`/sim.js`、`/display.css` 均返回 HTTP 200（由 `src/api/mod.rs:72-77` 的静态路由与 `fallback_service` 提供）。
+- **静态资源实测**：`/`、`/common.js`、`/display.css` 均返回 HTTP 200（由 `src/api/mod.rs` 的静态路由与 `fallback_service` 提供）；`/sim`、`/sim.js` 已移除（返回 404）。
 
 ### F10 管理面板（revision / 409）
 
@@ -388,24 +388,21 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 ```
 （HTTP 409；`src/api/config_routes.rs:60-71`）
 
-### F11 模拟器（身份 / 时间偏移）
+### F11 测试注入（HTTP，仅测试轮）
 
-- **触发**：打开 `/sim`。
-- **处理**：`GET /api/members` 填充身份下拉（`web/sim.js:296-307`）；切换身份 → `POST /api/sim/identity`（`:201-212`）；输入偏移 `±DD HH MM SS`（`web/common.js:426-446`）；发送 → `POST /api/sim/message`，`timestamp_ms = now + offset_ms`（`src/api/sim_routes.rs:53-64`）；服务端走与真实链路**同一** `Pipeline::process`（`src/api/sim_routes.rs:69`）。重置 → `POST /api/sim/reset`（`src/api/sim_routes.rs:98-103`）。
-- **实测请求/响应**：
+- **背景**：模拟器页（`/sim`、`sim.html`/`sim.js`）与浏览器端伪造发送**已移除**；测试消息改由 HTTP 端点注入，且**仅测试轮可用**（`RoundSettings.category == "test"`）。
+- **触发**：`POST /api/sim/message`（单条）或 `POST /api/sim/messages`（批量，裸数组或 `{messages:[…]}`）。
+- **处理**：每条为**完整消息** `{user_id|id, text, timestamp, nickname?, is_admin?, message_id?, group_id?}`，`timestamp` **逐条出现**（整数毫秒 / 纯数字串 / RFC3339 / 本地 `YYYY-MM-DD HH:MM[:SS]`）。服务端逐条构造 `IncomingEvent`，走与真实链路**同一** `Pipeline::process`（`src/api/sim_routes.rs`）。
+- **隔离**：伪造解包只在 NC 入口 `Pipeline::handle` 生效，且要求「`accept_forged_messages` + 测试轮 + 测试群（`gateway.test_group_id`）」三者同时满足；`process` 核心不再感知伪造。
+- **逐条 drop（不整批拒绝）**：缺 `user_id`/`text`/`timestamp`（或 timestamp 非法）→ 该条 `Dropped`，不进入处理；`group_id` 非测试群 → 该条 `Dropped`；其余照常。非测试轮调用 → `400 {"error":"not_a_test_round"}`。
+- **响应**（批量）：
 ```json
-POST /api/sim/message
-{ "user_id": "10001", "nickname": "成员01", "text": "排 通行证 结城理 1", "offset_ms": 0, "is_admin": false }
+{ "ok": true, "round_id": "…", "category": "test", "count": 3,
+  "summary": { "applied": 1, "dropped": 2, "rejected": 0, "ignored": 0 },
+  "results": [ { "index": 0, "user_id": "…", "text": "…", "status": "Applied", "detail": "…", "version": 1 } ],
+  "board": { "…": "AllocationSnapshot" }, "version": 1 }
 ```
-```json
-{
-  "version": 1,
-  "board": { "...": "AllocationSnapshot" },
-  "outcome": { "status": "Applied", "detail": "claim: pass_spx1[normal]",
-    "reply": "已记录，当前版本 #1", "version": 1, "snapshot": { "...": "AllocationSnapshot" } }
-}
-```
-- **注意**：`POST /api/sim/identity` 仅把身份存入进程内 `BTreeMap`（`src/api/sim_routes.rs:15-25,85-96`），**不参与消息处理**；模拟消息的预存判定实际由 `config.round.priority_users` + 昵称匹配决定（`src/llm/pipeline.rs:494-499`）。`sim.js` 发送的 `priority_level` 字段不在 `SimIdentity` 结构体中，会被忽略（`web/sim.js:203-208`；`src/api/sim_routes.rs:75-83`）。
+- **注意**：`POST /api/sim/identity` 仅把身份存入进程内 `BTreeMap`（`src/api/sim_routes.rs`），**不参与消息处理**；重置 `POST /api/sim/reset` 仅手动。
 
 ### F12 配置热载
 
@@ -430,7 +427,8 @@ POST /api/sim/message
 | POST | `/api/config/reload` | `{}` | `{config, revision}` | `500 {error}` |
 | GET | `/api/display?since=<version>` | — | `{version, board, messages, who_whats, status, changed}` | — |
 | GET | `/api/messages?since=<seq>` | — | `{messages, version}` | — |
-| POST | `/api/sim/message` | `{user_id, nickname, text, offset_ms?, group_id?, is_admin?}` | `{outcome, board, version}` | — |
+| POST | `/api/sim/message` | `{user_id\|id, text, timestamp, nickname?, is_admin?, message_id?, group_id?}` | `{outcome, board, version}` | `400 {error:"not_a_test_round"}`；缺字段/非测试群 → `outcome.status="Dropped"` |
+| POST | `/api/sim/messages` | 裸数组 或 `{messages:[…]}`（每项同上） | `{ok, round_id, category, count, summary, results, board, version}` | `400 {error:"not_a_test_round"}` |
 | POST | `/api/sim/identity` | `{user_id, nickname, is_admin?, priority?}` | `{ok, identity, identities}` | — |
 | POST | `/api/sim/reset` | `{}` | `{ok, version}` | — |
 | GET | `/api/members` | — | `{members, source:"seed"\|"example"\|"empty"}` | — |
@@ -438,7 +436,6 @@ POST /api/sim/message
 | GET | `/api/replay`、`/api/replay/*` | — | — | `501 {error:"not_implemented"}` |
 | GET | `/` | — | `display.html` | — |
 | GET | `/admin` | — | `admin.html` | — |
-| GET | `/sim` | — | `sim.html` | — |
 | GET | `/replay` | — | `replay.html` | — |
 | GET | `/web/*` | — | 静态文件；未命中回退目录 `web/` | 404 |
 
@@ -450,9 +447,10 @@ POST /api/sim/message
 - `GET /api/config` / `PUT` / `POST reload` → `src/api/config_routes.rs:14-71`；409 映射 `:60-65`。
 - `GET /api/display?since=` → `src/api/display_routes.rs:48-75`；`changed` 仅在缓存中命中 `since` 对应版本时计算（`:55-65`）。
 - `GET /api/messages?since=` → `src/api/display_routes.rs:77-82`。
-- `POST /api/sim/message` → `src/api/sim_routes.rs:34-73`；`group_id` 缺省用 `round.group_id`。
-- `POST /api/sim/identity` → `src/api/sim_routes.rs:75-96`。
-- `POST /api/sim/reset` → `src/api/sim_routes.rs:98-103`（`pipeline.reset()` + `display_routes::clear_cache()`）。
+- `POST /api/sim/message` → `src/api/sim_routes.rs`（**仅测试轮**；逐条 drop）。
+- `POST /api/sim/messages` → `src/api/sim_routes.rs`（批量，裸数组或 `{messages:[…]}`）。
+- `POST /api/sim/identity` → `src/api/sim_routes.rs`。
+- `POST /api/sim/reset` → `src/api/sim_routes.rs`（`pipeline.reset()` + `display::clear_cache()`）。
 - `GET /api/members` / `POST /api/members/refresh` → `src/api/member_routes.rs:30-91`。
 - 静态页 → `src/api/mod.rs:57-75`。
 
@@ -468,10 +466,10 @@ curl http://127.0.0.1:21081/api/board
 # 增量展示（since 传上次 version）
 curl "http://127.0.0.1:21081/api/display?since=0"
 
-# 模拟发送一条排谷消息
-curl -X POST http://127.0.0.1:21081/api/sim/message \
+# 批量注入测试消息（仅测试轮；缺字段/非测试群逐条 Dropped）
+curl -X POST http://127.0.0.1:21081/api/sim/messages \
   -H "Content-Type: application/json" \
-  -d '{"user_id":"10001","nickname":"成员01","text":"排 通行证 结城理 1","offset_ms":0,"is_admin":false}'
+  -d '[{"user_id":"10001","nickname":"成员01","text":"排 通行证 结城理 1","timestamp":1791792000000}]'
 
 # 读取配置
 curl http://127.0.0.1:21081/api/config

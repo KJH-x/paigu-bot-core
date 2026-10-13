@@ -7,6 +7,9 @@
     "heartbeat_secs": 15,
     "reply_enabled": false,
     "admin_commands_enabled": false,
+    "accept_forged_messages": false,
+    "react_emoji_id": null,
+    "test_group_id": null,
     "allowed_actions": [
       "get_group_member_list",
       "get_group_info",
@@ -23,12 +26,14 @@
     "max_tokens": 2048,
     "temperature": 0.1,
     "fallback_to_rules": true,
+    "segment_claims": false,
     "prompt_template": "你是排谷消息解析器。只抽取结构化信息，不计算价格、不排序、不生成回复。\n输入：QQ 群消息文本、当前商品目录、预存(购物金)用户、时段政策。\n输出：严格 JSON：{\"intent\":\"claim|cancel|admin|unknown\",\"items\":[{\"item\":\"商品名\",\"variant\":\"变体名\",\"quantity\":1,\"claim_type\":\"split|single\",\"slot_policy\":\"normal|tail|fullbox\"}],\"confidence\":0.0,\"ambiguous_parts\":[]}。\n非排谷消息（闲聊/表情/图片/无关）→ intent=unknown。\n商品歧义 → 填入 ambiguous_parts。\n中文口语别名：通行证→通行认证SP-月行水上、特典/特典卡组→特典卡组-校园凭证、一套→整套、人事部简历→人事部简历SP-月行水上、风尚速递→风尚速递SP-月行水上。"
   },
   "round": {
     "round_id": "月行水上",
     "title": "月行水上",
     "group_id": "123456789",
+    "category": "normal",
     "priority_users": ["user_a", "user_b", "user_c", "user_d"],
     "priority_window": { "start_ms": 1788782400000, "end_ms": 1788789600000 },
     "phases": [],

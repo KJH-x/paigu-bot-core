@@ -71,7 +71,7 @@
 .legend .sw { width: 14px; height: 14px; border-radius: 4px; border: 2px solid; display: inline-block; }
 .legend .sw.new { border-color: var(--ok); background: var(--ok-soft); }
 .legend .sw.release { border-color: var(--danger); background: var(--danger-soft); }
-.legend .sw.成员32 { border-color: var(--warn); background: var(--warn-soft); }
+.legend .sw.fwd { border-color: var(--warn); background: var(--warn-soft); }
 .legend .sw.tail { border-color: var(--tail); background: var(--tail-soft); }
 .legend .sw.admin { border-color: var(--admin); background: var(--admin-soft); }
 

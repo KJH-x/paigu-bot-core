@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::warn;
@@ -16,13 +16,14 @@ use crate::parser::parsed_event::ParsedIntent;
 use crate::parser::policy;
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
-use crate::settings::ConfigStore;
+use crate::settings::{AppConfig, ConfigStore};
 
 use super::client::{LlmClient, OpenAiClient};
 
 mod admin;
 mod export;
 mod llm_parse;
+mod replay_view;
 mod state;
 
 #[cfg(test)]
@@ -34,6 +35,193 @@ use state::{MessageRecord, State};
 
 const RULE_CONFIDENCE: f32 = 0.9;
 const CONFIDENCE_THRESHOLD: f32 = 0.65;
+
+/// 测试用：识别“伪造来源”双层 JSON 封装。NC 的完整文本本身为
+/// `{"id":"<qq>","text":"<内容>"}`（可选 `nickname` / `is_admin`）；命中则把来源改为内层
+/// `id`、正文改为内层 `text`，其余字段（群 / 时间戳 / 消息 id / 原始事件）沿用外层。
+/// 仅在 `gateway.accept_forged_messages` 开启时生效。
+fn unwrap_forged_envelope(ev: IncomingEvent) -> IncomingEvent {
+    let Some(envelope) = parse_forged_envelope(&ev.text) else {
+        return ev;
+    };
+    IncomingEvent {
+        group_id: ev.group_id,
+        user_id: envelope.id.clone(),
+        nickname: envelope.nickname.unwrap_or(envelope.id),
+        message_id: ev.message_id,
+        text: envelope.text,
+        timestamp_ms: envelope.timestamp_ms.unwrap_or(ev.timestamp_ms),
+        is_admin: envelope.is_admin.unwrap_or(false),
+        raw: ev.raw,
+    }
+}
+
+/// NC 入口隔离（R3/R4）：仅当开启伪造解包、当前轮为**测试轮**、且消息来自**测试群**时，
+/// 才把伪造信封解包；其余情况原样透传。
+/// 真实消息处理链路（`Pipeline::process`）不再感知伪造 —— 隔离只管理来自 NC 的消息。
+pub(crate) fn gate_nc(cfg: &AppConfig, ev: IncomingEvent) -> IncomingEvent {
+    let is_test_round = cfg.round.category.is_test();
+    let from_test_group = cfg.gateway.test_group_id.as_deref() == Some(ev.group_id.as_str());
+    if cfg.gateway.accept_forged_messages && is_test_round && from_test_group {
+        unwrap_forged_envelope(ev)
+    } else {
+        ev
+    }
+}
+
+struct ForgedEnvelope {
+    id: String,
+    text: String,
+    nickname: Option<String>,
+    is_admin: Option<bool>,
+    /// 覆盖消息时间（毫秒）；缺省用外层时间。支持整数毫秒 / 纯数字串 /
+    /// RFC3339（`2026-10-12T22:30:00+08:00`）/ 本地 `YYYY-MM-DD HH:MM[:SS]`。
+    timestamp_ms: Option<i64>,
+}
+
+fn parse_forged_envelope(text: &str) -> Option<ForgedEnvelope> {
+    let trimmed = text.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return None;
+    }
+    let value: Value = serde_json::from_str(trimmed).ok()?;
+    let obj = value.as_object()?;
+    let id = obj
+        .get("id")
+        .or_else(|| obj.get("user_id"))
+        .and_then(scalar_to_string)?;
+    let text = obj.get("text").and_then(Value::as_str)?.to_string();
+    let nickname = obj
+        .get("nickname")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let is_admin = obj.get("is_admin").and_then(Value::as_bool);
+    let timestamp_ms = obj
+        .get("timestamp")
+        .or_else(|| obj.get("timestamp_ms"))
+        .and_then(parse_timestamp_ms);
+    Some(ForgedEnvelope {
+        id,
+        text,
+        nickname,
+        is_admin,
+        timestamp_ms,
+    })
+}
+
+/// 解析时间：整数/数值 ⇒ 毫秒；字符串 ⇒ 纯数字毫秒 / RFC3339 / 本地 `YYYY-MM-DD HH:MM[:SS]`。
+pub(crate) fn parse_timestamp_ms(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        Value::String(s) => {
+            let s = s.trim();
+            if s.is_empty() {
+                return None;
+            }
+            if let Ok(ms) = s.parse::<i64>() {
+                return Some(ms);
+            }
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+                return Some(dt.timestamp_millis());
+            }
+            for fmt in [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y/%m/%d %H:%M",
+            ] {
+                if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
+                    if let Some(dt) = chrono::Local.from_local_datetime(&naive).single() {
+                        return Some(dt.timestamp_millis());
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn scalar_to_string(value: &Value) -> Option<String> {
+    let s = match value {
+        Value::String(s) => s.trim().to_string(),
+        Value::Number(n) => n.to_string(),
+        _ => return None,
+    };
+    (!s.is_empty()).then_some(s)
+}
+
+/// 代排分段：识别 `代<名称>排[:]` 标记；有标记时返回分段 `(target, text)`。
+/// `target=None` 为发信人段，`Some(名称)` 为被代理人段（标记本身被剔除）。
+fn proxy_segments(text: &str) -> Option<Vec<(Option<String>, String)>> {
+    let markers = find_proxy_markers(text);
+    if markers.is_empty() {
+        return None;
+    }
+    let mut segs: Vec<(Option<String>, String)> = Vec::new();
+    let mut pos = 0usize;
+    let mut current: Option<String> = None;
+    for (name, start, end) in markers {
+        if start > pos {
+            segs.push((current.clone(), text[pos..start].to_string()));
+        }
+        current = Some(name);
+        pos = end;
+    }
+    if pos < text.len() {
+        segs.push((current, text[pos..].to_string()));
+    }
+    segs.retain(|(_, s)| !s.trim().is_empty());
+    (!segs.is_empty()).then_some(segs)
+}
+
+fn find_proxy_markers(text: &str) -> Vec<(String, usize, usize)> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].1 == '代' {
+            let mut j = i + 1;
+            while j < chars.len()
+                && !matches!(
+                    chars[j].1,
+                    '排' | ' ' | ':' | '：' | '\n' | '\t' | '，' | ','
+                )
+                && j - i <= 24
+            {
+                j += 1;
+            }
+            if j < chars.len() && chars[j].1 == '排' && j > i + 1 {
+                let name: String = chars[i + 1..j].iter().map(|(_, c)| *c).collect();
+                let start = chars[i].0;
+                let mut end = chars[j].0 + chars[j].1.len_utf8();
+                if let Some(c) = text[end..].chars().next() {
+                    if c == ':' || c == '：' {
+                        end += c.len_utf8();
+                    }
+                }
+                out.push((name, start, end));
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// 是否疑似排谷/撤销/改单消息（决定是否走 LLM 切分）；纯闲聊/表情不触发 LLM。
+fn looks_like_order(text: &str, rule: &crate::parser::parsed_event::ParsedMessage) -> bool {
+    !rule.items.is_empty()
+        || rule.intent != ParsedIntent::Unknown
+        || text.contains('排')
+        || text.contains('撤')
+        || text.contains('改')
+        || text.contains('代')
+        || text.contains("特典")
+}
 
 pub struct Pipeline {
     cfg: Arc<ConfigStore>,
@@ -98,6 +286,65 @@ impl Pipeline {
         self.llm.clone()
     }
 
+    /// 代排（T-29）：把一条消息按 `代<名称>排:` 分段，逐段复用 `process`。
+    /// 发信人段归属发信人；被代理人段经成员缓存反查 QQ（群内）→ 归属被代理人，
+    /// 查不到（群外）→ 记为 `发信人(代名称)`。
+    async fn process_proxy_segments(
+        &self,
+        ev: &IncomingEvent,
+        segments: Vec<(Option<String>, String)>,
+    ) -> PipelineOutcome {
+        let cfg = self.cfg.get().await;
+        let sender_name = crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname)
+            .unwrap_or_else(|| ev.user_id.clone());
+        let mut statuses: Vec<String> = Vec::new();
+        let mut details: Vec<String> = Vec::new();
+        let mut version = 0i64;
+        let mut snapshot: Option<Value> = None;
+        for (idx, (target, text)) in segments.into_iter().enumerate() {
+            let mut seg = ev.clone();
+            seg.text = text;
+            seg.message_id = format!("{}#proxy{}", ev.message_id, idx);
+            seg.raw = None;
+            if let Some(name) = target {
+                match crate::settings::member_user_id_by_name(&cfg, &name) {
+                    Some(uid) => {
+                        seg.user_id = uid;
+                        seg.nickname = String::new();
+                    }
+                    None => {
+                        seg.user_id = format!("{sender_name}(代{name})");
+                        seg.nickname = String::new();
+                    }
+                }
+            }
+            let outcome = Box::pin(self.process(seg)).await;
+            statuses.push(outcome.status.clone());
+            if !outcome.detail.is_empty() {
+                details.push(format!("{} [{}]", outcome.detail, outcome.status));
+            }
+            version = outcome.version;
+            if outcome.snapshot.is_some() {
+                snapshot = outcome.snapshot;
+            }
+        }
+        let status = if statuses.iter().any(|s| s == "Applied") {
+            "Applied".to_string()
+        } else {
+            statuses
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "Ignored".to_string())
+        };
+        PipelineOutcome {
+            status,
+            detail: format!("代排：{}", details.join("；")),
+            reply: None,
+            version,
+            snapshot,
+        }
+    }
+
     pub async fn process(&self, ev: IncomingEvent) -> PipelineOutcome {
         let cfg = self.cfg.get().await;
         // C-3：保留成员原始事件（WS 路径由 Gateway 落盘；此处覆盖 API/脚本注入路径）
@@ -106,6 +353,10 @@ impl Pipeline {
             if let Err(e) = self.messages.append_raw_event(&round_id, raw).await {
                 warn!("原始事件写入失败: {e}");
             }
+        }
+        // 代排：`代<名称>排: …` → 按段归属（发信人段 + 被代理人段），逐段复用本流程。
+        if let Some(segments) = proxy_segments(&ev.text) {
+            return self.process_proxy_segments(&ev, segments).await;
         }
         let (identity, display_raw) = crate::parser::normalize::clean_nickname(&ev.nickname);
         let display = if display_raw.trim().is_empty() {
@@ -191,7 +442,17 @@ impl Pipeline {
         let items = cfg.round.to_items();
         let rule = RuleParser::parse(&text, &items, ev.is_admin);
 
-        let parsed = if rule.confidence >= RULE_CONFIDENCE && rule.intent != ParsedIntent::Unknown {
+        let parsed = if cfg.llm.enabled && cfg.llm.segment_claims && looks_like_order(&text, &rule)
+        {
+            // 切分改由 LLM 自动完成（关键词提取）；失败/超时回退规则解析器。
+            match self.llm_parse(&cfg, &ev).await {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    warn!("LLM 切分失败，回退规则：{e}");
+                    rule
+                }
+            }
+        } else if rule.confidence >= RULE_CONFIDENCE && rule.intent != ParsedIntent::Unknown {
             rule
         } else if cfg.llm.enabled {
             match self.llm_parse(&cfg, &ev).await {
@@ -509,6 +770,8 @@ impl Pipeline {
 #[async_trait]
 impl EventSink for Pipeline {
     async fn handle(&self, ev: IncomingEvent) {
+        let cfg = self.cfg.get().await;
+        let ev = gate_nc(&cfg, ev);
         self.process(ev).await;
     }
 

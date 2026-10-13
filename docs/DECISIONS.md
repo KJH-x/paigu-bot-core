@@ -47,6 +47,16 @@
 ### B-3 白名单口径 `已决策`（2026-09-17）
 - **结论**：**仅按群白名单**；不启用成员级白名单。
 
+### B-4 测试轮隔离与批量测试消息 `已决策`（2026-10-13）
+- **结论**：
+  - 轮次新增 `category: "test" | "normal"`（默认 normal）；`gateway.test_group_id` 指定测试群。**测试轮只绑定测试群，正常轮只绑定正常群**（校验 `test_round_group_mismatch` / `normal_round_uses_test_group`）。
+  - **伪造消息解包隔离真实链路，只作用于来自 NC 的消息**：仅在 `EventSink::handle` 入口、且 `accept_forged_messages && category==test && group_id==test_group_id` 时解包；`process`（core）不再感知伪造。
+  - 新增 `POST /api/sim/messages`（批量）：裸数组或 `{"messages":[…]}`；`timestamp` 只在每条消息内；**逐条处理，无整批拒绝**；缺 `user_id`/`text`/`timestamp` 或群号非测试群 → 该条直接 `Dropped`（**不使用 `Skipped`，不用 `now` 兜底**）。单条 `/api/sim/message` 与批量端点**均仅测试轮可用**；重置仅手动。
+  - **移除 webui 模拟器页**（`sim.html`/`sim.js`）及伪造发送；保留消息编辑（`msglog.js`）。
+  - e2e 增加排版验收：Playwright 视口 **1920×1080、100% 缩放**。
+- **回复**：用户拍板"按推荐、sim 不再保留、字段用 `category`、缺失字段直接 drop、一并改测试脚本、e2e 需 1920×1080/100% 验证排版"。
+- **影响**：`src/round/mod.rs`、`src/settings/mod.rs`、`src/services/rounds.rs`、`src/llm/pipeline/mod.rs`、`src/api/{mod,sim_routes}.rs`、`web/**`、`tests/e2e/sim.mjs`。详见 [SPEC-TEST-ROUND-ISOLATION.md](./SPEC-TEST-ROUND-ISOLATION.md)。
+
 ---
 
 ## C. 存储 / 部署

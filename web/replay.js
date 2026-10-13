@@ -6,67 +6,8 @@
 
   function $(id) { return document.getElementById(id); }
 
-  /* 内置占位示例（脱敏：甲/乙/丙/丁/戊）。默认数据源为同目录 replay_view.json（可选），
-     读取失败时回退到本示例。示例与 sample_replay.json 结构等价。 */
-  var EMBEDDED_SAMPLE = {
-    sample_id: '占位示例',
-    title: '占位示例',
-    items: [
-      {
-        item_id: '月行水上/特典卡组-校园凭证', name: '特典卡组-校园凭证', kind: 'split',
-        section: '特典卡组-校园凭证',
-        variants: [{ variant_id: '整套', name: '整套', capacity: 5 }]
-      },
-      {
-        item_id: '月行水上/通行证SP-月行水上', name: '通行证SP-月行水上', kind: 'single',
-        section: '单领', variants: []
-      },
-      {
-        item_id: '月行水上/徽章-月行水上', name: '徽章-月行水上', kind: 'split',
-        section: '徽章-月行水上',
-        variants: [
-          { variant_id: '亚克力', name: '亚克力', capacity: 3 },
-          { variant_id: '吧唧', name: '吧唧', capacity: 4 }
-        ]
-      }
-    ],
-    messages: [
-      { seq: 1, display: '甲', text: '排整套', status: 'Applied', detail: 'claim: 特典卡组-校园凭证 整套 x1' },
-      { seq: 2, display: '乙', text: '排整套', status: 'Applied', detail: 'claim: 特典卡组-校园凭证 整套 x1' },
-      { seq: 3, display: '丙', text: '排整套', status: 'Applied', detail: 'claim: 特典卡组-校园凭证 整套 x1' },
-      { seq: 4, display: '丁', text: '排亚克力1', status: 'Applied', detail: 'claim: 徽章-月行水上 亚克力 x1' },
-      { seq: 5, display: '戊', text: '排亚克力1', status: 'Applied', detail: 'claim: 徽章-月行水上 亚克力 x1' },
-      { seq: 6, display: '乙', text: '撤整套1', status: 'Applied', detail: 'cancel: 特典卡组-校园凭证 整套 x1' },
-      { seq: 7, display: '丁', text: '排吧唧1', status: 'Applied', detail: 'claim: 徽章-月行水上 吧唧 x1' },
-      { seq: 8, display: '管理员', text: '/锁位 吧唧 3号位给甲', status: 'Applied', detail: 'admin: 包尾锁位 吧唧 slot3 -> 甲' },
-      { seq: 9, display: '管理员', text: '/固定 吧唧 2号位给戊', status: 'Applied', detail: 'admin: 固定 吧唧 slot2 -> 戊' }
-    ],
-    steps: [
-      { index: 0, message_seq: 1, board: { '月行水上/特典卡组-校园凭证|整套': [{ slot: 1, user: '甲', status: 'filled' }] }, changed: [{ item_id: '月行水上/特典卡组-校园凭证', variant_id: '整套', slot: 1, before: null, after: '甲', reason: 'NewClaimFilled' }] },
-      { index: 1, message_seq: 2, board: { '月行水上/特典卡组-校园凭证|整套': [{ slot: 1, user: '甲', status: 'filled' }, { slot: 2, user: '乙', status: 'filled' }] }, changed: [{ item_id: '月行水上/特典卡组-校园凭证', variant_id: '整套', slot: 2, before: null, after: '乙', reason: 'NewClaimFilled' }] },
-      { index: 2, message_seq: 3, board: { '月行水上/特典卡组-校园凭证|整套': [{ slot: 1, user: '甲', status: 'filled' }, { slot: 2, user: '乙', status: 'filled' }, { slot: 3, user: '丙', status: 'filled' }] }, changed: [{ item_id: '月行水上/特典卡组-校园凭证', variant_id: '整套', slot: 3, before: null, after: '丙', reason: 'NewClaimFilled' }] },
-      { index: 3, message_seq: 4, board: { '月行水上/徽章-月行水上|亚克力': [{ slot: 1, user: '丁', status: 'filled' }] }, changed: [{ item_id: '月行水上/徽章-月行水上', variant_id: '亚克力', slot: 1, before: null, after: '丁', reason: 'NewClaimFilled' }] },
-      { index: 4, message_seq: 5, board: { '月行水上/徽章-月行水上|亚克力': [{ slot: 1, user: '丁', status: 'filled' }, { slot: 2, user: '戊', status: 'filled' }] }, changed: [{ item_id: '月行水上/徽章-月行水上', variant_id: '亚克力', slot: 2, before: null, after: '戊', reason: 'NewClaimFilled' }] },
-      { index: 5, message_seq: 6, board: { '月行水上/特典卡组-校园凭证|整套': [{ slot: 1, user: '甲', status: 'filled' }, { slot: 2, user: '丙', status: 'filled' }] }, changed: [{ item_id: '月行水上/特典卡组-校园凭证', variant_id: '整套', slot: 2, before: '乙', after: '丙', reason: 'AutoMovedForward' }, { item_id: '月行水上/特典卡组-校园凭证', variant_id: '整套', slot: 3, before: '丙', after: null, reason: 'CancelReleased' }] },
-      { index: 6, message_seq: 7, board: { '月行水上/徽章-月行水上|吧唧': [{ slot: 1, user: '丁', status: 'filled' }] }, changed: [{ item_id: '月行水上/徽章-月行水上', variant_id: '吧唧', slot: 1, before: null, after: '丁', reason: 'NewClaimFilled' }] },
-      { index: 7, message_seq: 8, board: { '月行水上/徽章-月行水上|吧唧': [{ slot: 1, user: '丁', status: 'filled' }, { slot: 3, user: '甲', status: 'locked' }] }, changed: [{ item_id: '月行水上/徽章-月行水上', variant_id: '吧唧', slot: 3, before: null, after: '甲', reason: 'TailSegmentCreated' }] },
-      { index: 8, message_seq: 9, board: { '月行水上/徽章-月行水上|吧唧': [{ slot: 1, user: '丁', status: 'filled' }, { slot: 2, user: '戊', status: 'filled' }, { slot: 3, user: '甲', status: 'locked' }] }, changed: [{ item_id: '月行水上/徽章-月行水上', variant_id: '吧唧', slot: 2, before: null, after: '戊', reason: 'AdminFixed' }] }
-    ],
-    who_whats: [
-      { display: '甲', identity: '甲', items: [{ name: '整套', qty: 1 }, { name: '吧唧', qty: 1 }] },
-      { display: '乙', identity: '乙', items: [{ name: '整套', qty: 1 }] },
-      { display: '丙', identity: '丙', items: [{ name: '整套', qty: 1 }] },
-      { display: '丁', identity: '丁', items: [{ name: '亚克力', qty: 1 }, { name: '吧唧', qty: 1 }] },
-      { display: '戊', identity: '戊', items: [{ name: '亚克力', qty: 1 }, { name: '吧唧', qty: 1 }] }
-    ],
-    expected: {
-      '月行水上/特典卡组-校园凭证|整套': ['甲', '丙'],
-      '月行水上/徽章-月行水上|亚克力': ['丁', '戊'],
-      '月行水上/徽章-月行水上|吧唧': ['丁', '戊', '甲']
-    }
-  };
 
-  var KIND_LABEL = { split: '拆分', single: '单领', gift: '赠品', shipping: '运费', adjustment: '调整' };
+  var KIND_LABEL = { split: '拼团', group: '拼团', single: '单领', box: '整盒', whole_box: '整盒', gift: '特典' };
 
   var state = {
     data: null,
@@ -81,7 +22,14 @@
     focusedKey: null,
     meta: null,
     mermaidReady: false,
-    wwOpen: true
+    wwOpen: true,
+    changes: [],
+    active: true,
+    inFlight: false,
+    workflowStamp: '',
+    requestId: 0,
+    queuedLoad: false,
+    expectedRound: ''
   };
 
   var tableEl, boardRenderer;
@@ -109,33 +57,55 @@
     var boards = [];
     var cur = {};
     var lastChange = {};
+    var changes = [];
+    var previousRows = [];
     for (var i = 0; i < steps.length; i++) {
       var next = {};
-      for (var k in cur) { if (Object.prototype.hasOwnProperty.call(cur, k)) next[k] = cur[k].slice(); }
+      if (!Array.isArray(cur.item_allocations)) {
+        for (var k in cur) { if (Object.prototype.hasOwnProperty.call(cur, k) && Array.isArray(cur[k])) next[k] = cur[k].slice(); }
+      }
       var b = steps[i].board || {};
-      for (var k2 in b) {
-        if (!Object.prototype.hasOwnProperty.call(b, k2)) continue;
-        next[k2] = b[k2].slice();
+      if (Array.isArray(b.item_allocations)) {
+        next = b;
+      } else {
+        for (var k2 in b) {
+          if (!Object.prototype.hasOwnProperty.call(b, k2) || !Array.isArray(b[k2])) continue;
+          next[k2] = b[k2].slice();
+        }
       }
       var changed = steps[i].changed || [];
       for (var c = 0; c < changed.length; c++) {
         lastChange[cellKey(boardKey(changed[c].item_id, changed[c].variant_id), changed[c].slot)] = i;
       }
       boards.push(next);
+      var rows = P.normalizeBoard({ board: next }, state.meta);
+      var map = steps[i].changed ? P.normalizeChanged(steps[i]) : P.diffBoardItems(previousRows, rows);
+      if (!steps[i].changed) {
+        steps[i].changed = Object.keys(map).map(function (key) {
+          var parts = key.slice(0, key.lastIndexOf('#')).split('|');
+          var position = key.slice(key.lastIndexOf('#') + 1).split(':');
+          return {item_id:parts[0], variant_id:parts.slice(1).join('|'), box_index:+position[0],
+            slot:+position[1], before:map[key].before, after:map[key].after, reason:map[key].reason};
+        });
+      }
+      Object.keys(map).forEach(function (key) { lastChange[key] = i; });
+      changes.push(map);
+      previousRows = rows;
       cur = next;
     }
     state.cumulative = boards;
     state.lastChange = lastChange;
+    state.changes = changes;
   }
 
   function renderHeader() {
     if (!state.data) return;
     var steps = state.data.steps || [];
     $('replay-title').textContent = state.data.title || state.data.sample_id || '排谷重放';
-    $('step-info').textContent = '共 ' + steps.length + ' 步 · 当前第 ' +
+    $('step-info').textContent = state.data.latest_only ? '当前排位 · 逐步历史尚未启用' : '共 ' + steps.length + ' 步 · 当前第 ' +
       (steps.length ? state.current + 1 : 0) + ' 步';
-    $('step-count').textContent = steps.length ? (state.current + 1) + '/' + steps.length : '0/0';
-    $('source-info').textContent = state.source ? '数据源：' + state.source : '';
+    $('step-count').textContent = state.data.latest_only ? '仅当前快照' : (steps.length ? (state.current + 1) + '/' + steps.length : '0/0');
+    $('source-info').textContent = state.active ? '当前激活轮次 · 版本 ' + state.data.version : '导入文件 · ' + state.source;
   }
 
   function renderList() {
@@ -168,7 +138,7 @@
         li.__who.textContent = display;
         li.__txt.textContent = text;
         li.__txt.title = text;
-        li.__st.textContent = status;
+        li.__st.textContent = ({Applied:'已记录', Rejected:'已拒绝', Ignored:'已忽略', Duplicate:'已去重', NeedConfirm:'待确认', Error:'错误'})[status] || status;
         li.__st.className = 'status' + (status ? ' st-' + String(status).toLowerCase() : '');
         li.onclick = function () { setPlaying(false); goToStep(i); };
       }
@@ -186,9 +156,9 @@
 
   function renderBoard() {
     var step = (state.data.steps || [])[state.current];
-    var board = state.cumulative[state.current] || {};
+    var board = state.cumulative[state.current] || state.data.board || {};
     var rows = P.normalizeBoard({ board: board }, state.meta);
-    var changeMap = P.normalizeChanged({ changed: (step && step.changed) || [] });
+    var changeMap = state.changes[state.current] || {};
     boardRenderer.render(rows, changeMap);
     applyFocus();
   }
@@ -204,7 +174,10 @@
     var data = state.data;
     var step = (data.steps || [])[state.current];
     var changes = (step && step.changed) || [];
-    var board = state.cumulative[state.current] || {};
+    var board = {};
+    P.normalizeBoard({board: state.cumulative[state.current] || data.board || {}}, state.meta).forEach(function (row) {
+      board[row.key] = [].concat.apply([], row.boxes.map(function (box) { return box.slots; }));
+    });
 
     var changedItemIds = {};
     var changedVariantKeys = {};
@@ -343,11 +316,10 @@
     var stepCells = [];
     for (var j = 0; j < steps.length; j++) {
       var map = {};
-      var ch = steps[j].changed || [];
-      for (var c = 0; c < ch.length; c++) {
-        if (!ch[c].after) continue;
-        map[boardKey(ch[c].item_id, ch[c].variant_id)] = ch[c].after;
-      }
+      Object.keys(state.changes[j] || {}).forEach(function (key) {
+        var change = state.changes[j][key];
+        if (change.after) map[key.split('#')[0]] = change.after;
+      });
       stepCells.push(map);
     }
 
@@ -390,11 +362,12 @@
 
   function renderWhoWhats() {
     var panel = $('who-whats-panel');
-    var list = P.normalizeWhoWhats({ who_whats: (state.data && state.data.who_whats) || [] });
+    var step = state.data && (state.data.steps || [])[state.current];
+    var list = P.normalizeWhoWhats({ who_whats: (step && step.who_whats) || (state.data && state.data.who_whats) || [] });
     if (!list.length) { panel.classList.add('hidden'); return; }
     panel.classList.remove('hidden');
     $('ww-count').textContent = list.length + ' 人';
-    $('ww-title').textContent = (state.wwOpen ? '▾ ' : '▸ ') + 'Who-Whats';
+    $('ww-title').textContent = (state.wwOpen ? '▾ ' : '▸ ') + (state.active ? '当前步成员明细' : '文件成员汇总');
     $('ww-body').classList.toggle('hidden', !state.wwOpen);
     P.syncKeyedChildren(
       $('who-whats-body'),
@@ -486,6 +459,7 @@
     renderHeader();
     renderList();
     renderRight();
+    renderWhoWhats();
   }
 
   function goToStep(idx, opts) {
@@ -548,16 +522,22 @@
       Array.isArray(json.items) && Array.isArray(json.steps);
   }
 
-  function loadData(json, source) {
+  function loadData(json, source, preserve) {
     if (!isValid(json)) {
       P.toast('数据格式不完整：至少需要 items 与 steps 数组', 'bad');
       return;
     }
     if (!Array.isArray(json.messages)) json.messages = [];
+    var oldSeq = state.data && state.data.steps[state.current] && state.data.steps[state.current].message_seq;
+    var atEnd = !state.data || state.current >= state.data.steps.length - 1;
     state.data = json;
     state.source = source || '';
     state.meta = P.buildMeta({ round: { items: json.items } });
-    state.current = 0;
+    state.current = state.active ? Math.max(0, json.steps.length - 1) : 0;
+    if (preserve && !atEnd) {
+      var oldIndex = json.steps.findIndex(function (step) { return step.message_seq === oldSeq; });
+      if (oldIndex >= 0) state.current = oldIndex;
+    }
     state.focusedKey = null;
     setPlaying(false);
     buildDerived();
@@ -568,22 +548,42 @@
     renderCheck();
     renderAll();
     updateControls();
-    if (state.view === 'mermaid') renderMermaid();
   }
 
-  function loadEmbeddedFallback(reason) {
-    loadData(EMBEDDED_SAMPLE, '内置占位示例' + (reason ? '（' + reason + '）' : ''));
-  }
 
-  function loadDefault() {
-    if (!window.fetch) { loadEmbeddedFallback('无 fetch'); return; }
-    fetch('replay_view.json', { cache: 'no-store' }).then(function (res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
+  function loadDefault(preserve) {
+    if (state.inFlight) { state.queuedLoad = true; return; }
+    state.inFlight = true;
+    var requestId = ++state.requestId;
+    $('active-refresh').disabled = true;
+    var base = P.stripSlash($('api').value) || P.resolveApiBase();
+    P.get(base + '/api/replay/view').catch(function (err) {
+      if (err.status !== 404) throw err;
+      return Promise.all([P.get(base + '/api/config'), P.get(base + '/api/display?since=0')]).then(function (parts) {
+        var cfg = parts[0].config || parts[0];
+        var live = parts[1];
+        if (live.board && live.board.round_id && live.board.round_id !== cfg.round.round_id) throw new Error('轮次正在切换，请刷新');
+        return {round_id:cfg.round.round_id, title:cfg.round.title, version:live.version,
+          items:cfg.round.items || [], messages:[], steps:[], board:live.board,
+          who_whats:live.who_whats, latest_only:true};
+      });
     }).then(function (json) {
-      loadData(json, 'replay_view.json');
-    }).catch(function () {
-      loadEmbeddedFallback('读取失败，已回退');
+      if (requestId !== state.requestId || !state.active) return;
+      if (state.expectedRound && json.round_id !== state.expectedRound) {
+        state.queuedLoad = true;
+        return;
+      }
+      loadData(json, '当前激活轮次', preserve);
+      $('replay-notice').textContent = json.latest_only ? '已显示当前激活排位。逐步历史需要服务更新后刷新。' : (json.steps.length ? '选择左侧消息查看该步排位；默认显示最新状态。' : '当前激活轮次暂无复盘消息。');
+      $('replay-notice').className = 'hint replay-notice';
+    }).catch(function (err) {
+      if (requestId !== state.requestId || !state.active) return;
+      $('replay-notice').textContent = '读取当前轮次失败：' + P.errorText(err);
+      $('replay-notice').className = 'banner show bad';
+    }).finally(function () {
+      state.inFlight = false;
+      $('active-refresh').disabled = false;
+      if (state.queuedLoad && state.active) { state.queuedLoad = false; loadDefault(true); }
     });
   }
 
@@ -594,7 +594,11 @@
       var reader = new FileReader();
       reader.onload = function () {
         try {
-          loadData(JSON.parse(String(reader.result)), file.name);
+          var imported = JSON.parse(String(reader.result));
+          if (!isValid(imported)) throw new Error('需要 items 和 steps 数组');
+          state.active = false;
+          state.requestId++;
+          loadData(imported, file.name);
           P.toast('已载入 ' + file.name, 'ok');
         } catch (e) {
           P.toast('JSON 解析失败：' + (e && e.message ? e.message : e), 'bad');
@@ -615,6 +619,14 @@
   }
 
   function init() {
+    $('api').value = P.resolveApiBase();
+    $('api').addEventListener('change', function () {
+      state.active = true;
+      state.expectedRound = '';
+      state.workflowStamp = '';
+      state.requestId++;
+      loadDefault();
+    });
     tableEl = $('table-view');
     boardRenderer = P.createBoardRenderer(tableEl, { persistent: true });
 
@@ -656,6 +668,24 @@
     });
 
     bindFileInput();
+    $('active-refresh').addEventListener('click', function () { state.active = true; loadDefault(); });
+    if (window.PAIGU_SHELL) window.PAIGU_SHELL.onWorkflow(function (wf) {
+      if (!wf || !state.active) return;
+      var stamp = [wf.round_id, wf.revision, wf.version, wf.messages].join('|');
+      state.expectedRound = wf.round_id;
+      if (stamp !== state.workflowStamp || !state.data) {
+        var changedRound = state.data && state.data.round_id !== wf.round_id;
+        state.workflowStamp = stamp;
+        if (changedRound) {
+          state.requestId++;
+          setPlaying(false);
+          state.data = null;
+          $('replay-main').classList.add('hidden');
+          $('who-whats-panel').classList.add('hidden');
+        }
+        loadDefault(!changedRound);
+      }
+    });
     updateControls();
     loadDefault();
   }

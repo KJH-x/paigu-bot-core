@@ -63,6 +63,52 @@ fn base_config() -> AppConfig {
     cfg
 }
 
+#[tokio::test]
+async fn active_replay_view_uses_recorded_steps_without_mutating_live_state() {
+    let mut cfg = base_config();
+    cfg.llm.enabled = false;
+    cfg.round.phases.clear();
+    let pipeline = test_pipeline(&cfg, MockClient::ok("{}"));
+    assert_eq!(
+        pipeline
+            .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+            .await
+            .status,
+        "Applied"
+    );
+    pipeline.process(event("u2", "成员02", "闲聊", 2_000)).await;
+    assert_eq!(
+        pipeline
+            .process(event("u1", "成员01", "改 通行证 结城理 2", 3_000))
+            .await
+            .status,
+        "Applied"
+    );
+    let before = pipeline.board().await;
+    let view = pipeline.replay_view().await.unwrap();
+    let after = pipeline.board().await;
+    assert_eq!(
+        before, after,
+        "read-only history must not change the live board"
+    );
+    assert_eq!(view["source"], "active_round");
+    assert_eq!(view["round_id"], cfg.round.round_id);
+    let steps = view["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 3);
+    assert_eq!(steps[0]["who_whats"][0]["items"][0]["qty"], 1);
+    assert_eq!(steps[1]["who_whats"], steps[0]["who_whats"]);
+    assert_eq!(steps[2]["who_whats"][0]["items"][0]["qty"], 2);
+    assert_eq!(
+        steps[2]["board"]["item_allocations"],
+        before.1["item_allocations"]
+    );
+    pipeline.reset().await;
+    let empty = pipeline.replay_view().await.unwrap();
+    assert_eq!(empty["round_id"], cfg.round.round_id);
+    assert_eq!(empty["steps"], serde_json::json!([]));
+    assert_eq!(empty["who_whats"], serde_json::json!([]));
+}
+
 fn store(cfg: &AppConfig) -> Arc<ConfigStore> {
     let path = std::env::temp_dir().join(format!("paigu-llm-test-{}.json", uuid::Uuid::new_v4()));
     std::fs::write(&path, serde_json::to_string_pretty(cfg).unwrap()).unwrap();
@@ -545,4 +591,201 @@ async fn message_log_records_every_inbound() {
     assert!(visible.windows(2).all(|w| {
         w[1]["seq"].as_i64().unwrap_or_default() > w[0]["seq"].as_i64().unwrap_or_default()
     }));
+}
+
+#[test]
+fn forged_envelope_unwraps_source_text_and_drops_admin() {
+    let mut ev = event(
+        "10000",
+        "测试号",
+        r#"{"id":"123456","text":"排 通行证 结城理 1"}"#,
+        1_000,
+    );
+    ev.is_admin = true;
+    let message_id = ev.message_id.clone();
+    let out = unwrap_forged_envelope(ev);
+    assert_eq!(out.user_id, "123456");
+    assert_eq!(out.nickname, "123456");
+    assert_eq!(out.text, "排 通行证 结城理 1");
+    assert_eq!(out.group_id, "123456789");
+    assert_eq!(out.message_id, message_id);
+    assert_eq!(out.timestamp_ms, 1_000);
+    assert!(!out.is_admin);
+}
+
+#[test]
+fn forged_envelope_parses_numeric_id_and_optional_fields() {
+    let ev = event(
+        "10000",
+        "测试号",
+        r#"{"user_id":123456,"text":"撤销","nickname":"甲","is_admin":true}"#,
+        2,
+    );
+    let out = unwrap_forged_envelope(ev);
+    assert_eq!(out.user_id, "123456");
+    assert_eq!(out.nickname, "甲");
+    assert_eq!(out.text, "撤销");
+    assert!(out.is_admin);
+}
+
+#[test]
+fn forged_envelope_overrides_timestamp() {
+    let ev = event(
+        "10000",
+        "测试号",
+        r#"{"id":"1","text":"排 通行证 1","timestamp":1791813600000}"#,
+        5,
+    );
+    assert_eq!(unwrap_forged_envelope(ev).timestamp_ms, 1791813600000);
+
+    let ev2 = event(
+        "10000",
+        "测试号",
+        r#"{"id":"1","text":"x","timestamp":"2026-10-12T22:30:00+08:00"}"#,
+        5,
+    );
+    assert_eq!(unwrap_forged_envelope(ev2).timestamp_ms, 1791815400000);
+
+    // 缺省用外层时间。
+    let ev3 = event("10000", "测试号", r#"{"id":"1","text":"x"}"#, 7);
+    assert_eq!(unwrap_forged_envelope(ev3).timestamp_ms, 7);
+}
+
+#[tokio::test]
+async fn segment_claims_routes_multi_item_message_through_llm() {
+    let mut cfg = base_config();
+    cfg.llm.segment_claims = true;
+    let body = r#"{"intent":"claim","items":[
+        {"item":"pass_sp","variant":"结城理","quantity":1},
+        {"item":"hr_resume","quantity":1}
+    ],"confidence":0.9}"#;
+    let (pipeline, _dir) = test_pipeline_with_dir(&cfg, MockClient::ok(body));
+    let out = pipeline
+        .process(event(
+            "u1",
+            "成员01",
+            "排 通行证 结城理 1 人事部简历 1",
+            1000,
+        ))
+        .await;
+    assert_eq!(out.status, "Applied", "detail={}", out.detail);
+    assert!(out.detail.contains("pass_sp"), "detail={}", out.detail);
+    assert!(out.detail.contains("hr_resume"), "detail={}", out.detail);
+}
+
+#[tokio::test]
+async fn ambiguous_bare_variant_is_first_matched_not_need_confirm() {
+    let mut cfg = base_config();
+    cfg.llm.segment_claims = true;
+    // LLM 把「只报角色名」放进 ambiguous_parts（模拟 "排 结城理 1"）。
+    let body = r#"{"intent":"claim","items":[],"ambiguous_parts":["结城理（可能为多个商品）"],"confidence":0.3}"#;
+    let (pipeline, _dir) = test_pipeline_with_dir(&cfg, MockClient::ok(body));
+    let out = pipeline
+        .process(event("u1", "成员01", "排 结城理 1", 1000))
+        .await;
+    assert_eq!(out.status, "Applied", "detail={}", out.detail);
+    assert!(out.detail.contains("pass_sp"), "detail={}", out.detail);
+}
+
+#[test]
+fn proxy_segments_split_mixed_message() {
+    let segs = proxy_segments("嘟嘟：旅骨通行证1 代DKLA排:人事部简历1").unwrap();
+    assert_eq!(segs.len(), 2, "{segs:?}");
+    assert!(segs[0].0.is_none());
+    assert!(segs[0].1.contains("旅骨通行证"));
+    assert_eq!(segs[1].0.as_deref(), Some("DKLA"));
+    assert!(segs[1].1.contains("人事部简历"));
+    assert!(proxy_segments("排 通行证 1").is_none());
+}
+
+#[tokio::test]
+async fn proxy_attributes_in_group_and_out_group() {
+    let dir = std::env::temp_dir().join(format!("paigu-proxy-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let members = dir.join("members.json");
+    std::fs::write(
+        &members,
+        r#"[{"user_id":"8888","card":"小明","nickname":"ming"}]"#,
+    )
+    .unwrap();
+    let mut cfg = base_config();
+    cfg.members.cache_path = members.to_string_lossy().to_string();
+    let (pipeline, _d) = test_pipeline_with_dir(&cfg, MockClient::ok("{}"));
+
+    // 群内被代「小明」→ 归属 8888
+    let out = pipeline
+        .process(event(
+            "10000",
+            "发送者",
+            "代小明排:排 通行证 结城理 1",
+            1000,
+        ))
+        .await;
+    assert_eq!(out.status, "Applied", "detail={}", out.detail);
+
+    // 群外被代「One」→ 记 `发送者(代One)`
+    let out2 = pipeline
+        .process(event("10000", "发送者", "代One排:排 通行证 结城理 1", 2000))
+        .await;
+    assert_eq!(out2.status, "Applied", "detail={}", out2.detail);
+}
+
+#[test]
+fn non_forged_messages_pass_through() {
+    for text in [
+        "排 通行证 1",
+        "{\"foo\":\"bar\"}",
+        "{\"id\":\"1\"}",
+        "{\"text\":\"x\"}",
+        "not json",
+    ] {
+        let ev = event("u", "n", text, 5);
+        let out = unwrap_forged_envelope(ev);
+        assert_eq!(out.user_id, "u");
+        assert_eq!(out.text, text);
+    }
+}
+
+#[test]
+fn gate_nc_unwraps_only_for_test_round_and_test_group() {
+    use crate::round::RoundCategory;
+
+    let env = r#"{"id":"123456","text":"排 通行证 结城理 1"}"#;
+
+    let mut cfg = base_config();
+    cfg.gateway.accept_forged_messages = true;
+    cfg.gateway.test_group_id = Some("123456789".to_string());
+    cfg.round.group_id = "123456789".to_string();
+
+    // 正常轮（非测试轮）→ 不解包。
+    cfg.round.category = RoundCategory::Normal;
+    let out = gate_nc(&cfg, event("10000", "测试号", env, 1));
+    assert_eq!(out.user_id, "10000");
+    assert_eq!(out.text, env);
+
+    // 测试轮 + 测试群 → 解包。
+    cfg.round.category = RoundCategory::Test;
+    let out = gate_nc(&cfg, event("10000", "测试号", env, 1));
+    assert_eq!(out.user_id, "123456");
+    assert_eq!(out.text, "排 通行证 结城理 1");
+
+    // 测试轮但来自其它群 → 不解包。
+    let mut other = event("10000", "测试号", env, 1);
+    other.group_id = "999".to_string();
+    assert_eq!(gate_nc(&cfg, other).user_id, "10000");
+
+    // 开关关闭 → 不解包。
+    cfg.gateway.accept_forged_messages = false;
+    assert_eq!(
+        gate_nc(&cfg, event("10000", "测试号", env, 1)).user_id,
+        "10000"
+    );
+
+    // 未配置测试群 → 不解包。
+    cfg.gateway.accept_forged_messages = true;
+    cfg.gateway.test_group_id = None;
+    assert_eq!(
+        gate_nc(&cfg, event("10000", "测试号", env, 1)).user_id,
+        "10000"
+    );
 }

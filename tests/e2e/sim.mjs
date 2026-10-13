@@ -66,6 +66,9 @@ function prepareConfig(tmpDir, gatewayPort) {
   const cfg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'config.example.json'), 'utf8'));
   cfg.gateway.bind = '127.0.0.1:' + gatewayPort;
   cfg.gateway.reply_enabled = false;
+  // 测试轮隔离：本会话为测试轮，绑定测试群（= 配置里的群号）。
+  cfg.gateway.test_group_id = GROUP_ID;
+  cfg.round.category = 'test';
   cfg.llm.enabled = false;
   cfg.llm.fallback_to_rules = true;
   cfg.round.priority_window = { ...FIXED_WINDOW };
@@ -85,6 +88,10 @@ function startServer(port, cfgPath) {
       ...process.env,
       PAIGU_CONFIG_PATH: cfgPath,
       PAIGU_HTTP_PORT: String(port),
+      PAIGU_ROUNDS_DIR: path.join(path.dirname(cfgPath), 'rounds'),
+      PAIGU_MESSAGES_DIR: path.join(path.dirname(cfgPath), 'messages'),
+      PAIGU_EVENTS_DIR: path.join(path.dirname(cfgPath), 'events'),
+      PAIGU_SETTLEMENT_DIR: path.join(path.dirname(cfgPath), 'settlement'),
       PAIGU_WEB_DIR: path.join(REPO_ROOT, 'web'),
       PAIGU_MEMBERS_SEED_PATH: path.join(path.dirname(cfgPath), 'members.seed.json'),
       PAIGU_MEMBERS_EXAMPLE_PATH: path.join(REPO_ROOT, 'data', 'members.example.json'),
@@ -189,19 +196,6 @@ async function api(base, method, urlPath, body) {
   return res.json();
 }
 
-function formatOffset(ms) {
-  const sign = ms < 0 ? '-' : '+';
-  let t = Math.floor(Math.abs(ms) / 1000);
-  const dd = Math.floor(t / 86400);
-  t -= dd * 86400;
-  const hh = Math.floor(t / 3600);
-  t -= hh * 3600;
-  const mm = Math.floor(t / 60);
-  t -= mm * 60;
-  const pad = (n) => (n < 10 ? '0' : '') + n;
-  return `${sign}${pad(dd)} ${pad(hh)} ${pad(mm)} ${pad(t)}`;
-}
-
 function firstSlotUser(board) {
   const allocations = board && Array.isArray(board.item_allocations) ? board.item_allocations : [];
   for (const alloc of allocations) {
@@ -239,70 +233,37 @@ async function waitForMessage(base, predicate, timeoutMs) {
   throw new Error('等待 /api/display 消息超时');
 }
 
-async function resetViaPage(page) {
-  await page.click('#reset');
-  await page.waitForFunction(() => {
-    const b = document.querySelector('#reset');
-    return !!b && !b.disabled;
-  }, { timeout: 10000 });
-  await sleep(150);
+/** 重置（手动，HTTP）：sim 页已移除。 */
+async function resetViaHttp(base) {
+  await api(base, 'POST', '/api/sim/reset', {});
 }
 
-async function openSim(page, base, wsUrl) {
-  const primary = `${base}/sim?api=${encodeURIComponent(base)}&ws=${encodeURIComponent(wsUrl)}`;
-  await page.goto(primary, { waitUntil: 'domcontentloaded' });
-  const loaded = await page
-    .evaluate(() => typeof window.PAIGU !== 'undefined')
-    .catch(() => false);
-  if (loaded) return { url: primary, note: null };
-  const fallback = `${base}/web/sim.html?api=${encodeURIComponent(base)}&ws=${encodeURIComponent(wsUrl)}`;
-  await page.goto(fallback, { waitUntil: 'domcontentloaded' });
+/**
+ * 测试注入（仅测试轮）：`POST /api/sim/messages`（批量，逐条处理）。
+ * 每条消息自带 `timestamp`；缺字段/非测试群由服务端逐条 `Dropped`。
+ */
+async function injectMessages(base, messages) {
+  return api(base, 'POST', '/api/sim/messages', messages);
+}
+
+/** 单条注入的便捷封装（对齐旧 `sendViaUI` 语义）。 */
+async function injectViaApi(base, opts) {
+  const timestamp = opts.timestamp != null ? opts.timestamp : Date.now() + (opts.offsetMs || 0);
+  const res = await injectMessages(base, [
+    {
+      user_id: opts.user_id || opts.identity,
+      nickname: opts.nickname || opts.identity,
+      text: opts.text,
+      timestamp,
+      group_id: GROUP_ID,
+    },
+  ]);
+  const r = res.results[0];
   return {
-    url: fallback,
-    note: `/sim 的相对静态资源返回 404（web/ 仅挂在 /web），已回退 ${fallback}`,
+    outcome: { status: r.status, detail: r.detail },
+    board: res.board,
+    message: r,
   };
-}
-
-async function sendViaUI(page, ctx, opts) {
-  await page.selectOption('#identity-select', opts.identity);
-  await page.waitForFunction(
-    (identity) => {
-      const el = document.querySelector('#identity-info');
-      return !!el && el.textContent.includes(identity);
-    },
-    opts.identity,
-    { timeout: 10000 }
-  );
-  await page.fill('#offset', opts.offsetText);
-  await page.fill('#text', opts.text);
-  await page.waitForFunction(() => window.__simWsReady === true, { timeout: 15000 });
-  await page.click('#send');
-  const found = await waitForMessage(
-    ctx.base,
-    (m) => m.text === opts.text && m.display === opts.identity,
-    15000
-  );
-  await page.waitForFunction(
-    (status) => {
-      const outs = document.querySelectorAll('#transcript .out');
-      if (!outs.length) return false;
-      return (outs[outs.length - 1].textContent || '').includes(status);
-    },
-    opts.expectStatus,
-    { timeout: 15000 }
-  );
-  return { outcome: { status: found.message.status, detail: found.message.detail }, board: found.board, message: found.message };
-}
-
-async function waitBoardFirstCell(page, expected) {
-  await page.waitForFunction(
-    (value) => {
-      const cell = document.querySelector('#board .cell-user');
-      return !!cell && cell.textContent.trim() === value;
-    },
-    expected,
-    { timeout: 10000 }
-  );
 }
 
 function runNode(args, input) {
@@ -337,39 +298,35 @@ function normalizeState(state) {
 function buildCases() {
   return [
     {
-      name: 'WS 连接成功',
+      name: 'Gateway 监听',
       fn: async (page, ctx) => {
         const status = await api(ctx.base, 'GET', '/api/gateway/status');
         assert(status.listening === true, 'Gateway 应处于监听: ' + JSON.stringify(status));
-        assert(status.clients >= 1, 'Gateway 应有 WS 客户端: ' + JSON.stringify(status));
-        const ready = await page.evaluate(() => window.__simWsReady === true);
-        assert(ready, '页面 window.__simWsReady 应为 true');
-        const badge = await page.textContent('#ws-badge');
-        assert(badge.includes('WS 已连接'), 'WS 徽章应显示已连接，实际: ' + badge);
       },
     },
     {
-      name: '常规排谷（经真实 WS）',
+      name: '常规排谷（HTTP 注入）',
       fn: async (page, ctx) => {
-        const r = await sendViaUI(page, ctx, {
+        const r = await injectViaApi(ctx.base, {
           identity: TARGET_IDENTITY,
-          offsetText: '+00 00 00 00',
           text: '排 通行证 结城理 1',
-          expectStatus: 'Applied',
         });
         assertEq(r.outcome.status, 'Applied', '状态');
         assertEq(firstSlotUser(r.board), TARGET_IDENTITY, '排位表首格');
-        await waitBoardFirstCell(page, TARGET_IDENTITY);
+        const found = await waitForMessage(
+          ctx.base,
+          (m) => m.text === '排 通行证 结城理 1' && m.display === TARGET_IDENTITY,
+          10000
+        );
+        assertEq(found.message.status, 'Applied', '消息状态');
       },
     },
     {
       name: '非排谷忽略',
       fn: async (page, ctx) => {
-        const r = await sendViaUI(page, ctx, {
+        const r = await injectViaApi(ctx.base, {
           identity: TARGET_IDENTITY,
-          offsetText: '+00 00 00 00',
           text: '今天天气不错',
-          expectStatus: 'Ignored',
         });
         assertEq(r.outcome.status, 'Ignored', '状态');
       },
@@ -377,14 +334,11 @@ function buildCases() {
     {
       name: '时段拒绝',
       fn: async (page, ctx) => {
-        const offsetMs = Math.round(
-          (FIXED_WINDOW.start_ms + FIXED_WINDOW.end_ms) / 2 - Date.now()
-        );
-        const r = await sendViaUI(page, ctx, {
+        const timestamp = Math.round((FIXED_WINDOW.start_ms + FIXED_WINDOW.end_ms) / 2);
+        const r = await injectViaApi(ctx.base, {
           identity: BLOCKED_IDENTITY,
-          offsetText: formatOffset(offsetMs),
+          timestamp,
           text: '排 通行证 结城理 1',
-          expectStatus: 'Rejected',
         });
         assertEq(r.outcome.status, 'Rejected', '状态');
         assert(
@@ -396,23 +350,45 @@ function buildCases() {
     {
       name: '预存优先',
       fn: async (page, ctx) => {
-        const first = await sendViaUI(page, ctx, {
+        const first = await injectViaApi(ctx.base, {
           identity: BLOCKED_IDENTITY,
-          offsetText: '+00 00 00 00',
           text: '排 通行证 结城理 1',
-          expectStatus: 'Applied',
         });
         assertEq(first.outcome.status, 'Applied', '非预存先排状态');
         assertEq(firstSlotUser(first.board), BLOCKED_IDENTITY, '非预存首格');
-        const second = await sendViaUI(page, ctx, {
+        const second = await injectViaApi(ctx.base, {
           identity: TARGET_IDENTITY,
-          offsetText: '+00 00 00 00',
           text: '排 通行证 结城理 1',
-          expectStatus: 'Applied',
         });
         assertEq(second.outcome.status, 'Applied', '预存排状态');
         assertEq(firstSlotUser(second.board), TARGET_IDENTITY, '预存应占首格');
-        await waitBoardFirstCell(page, TARGET_IDENTITY);
+      },
+    },
+    {
+      name: '批量注入 /api/sim/messages',
+      fn: async (page, ctx) => {
+        const now = Date.now();
+        // 裸数组：1 合法 + 1 缺 timestamp + 1 非测试群。
+        const bare = await injectMessages(ctx.base, [
+          { user_id: TARGET_IDENTITY, nickname: TARGET_IDENTITY, text: '排 通行证 结城理 1', timestamp: now },
+          { user_id: BLOCKED_IDENTITY, nickname: BLOCKED_IDENTITY, text: '缺时间戳' },
+          { user_id: BLOCKED_IDENTITY, nickname: BLOCKED_IDENTITY, text: '排 通行证 岳羽由加莉 1', timestamp: now, group_id: '999999' },
+        ]);
+        assertEq(bare.count, 3, 'count');
+        assertEq(bare.summary.applied, 1, 'applied');
+        assertEq(bare.summary.dropped, 2, 'dropped');
+        assertEq(bare.results[1].detail, 'missing_timestamp', '缺字段原因');
+        assertEq(bare.results[2].detail, 'not_test_group', '非测试群原因');
+
+        // messages 包装：另一条合法（不同变体）。
+        const wrapped = await injectMessages(ctx.base, {
+          messages: [
+            { id: BLOCKED_IDENTITY, nickname: BLOCKED_IDENTITY, text: '排 通行证 虎狼丸 1', timestamp: now },
+          ],
+        });
+        assertEq(wrapped.count, 1, 'wrapped count');
+        assertEq(wrapped.summary.applied, 1, 'wrapped applied');
+        assertEq(variantFirstSlotUser(wrapped.board, 'v_hlw'), BLOCKED_IDENTITY, 'wrapped 首格');
       },
     },
     {
@@ -470,7 +446,7 @@ function buildCases() {
         const stateA = await api(ctx.base, 'GET', '/api/display?since=0');
         const normalizedA = normalizeState(stateA);
 
-        await resetViaPage(page);
+        await resetViaHttp(ctx.base);
 
         const rep = runNode([
           'scripts/sim-record.mjs',
@@ -488,12 +464,16 @@ function buildCases() {
       },
     },
     {
-      name: '/sim 静态资源 200',
+      name: '静态资源 200 与 /sim 已移除',
       fn: async (page, ctx) => {
-        for (const urlPath of ['/sim', '/common.js', '/sim.js', '/display.css']) {
+        for (const urlPath of ['/', '/common.js', '/display.css', '/round.html', '/settings.html']) {
           const res = await fetch(ctx.base + urlPath, { signal: AbortSignal.timeout(10000) });
           assertEq(res.status, 200, urlPath + ' 状态');
         }
+        const gone = await fetch(ctx.base + '/sim', { signal: AbortSignal.timeout(10000) });
+        assertEq(gone.status, 404, '/sim 应已移除');
+        const goneJs = await fetch(ctx.base + '/sim.js', { signal: AbortSignal.timeout(10000) });
+        assertEq(goneJs.status, 404, '/sim.js 应已移除');
       },
     },
     {
@@ -528,6 +508,107 @@ function buildCases() {
       },
     },
     {
+      name: '当前轮次复盘只读与真实步骤',
+      fn: async (page, ctx) => {
+        await injectViaApi(ctx.base, { identity: TARGET_IDENTITY, text: '排 通行证 结城理 1' });
+        await injectViaApi(ctx.base, { identity: BLOCKED_IDENTITY, text: '闲聊复盘检查' });
+        const before = await api(ctx.base, 'GET', '/api/board');
+        const view = await api(ctx.base, 'GET', '/api/replay/view');
+        const after = await api(ctx.base, 'GET', '/api/board');
+        assertEq(view.source, 'active_round', '复盘来源');
+        assertEq(view.steps.length, 2, '包含已记录和忽略消息');
+        assertEq(JSON.stringify(before.board), JSON.stringify(after.board), '读取不能改实时排位');
+        assertEq(JSON.stringify(view.steps.at(-1).board.item_allocations), JSON.stringify(before.board.item_allocations), '末步应与实时排位一致');
+        await page.goto(`${ctx.base}/replay.html?api=${encodeURIComponent(ctx.base)}`);
+        await page.waitForFunction(() => document.querySelector('#step-info')?.textContent.includes('当前第 2 步'));
+        assert((await page.textContent('#source-info')).includes('当前激活轮次'), '不应显示示例文件');
+        await page.click('#btn-first');
+        assert((await page.textContent('#step-info')).includes('当前第 1 步'), '首步切换');
+        assert((await page.textContent('#who-whats-body')).includes(TARGET_IDENTITY), '当前步成员信息');
+        await page.click('#tab-column');
+        const readable = await page.locator('.col-table th').first().evaluate(el => getComputedStyle(el).color !== 'rgb(255, 255, 255)');
+        assert(readable, '浅色表头不能为白字');
+        await page.route('**/api/replay/view', route => route.fulfill({status:404,body:'接口尚未启用'}));
+        await page.click('#active-refresh');
+        await page.waitForFunction(() => document.querySelector('#step-info')?.textContent.includes('逐步历史尚未启用'));
+        assert((await page.textContent('#replay-title')).includes(view.title), '旧服务也应显示实际激活轮次');
+        assert(await page.locator('#replay-notice').isVisible(), '快照模式提示应始终可见');
+        assert((await page.textContent('#table-view')).includes(TARGET_IDENTITY), '旧服务降级不能换成示例');
+        await page.unroute('**/api/replay/view');
+        await page.goto(`${ctx.base}/display.html?api=${encodeURIComponent(ctx.base)}`);
+      },
+    },
+    {
+      name: 'POST /api/rounds/:id/setup 开团前填写',
+      fn: async (page, ctx) => {
+        const roundId = 'e2e-setup';
+        const items = [
+          {
+            item_id: 'pass_sp',
+            name: '通行认证SP-月行水上',
+            kind: '拼团',
+            aliases: ['通行证'],
+            unit_price_cents: 5000,
+            variants: [
+              {
+                variant_id: 'v_jcl',
+                name: '结城理',
+                unit_price_cents: 5000,
+                adjust_cents: -500,
+                capacity: null,
+                aliases: [],
+              },
+            ],
+          },
+          {
+            item_id: 'item_1',
+            name: '纪念徽章',
+            kind: '单领',
+            unit_price_cents: 1800,
+            max_quantity: 2,
+            aliases: [],
+            variants: [],
+          },
+        ];
+
+        const dry = await api(ctx.base, 'POST', `/api/rounds/${roundId}/setup`, {
+          dry_run: true,
+          group_id: GROUP_ID,
+          category: 'test',
+          items,
+        });
+        assertEq(dry.dry_run, true, 'dry_run 标记');
+        assertEq(dry.written, false, 'dry_run 不应落盘');
+        assertEq(dry.ok, true, '模板应无 error 级 issue: ' + JSON.stringify(dry.issues));
+
+        const saved = await api(ctx.base, 'POST', `/api/rounds/${roundId}/setup`, {
+          group_id: GROUP_ID,
+          category: 'test',
+          priority_users: ['user_a'],
+          items,
+        });
+        assertEq(saved.written, true, '应落盘');
+        assertEq(saved.ok, true, '应无 error 级 issue: ' + JSON.stringify(saved.issues));
+        assertEq(saved.applied_to_active, false, '非激活轮次不应热载');
+        assertEq(saved.round.category, 'test', '轮次类别应回显');
+        assertEq(saved.round.items, items.length, '轮次商品数');
+
+        const list = await api(ctx.base, 'GET', '/api/rounds');
+        assert(
+          list.rounds.some((r) => r.round_id === roundId),
+          '新轮次应出现在 /api/rounds 列表'
+        );
+
+        const mismatch = await fetch(ctx.base + `/api/rounds/${roundId}/setup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ round_id: 'other', items: [] }),
+          signal: AbortSignal.timeout(10000),
+        });
+        assertEq(mismatch.status, 400, 'round_id 不一致应 400');
+      },
+    },
+    {
       name: '/api/members 回退 example',
       fn: async (page, ctx) => {
         const res = await fetch(ctx.base + '/api/members', {
@@ -539,6 +620,74 @@ function buildCases() {
           res.members.every((m) => String(m.nickname || '').startsWith('成员')),
           '占位昵称应以「成员」开头'
         );
+      },
+    },
+    {
+      name: '桌面布局（1920×1080 / 100%）与元金额联动保存',
+      fn: async (page, ctx) => {
+        await injectViaApi(ctx.base, { identity: TARGET_IDENTITY, text: '排 通行证 结城理 1' });
+        const original = await api(ctx.base, 'GET', '/api/config');
+        try {
+          await page.goto(`${ctx.base}/round.html?api=${encodeURIComponent(ctx.base)}`);
+          await page.waitForSelector('.variant-price-base');
+          const rows = page.locator('.vtable tbody tr');
+          for (const adjust of await page.locator('.variant-price-adjust').all()) await adjust.fill('0.00');
+          await rows.nth(0).locator('.variant-price-base').fill('12.34');
+          await rows.nth(0).locator('.variant-price-adjust').fill('1.25');
+          await rows.nth(1).locator('.variant-price-adjust').fill('-1.25');
+          assertEq(await rows.nth(0).locator('.variant-price-final').inputValue(), '13.59', '元金额联动');
+          await rows.nth(0).locator('.variant-price-final').fill('13.84');
+          await rows.nth(1).locator('.variant-price-adjust').fill('-1.50');
+          assertEq(await rows.nth(0).locator('.variant-price-base').inputValue(), '12.34', '改最终价不能改原价');
+          assertEq(await rows.nth(0).locator('.variant-price-adjust').inputValue(), '+1.50', '反算调价');
+          await page.click('#save');
+          await page.waitForFunction(() => !document.querySelector('#save').disabled);
+          const saved = await api(ctx.base, 'GET', '/api/config');
+          assertEq(saved.config.round.items[0].variants[0].unit_price_cents, 1234, '前端元应按分保存');
+          assertEq(saved.config.round.items[0].variants[0].adjust_cents, 150, '调价应按分保存');
+          await rows.nth(0).locator('.alias-input').fill('别名甲/别名乙');
+          await rows.nth(0).locator('[data-act="split"]').click();
+          assertEq(await rows.nth(0).locator('.alias-input').inputValue(), '别名甲, 别名乙', '切分按钮应生效');
+          assert(await page.evaluate(() => document.querySelector('#sec-phases').closest('#sec-rounds') !== null), '阶段应在01轮次管理内');
+          for (const route of ['round','settings','settlement','replay','index','admin','display']) {
+            await page.goto(`${ctx.base}/${route}.html?api=${encodeURIComponent(ctx.base)}&ws=${encodeURIComponent(ctx.wsUrl)}`);
+            await page.waitForFunction(() => document.querySelector('#wf-api')?.textContent.includes('正常'));
+            if (route === 'replay') await page.waitForFunction(() => document.querySelector('#source-info')?.textContent.includes('当前激活轮次'));
+            if (route === 'settlement') {
+              await page.click('#load-sample');
+              await page.waitForSelector('#order-table .pkg');
+              await page.waitForFunction(() => document.querySelector('#draft-status')?.textContent.includes('已保存'));
+            }
+            if (route === 'display') await page.waitForFunction(() => document.querySelector('#conn-badge')?.textContent.includes('正常'));
+            const dimensions = await page.evaluate(() => ({width:innerWidth, height:innerHeight,
+              dpr:window.devicePixelRatio,
+              page:document.querySelector('.page').getBoundingClientRect().width,
+              header:document.querySelector('.app-topbar').getBoundingClientRect().height,
+              overflow:document.documentElement.scrollWidth>innerWidth}));
+            assertEq(dimensions.width,1920,'桌面画布宽');
+            assertEq(dimensions.height,1080,'桌面画布高');
+            assertEq(dimensions.dpr,1,route+' 应为 100% 缩放');
+            assert(dimensions.page>1700, route+' 应使用宽工作区');
+            assert(dimensions.header<180, route+' 头部不应挤成多行');
+            assert(!dimensions.overflow, route+' 不应页面级横向溢出');
+            if (process.env.PAIGU_UI_CAPTURE_DIR) {
+              fs.mkdirSync(process.env.PAIGU_UI_CAPTURE_DIR,{recursive:true});
+              await page.screenshot({path:path.join(process.env.PAIGU_UI_CAPTURE_DIR,route+'.png')});
+            }
+          }
+          await page.goto(`${ctx.base}/replay.html?api=${encodeURIComponent(ctx.base)}`);
+          await page.waitForFunction(() => document.querySelector('#source-info')?.textContent.includes('当前激活轮次'));
+          const oldRound = original.config.round.round_id;
+          await api(ctx.base,'POST','/api/rounds/e2e-setup/activate',{mode:'fresh'});
+          await page.waitForFunction(() => document.querySelector('#replay-notice')?.textContent.includes('暂无复盘消息'),{timeout:15000});
+          assertEq((await page.textContent('#replay-title')).trim(),'e2e-setup','切换后应显示新轮次');
+          assertEq(await page.locator('#step-list .step-item').count(),0,'新空轮次不能残留旧步骤');
+          await api(ctx.base,'POST',`/api/rounds/${encodeURIComponent(oldRound)}/activate`,{mode:'continue'});
+        } finally {
+          const current = await api(ctx.base,'GET','/api/config');
+          await api(ctx.base,'PUT','/api/config',{config:original.config,revision:current.revision});
+          await page.goto(`${ctx.base}/display.html?api=${encodeURIComponent(ctx.base)}`);
+        }
       },
     },
     {
@@ -609,30 +758,22 @@ async function main() {
     const ctx = { base, remote, wsUrl, tmpDir };
 
     browser = await chromium.launch();
-    const page = await browser.newPage();
+    // 桌面验收：1920×1080、100%（deviceScaleFactor = 1）。
+    const context = await browser.newContext({
+      viewport: { width: 1920, height: 1080 },
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
     page.setDefaultTimeout(15000);
 
-    const opened = await openSim(page, base, wsUrl);
-    if (opened.note) log('NOTE ' + opened.note);
-
-    await page.waitForFunction(
-      () => {
-        const select = document.querySelector('#identity-select');
-        return !!select && select.options.length > 3;
-      },
-      { timeout: 15000 }
-    );
-    await page.waitForFunction(() => window.__simWsReady === true, { timeout: 15000 });
-    await page.evaluate(() => {
-      try {
-        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-      } catch (err) {
-      }
+    await page.goto(`${base}/display.html?api=${encodeURIComponent(base)}`, {
+      waitUntil: 'domcontentloaded',
     });
+    await page.waitForFunction(() => typeof window.PAIGU !== 'undefined');
 
     for (const testCase of cases) {
       if (testCase.name !== 'remote 数据源') {
-        await resetViaPage(page);
+        await resetViaHttp(base);
       }
       try {
         await testCase.fn(page, ctx);

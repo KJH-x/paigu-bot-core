@@ -60,6 +60,30 @@ impl ItemClass {
     }
 }
 
+/// 轮次类别：**测试轮**（绑定测试群）与**正常轮**（绑定正常群）。
+/// 默认 `Normal`，旧轮次文件缺省即正常轮。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RoundCategory {
+    #[default]
+    Normal,
+    Test,
+}
+
+impl RoundCategory {
+    /// 稳定的机器可读标识（供 API/前端使用）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RoundCategory::Normal => "normal",
+            RoundCategory::Test => "test",
+        }
+    }
+
+    pub fn is_test(&self) -> bool {
+        matches!(self, RoundCategory::Test)
+    }
+}
+
 pub fn phase_at(windows: &[PhaseWindow], timestamp_ms: i64) -> Option<RoundPhase> {
     windows
         .iter()

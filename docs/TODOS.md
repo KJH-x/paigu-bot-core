@@ -51,6 +51,29 @@
 
 ## 待办
 
+### 桌面工作台（2026-10-13）
+
+- 已实现：8 个页面统一方形工作台布局；1920×1080、100% 桌面验收；价格以元录入、整数分保存；阶段归入轮次管理；别名单行、切分按钮验证；新增只读当前激活轮次复盘接口，默认最新步，成员明细随步骤，切换轮次不混用旧数据。
+- 验证：Rust 218 项、端到端 15 项通过；后者隔离轮次、消息、事件与结算目录，不连接真实群。
+- 尚未部署：常驻进程未更新/重启。旧服务复盘只显示真实当前快照，并持续提示逐步历史尚未启用。更新前须备份当前状态并制定恢复方案，不能只重启后假设内存排位会自动恢复。远程展示仍暂停。
+- 提交前遗留：隐私扫描仍有既有昵称命中，未通过前不得推送；本轮未将真实数据写入跟踪文件。
+- 清理遗留：测试进程均已退出；本轮两处隔离临时目录删除被执行策略拦截，仍保留在系统临时目录。未停止常驻实例、未删除真实运行数据。
+
+### 测试轮隔离与批量测试消息（2026-10-13，**已实现**）
+
+> 口径见 [DECISIONS.md](./DECISIONS.md) §B-4；详细计划见 [SPEC-TEST-ROUND-ISOLATION.md](./SPEC-TEST-ROUND-ISOLATION.md)。
+> 验收：`cargo test` 223 passed · `cargo clippy -- -D warnings` 通过 · e2e `16/16`（含 1920×1080/100% 排版）· `npm run privacy` OK。
+
+| ID | 状态 | 任务 | 验收 |
+|---|---|---|---|
+| TR-01 | done ✅ | **轮次 `category`（test/normal）+ `gateway.test_group_id` + 绑定校验** | 单测：`category_issues` test/normal × 群匹配/不匹配 |
+| TR-02 | done ✅ | **伪造解包隔离到 NC 入口**（`gate_nc`，仅测试轮+测试群）；`process` 去伪造 | 单测：`gate_nc` 开关×轮类×群组合 |
+| TR-03 | done ✅ | **批量端点 `POST /api/sim/messages`**（裸数组/`messages`；逐条；缺字段/非测试群 drop；仅测试轮） | 单测 + e2e「批量注入」核对 summary/results |
+| TR-04 | done ✅ | **单条 `/api/sim/message` 加"仅测试轮"门槛** | 非测试轮返回 400 |
+| TR-05 | done ✅ | **移除模拟器页与伪造发送**（`sim.html`/`sim.js`/导航/`buildOneBotEvent`/`/sim` 路由/`_tools` 行）；保留消息编辑 | 全站无 `sim.html` 链接；e2e 断言 `/sim`、`/sim.js` 404 |
+| TR-06 | done ✅ | **改写 `tests/e2e/sim.mjs`**：改走 HTTP 注入 + **1920×1080/100% 排版验收** | e2e 16/16；`devicePixelRatio===1`、无横向溢出 |
+| TR-07 | done ✅ | **文档同步**（INTERFACES/FUNCTIONAL/DESIGN/GAP/web README/AGENTS/config.example/round-setup.template/e2e README） | 文档与实现一致 |
+
 ### P1
 
 | ID | 状态 | 任务 | 依赖 | 验收 |
@@ -61,6 +84,8 @@
 | T-16 | todo | **快照导出/导入前端入口**：`web/admin` 按钮 + 下载（含 `format=file`） | T-06 | admin 可操作 |
 | T-17 | todo | **`/api/replay` diff 可视化**（`web/replay`） | — | diff 可见 |
 | T-18 | done | **成员 user_id 映射**（NapCat 拉取写入缓存）：refresh 已写缓存（`data/members.json`），映射实现完成；待实机验证 | B-2 | 映射非空 |
+| T-29 | todo | **代排（代理下单）归属**：识别 `代<名字>排:` / `<名字>：` 等前缀，抽取被代理人（名字/QQ），经成员缓存 `data/members.json` 反查 `user_id`，把该段认领**归属到被代理人**而非发信人；实时 == 重放；不支持时至少保留发信人并在 detail 标注 | — | `代DKLA排:…` 记在 DKLA 名下 |
+| T-28 | todo | **管理员阶段豁免**：`is_admin`（OneBot `sender.role` = owner/admin）在**阶段权限**中放行——`can_claim`/`can_cancel` 对管理员一律视为可排/可撤（不受 A/B 类别与 Phase0/II 限制）；**实时 == 重放**。伪造消息路径可用内层 `is_admin:true` 测试 | — | 管理员在 PhaseII 排 A 类不被拒；单测覆盖实时==重放 |
 
 ### P2
 

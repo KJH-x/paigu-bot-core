@@ -128,6 +128,7 @@ fn to_items_maps_whole_box_and_gift_kinds() {
             mk("split_en", "split", true),
             mk("single_en", "single", false),
         ],
+        category: crate::round::RoundCategory::Normal,
     };
     let kinds: std::collections::HashMap<String, ItemKind> = round
         .to_items()

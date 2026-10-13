@@ -24,8 +24,8 @@ NapCatQQ ──反向 WS──▶ gateway ──▶ llm::Pipeline ──▶ engi
 
 ```bash
 cargo build                                  # 编译（无 error / 无新 warning）
-cargo test                                   # Rust 单测（当前 200 passed）
-node tests/e2e/sim.mjs                       # Playwright e2e（当前 12/12，脚本自带 cargo build）
+cargo test                                   # Rust 单测（当前 223 passed）
+node tests/e2e/sim.mjs                       # Playwright e2e（当前 16/16，脚本自带 cargo build）
 
 # 回归语料（具体以 simulation-corpus/**/README.md 为准）
 python simulation-corpus/real-xlsx/parse_xlsx.py          # ① xlsx → sections/messages JSON（需 *.xlsx）
@@ -66,7 +66,7 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 | `src/snapshot_bundle/` | 单一 JSON 快照导出/导入 |
 | `src/messages/` | 共享消息日志 `MessageLog`（JSONL + 原始事件） |
 | `src/tests/` | Rust 重放辅助测试（`#[cfg(test)] mod tests;`） |
-| `web/` | 静态前端：display / admin / sim / replay / settlement / **round（轮次与商品）/ settings（其余配置）** + `common.js`、`shell.js` |
+| `web/` | 静态前端：display / admin / replay / settlement / **round（轮次与商品）/ settings（其余配置）** + `common.js`、`shell.js`（模拟器页已移除） |
 | `data/rounds/` | **轮次库**（gitignored 运行时数据）：`<round_id>.json` = `RoundSettings`；`config/app.json` 的 `active_round_id` 指向激活轮次 |
 | `tests/e2e/` | Node `.mjs` Playwright 端到端测试 |
 | `scripts/` | 模拟/录制脚本 + `privacy-scan.mjs` |
@@ -92,8 +92,10 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
   - **轮次库**：`config/app.json` 只留 `active_round_id`；轮次数据 `data/rounds/<round_id>.json`；`GET/POST /api/rounds`、`POST /api/rounds/:id/activate`（`continue` 默认 / `fresh` / `replay`，**切换与重放解耦**）、`POST /api/rounds/:id/check`、`DELETE /api/rounds/:id`。开团=`/round`，设置=`/settings`（不进 Stepper）。
   - **成员 CN**：`members.cn_overrides[{user_id,cn,aliases}]`；人名回退 **CN → 归一化昵称 → user_id**；用于匹配与**结算表/账单人名**；`/api/members` 附 `cn/resolved`。
   - **调价在目录（仅变体）**：商品级只设原价；**仅变体** `原价 A ± 调价 B = 最终价 C`；`VariantConfig.adjust_cents` 已落库并接入结算取价；结算页**不录入**调价、仅展示调后价；调价**不参与**折扣/减均/特典档位。
+  - **轮次类别（2026-10-13）**：`RoundSettings.category: "test"|"normal"`（默认 normal）；`gateway.test_group_id` 指定测试群。**测试轮只绑定测试群、正常轮只绑定正常群**；伪造解包**隔离到 NC 入口**（`Pipeline::handle`），仅测试轮+测试群的 NC 消息才解包；测试注入端点 `/api/sim/message(s)` **仅测试轮**可用、逐条处理（缺字段/非测试群 `Dropped`，不整批拒绝）；webui 模拟器页已移除（保留消息编辑）。详见 [docs/SPEC-TEST-ROUND-ISOLATION.md](./docs/SPEC-TEST-ROUND-ISOLATION.md)。
 - **禁止事项（红线）**：
   - **绝不向真实群发消息**：`reply_enabled=false` 默认关闭；`send_*` 仅当开启且 `action ∈ allowed_actions` 时放行，否则强制拦截并告警。
+  - **伪造消息仅限测试群**：伪造解包只作用于**测试群**的 NC 消息（见上）；测试注入端点仅测试轮可用；不得对正常群/正常轮启用伪造。
   - 真实昵称 / 群号 / 配置 / `data/**` / `config/**` / `*.xlsx` **不得入库**；改动只提交占位名（如 `成员01`、`123456789`、`0.0.0.0:9801`）。
   - 不改 `simulation-corpus/**`（只读回归资产）；不改他人归属文件（见 [docs/MODULES.md](./docs/MODULES.md)）。
 
@@ -112,6 +114,7 @@ npm run privacy         # scripts/privacy-scan.mjs（跟踪文件隐私/密钥�
 
 - **总入口**：[docs/README.md](./docs/README.md)（LLM 接手工作入口，含必读顺序与红线）。
 - ✅ **SPEC-UPDATE-2026-09-24 已实现（正文已更新）**：[docs/SPEC-UPDATE-2026-09-24.md](./docs/SPEC-UPDATE-2026-09-24.md)（U1–U9 现为现行口径；未落地差距见 [docs/TODOS.md](./docs/TODOS.md)「本轮遗留（Wave G2）」）。
+- ✅ **测试轮隔离与批量测试消息（2026-10-13）**：[docs/SPEC-TEST-ROUND-ISOLATION.md](./docs/SPEC-TEST-ROUND-ISOLATION.md)（已实现）。
 - 现行：[POLICY.md](./docs/POLICY.md) / [DESIGN.md](./docs/DESIGN.md) / [REQUIREMENTS.md](./docs/REQUIREMENTS.md) / [INTERFACES.md](./docs/INTERFACES.md) / [FUNCTIONAL.md](./docs/FUNCTIONAL.md) / [MODULES.md](./docs/MODULES.md) / [TASKS.md](./docs/TASKS.md) / [AGENT-RULES.md](./docs/AGENT-RULES.md) / [GAP-ANALYSIS.md](./docs/GAP-ANALYSIS.md) / [DECISIONS.md](./docs/DECISIONS.md) / [TODOS.md](./docs/TODOS.md)。
 - 归档：`docs/archive/README-legacy.md`（旧 README）。
 

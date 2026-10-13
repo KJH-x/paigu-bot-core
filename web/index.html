@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="theme.css" />
   <link rel="stylesheet" href="app.css" />
   <link rel="stylesheet" href="newlook.css" />
+  <link rel="stylesheet" href="workbench.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
@@ -46,23 +47,23 @@
 
     <div class="kpis">
       <div class="kpi accent">
-        <div class="k">版本 version</div>
+        <div class="k">数据版本</div>
         <div class="v" id="kpi-version">—</div>
       </div>
       <div class="kpi">
-        <div class="k">认购 claims</div>
+        <div class="k">已排数量</div>
         <div class="v" id="kpi-claims">—</div>
       </div>
       <div class="kpi ok">
-        <div class="k">在线 clients</div>
+        <div class="k">NapCat 连接</div>
         <div class="v" id="kpi-clients">—</div>
       </div>
       <div class="kpi">
-        <div class="k">成员 members_cached</div>
+        <div class="k">成员数量</div>
         <div class="v" id="kpi-members">—</div>
       </div>
       <div class="kpi">
-        <div class="k">阶段 phase</div>
+        <div class="k">当前阶段</div>
         <div class="v sm" id="kpi-phase">—</div>
       </div>
     </div>
@@ -71,15 +72,15 @@
     <div class="nav-cards">
       <a class="nav-card" href="admin.html">
         <span class="step-badge">1</span>
-        <h2>开团 · 配置</h2>
-        <p>编辑轮次、商品目录、阶段时间窗、成员缓存与 gateway 接入；revision 乐观并发，409 冲突显著提示。</p>
-        <em>phase0 → admin</em>
+        <h2>管理总览</h2>
+        <p>查看当前轮次状态，进入轮次管理或系统设置。</p>
+        <em>管理入口</em>
       </a>
       <a class="nav-card" href="round.html">
         <span class="step-badge">1</span>
         <h2>开团 · 轮次与商品</h2>
-        <p>新建 / 激活 / 校验轮次，编辑商品目录（拼团 / 单领 / 整盒 / 特典）与变体原价 A ± 调价 B = 最终价 C、别名、阶段时间窗。</p>
-        <em>phase0 → round</em>
+        <p>新建和切换轮次，录入商品、价格、别名与阶段时间。</p>
+        <em>轮次管理</em>
       </a>
       <a class="nav-card" href="settings.html">
         <span class="step-badge">⚙</span>
@@ -90,20 +91,14 @@
       <a class="nav-card" href="display.html">
         <span class="step-badge">2</span>
         <h2>排谷 · 展示</h2>
-        <p>排位板键控 diff 高亮、消息流 smart-scroll、Who-Whats 认领明细、状态面板；三栏可折叠。</p>
-        <em>phase1-3 → display</em>
-      </a>
-      <a class="nav-card" href="sim.html">
-        <span class="step-badge">2</span>
-        <h2>排谷 · 模拟</h2>
-        <p>切换占位身份与时间偏移发送消息，走与真实链路一致的流水线，实时排位与转录。</p>
-        <em>phase1-3 → sim</em>
+        <p>同屏查看实时排位、消息处理结果与成员认领明细。</p>
+        <em>实时工作台</em>
       </a>
       <a class="nav-card" href="settlement.html">
         <span class="step-badge">3</span>
         <h2>结算 · 试算</h2>
-        <p>调价 → 折扣 → 特典 → 减均，试算结果 C/B/G/D 与校验式、lines 逐行明细。</p>
-        <em>settling → settlement</em>
+        <p>设置折扣、特典与减均规则，核对每包金额和逐行账单。</p>
+        <em>结算工作台</em>
       </a>
       <a class="nav-card" href="settlement.html#order">
         <span class="step-badge">4</span>
@@ -114,8 +109,8 @@
       <a class="nav-card" href="replay.html">
         <span class="step-badge">5</span>
         <h2>复盘 · 重放</h2>
-        <p>步进/播放时间轴，表格 / Mermaid 双视图与底部 Who-Whats，PASS/FAIL 核对。</p>
-        <em>replay</em>
+        <p>回看当前激活轮次的消息和排位变化，按步骤核对成员认领。</p>
+        <em>当前轮次复盘</em>
       </a>
     </div>
 

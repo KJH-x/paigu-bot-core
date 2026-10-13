@@ -27,6 +27,27 @@
 
   var boardEl, boardEmpty, messagesEl, whoEls, statusEl, boardRenderer, smart;
 
+  var MESSAGE_STATUS_TEXT = {
+    applied: '已记录',
+    ok: '已记录',
+    rejected: '已拒绝',
+    reject: '已拒绝',
+    needconfirm: '待确认',
+    ignored: '已忽略',
+    ignore: '已忽略',
+    duplicate: '已去重'
+  };
+
+  var SYSTEM_LABELS = {
+    bound_addr: '监听地址',
+    clients: 'NapCat 连接',
+    last_error: '最近错误',
+    listening: '监听状态',
+    status: '运行状态',
+    version: '数据版本',
+    updated_at: '更新时间'
+  };
+
   function store(key, val) {
     try { window.localStorage.setItem('paigu.display.' + key, val); } catch (e) { /* ignore */ }
   }
@@ -95,8 +116,10 @@
     if (node.__who.textContent !== m.display) node.__who.textContent = m.display;
     if (node.__txt.textContent !== m.text) node.__txt.textContent = m.text;
     var st = m.status || '';
-    if (node.__st.textContent !== st) node.__st.textContent = st;
-    var stCls = 'st' + (st ? ' ' + String(st).toLowerCase() : '');
+    var stKey = String(st).toLowerCase();
+    var stText = MESSAGE_STATUS_TEXT[stKey] || st;
+    if (node.__st.textContent !== stText) node.__st.textContent = stText;
+    var stCls = 'st' + (st ? ' ' + stKey : '');
     if (node.__st.className !== stCls) node.__st.className = stCls;
     var detail = m.detail || '';
     if (node.__detail.textContent !== detail) node.__detail.textContent = detail;
@@ -168,8 +191,10 @@
       if (v == null) text = '—';
       else if (Array.isArray(v)) text = v.map(function (x) { return typeof x === 'object' ? JSON.stringify(x) : String(x); }).join('、');
       else if (typeof v === 'object') text = JSON.stringify(v);
+      else if (keys[i] === 'listening' && typeof v === 'boolean') text = v ? '监听中' : '未监听';
+      else if (typeof v === 'boolean') text = v ? '是' : '否';
       else text = String(v);
-      rows.push({ k: keys[i], v: text });
+      rows.push({ k: SYSTEM_LABELS[keys[i]] || keys[i], v: text });
     }
     if (!rows.length) {
       if (statusEl.__empty !== true) { statusEl.__empty = true; statusEl.textContent = '暂无状态'; }
@@ -196,8 +221,8 @@
       return;
     }
     var nextItems = P.normalizeBoard(payload, state.meta);
-    var changeMap = P.normalizeChanged(payload);
-    var auto = P.diffBoardItems(state.items, nextItems);
+    var changeMap = state.loaded ? P.normalizeChanged(payload) : {};
+    var auto = state.loaded ? P.diffBoardItems(state.items, nextItems) : {};
     for (var k in auto) {
       if (!changeMap[k]) changeMap[k] = auto[k];
     }
@@ -226,7 +251,7 @@
   function applyRemote(snap) {
     if (!snap) return;
     var nextItems = P.normalizeBoard(snap, state.meta);
-    var changeMap = P.diffBoardItems(state.items, nextItems);
+    var changeMap = state.loaded ? P.diffBoardItems(state.items, nextItems) : {};
     state.items = nextItems;
     renderBoard(nextItems, changeMap);
 

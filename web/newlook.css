@@ -1449,3 +1449,442 @@ code {
     background: CanvasText;
   }
 }
+
+/* ===== 共享工作台骨架 2026-10-13 ===== */
+body[data-page] {
+  background: var(--nl-viewport);
+  background-image: none;
+}
+
+body[data-page] .page {
+  width: min(calc(100% - 24px), 1840px);
+  max-width: none;
+}
+
+body[data-page] .app-topbar {
+  padding-top: 10px;
+}
+
+body[data-page] .app-topbar::after {
+  display: none;
+}
+
+body[data-page] .app-topbar .shell-row {
+  flex-wrap: nowrap;
+}
+
+body[data-page] .app-topbar .brand {
+  flex: 0 0 auto;
+}
+
+body[data-page] .app-topbar .stepper {
+  margin-top: 0;
+}
+
+body[data-page] .app-topbar .wf-status {
+  justify-content: flex-end;
+}
+
+body[data-page] .app-topbar .tools-row {
+  gap: 8px 10px;
+}
+
+body[data-page] .round-heading {
+  min-width: 0;
+  max-width: 320px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-page] .panel {
+  border-bottom: 0;
+  box-shadow: inset 0 0 0 1px var(--nl-line);
+}
+
+body[data-page] .panel-head {
+  min-height: 42px;
+  padding-right: 10px;
+  background: var(--nl-surface-2);
+  border-top-color: var(--nl-line);
+}
+
+body[data-page] .panel-head::before {
+  flex-basis: 4px;
+  margin-right: 10px;
+}
+
+body[data-page] .panel-body {
+  padding: 10px;
+}
+
+body[data-page="display"] .display-main {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(420px, 5fr) !important;
+  gap: 8px;
+  align-items: stretch;
+  padding: 8px 8px 0;
+}
+
+body[data-page="display"] .display-main > .panel {
+  display: flex;
+  flex-direction: column;
+  height: clamp(540px, calc(100vh - 190px), 760px);
+  min-width: 0;
+}
+
+body[data-page="display"] .display-main > .panel > .panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+body[data-page="display"] .display-main .messages {
+  height: 100%;
+  max-height: none;
+}
+
+body[data-page="display"] .display-secondary {
+  display: grid;
+  grid-template-columns: minmax(0, 9fr) minmax(260px, 3fr);
+  gap: 8px;
+  align-items: stretch;
+  padding: 8px 8px 0;
+}
+
+body[data-page="display"] .display-secondary > .panel {
+  min-width: 0;
+}
+
+body[data-page="display"] .full-who .panel-body {
+  max-height: 42vh;
+  overflow: auto;
+}
+
+body[data-page="display"] .full-status .panel-body {
+  height: calc(100% - 42px);
+}
+
+body[data-page="display"] .section-title {
+  margin: 14px 8px 8px;
+}
+
+body[data-page="display"] #sec-msglog {
+  margin-inline: 8px;
+}
+
+/* 排位表：固定标签列、紧凑槽位和单一分隔系统。 */
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .board {
+  gap: 8px;
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .item-section {
+  border-color: var(--nl-line);
+  background: var(--nl-surface);
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .item-section > .item-title {
+  min-height: 34px;
+  padding: 6px 9px;
+  background: var(--nl-surface-2);
+  border-bottom-color: var(--nl-line);
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .item-section > .item-title .kind {
+  margin-left: auto;
+  color: var(--nl-muted);
+  background: transparent;
+  border-color: var(--nl-line);
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .vrow {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 0 9px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--nl-line);
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .vrow .vlabel {
+  width: auto;
+  min-width: 0;
+  padding: 4px 8px 4px 0;
+  overflow: hidden;
+  color: var(--nl-ink-soft);
+  border-right: 1px solid var(--nl-line);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .vrow .cells {
+  gap: 3px;
+  min-width: 0;
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .vrow .extra {
+  grid-column: 2;
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .cell {
+  min-height: 26px;
+  padding: 3px 7px;
+  justify-content: flex-start;
+  text-align: left;
+  border-color: var(--nl-line);
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .cell[data-box] {
+  border-top-width: 1px;
+  border-left: 3px solid var(--bx, var(--nl-line-strong));
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .cell.empty {
+  min-width: 7px;
+  width: 7px;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--nl-line);
+  opacity: .35;
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .cell.empty::after {
+  content: "";
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .cell-user {
+  max-width: 180px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body:is([data-page="display"], [data-page="sim"], [data-page="replay"]) .box-sep {
+  display: inline-block;
+  width: 1px;
+  align-self: stretch;
+  margin: 0 4px;
+  background: var(--nl-line-strong) !important;
+  opacity: .28;
+}
+
+/* 消息流：四列稳定对齐，解析详情保留但退居第二层。 */
+body[data-page="display"] .msg {
+  display: grid;
+  grid-template-columns: 58px minmax(92px, 132px) minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  align-items: start;
+  padding: 7px 8px;
+}
+
+body[data-page="display"] .msg .seq,
+body[data-page="display"] .msg .who,
+body[data-page="display"] .msg .txt,
+body[data-page="display"] .msg .st {
+  min-width: 0;
+}
+
+body[data-page="display"] .msg .detail {
+  grid-column: 3 / 5;
+  padding-left: 0;
+  color: var(--nl-muted);
+  font-size: 11px;
+}
+
+body[data-page="display"] .msg .st {
+  white-space: nowrap;
+}
+
+/* 次级信息仍完整展示，但与主工作区共享同一列线。 */
+body[data-page="display"] .who-whats {
+  table-layout: fixed;
+}
+
+body[data-page="display"] .who-whats th,
+body[data-page="display"] .who-whats td {
+  padding: 6px 9px;
+  text-align: left;
+}
+
+body[data-page="display"] .who-whats th:nth-child(1),
+body[data-page="display"] .who-whats td:nth-child(1) {
+  width: 20%;
+}
+
+body[data-page="display"] .who-whats th:nth-child(2),
+body[data-page="display"] .who-whats td:nth-child(2) {
+  width: 23%;
+  color: var(--nl-muted);
+  font-family: var(--mono);
+}
+
+body[data-page="display"] .kv {
+  grid-template-columns: minmax(86px, auto) minmax(0, 1fr);
+  gap: 7px 10px;
+}
+
+body[data-page="display"] .kv .k {
+  color: var(--nl-muted);
+}
+
+@media (min-width: 761px) {
+  body[data-page="display"] .app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+}
+
+@media (max-width: 1040px) and (min-width: 761px) {
+  body[data-page="display"] .page {
+    width: 100%;
+  }
+
+  body[data-page="display"] .display-main {
+    grid-template-columns: minmax(0, 3fr) minmax(360px, 2fr) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  body[data-page="display"] .page {
+    width: 100%;
+  }
+
+  body[data-page="display"] .app-topbar .shell-row {
+    flex-wrap: wrap;
+  }
+
+  body[data-page="display"] .app-topbar .brand {
+    order: 1;
+  }
+
+  body[data-page="display"] .app-topbar .shell-row > .spacer {
+    order: 2;
+  }
+
+  body[data-page="display"] #theme-toggle {
+    order: 3;
+  }
+
+  body[data-page="display"] .app-topbar .wf-status {
+    order: 4;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  body[data-page="display"] .round-heading {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  body[data-page="display"] .app-topbar .tools-row .spacer {
+    display: none;
+  }
+
+  body[data-page="display"] #api-wrap,
+  body[data-page="display"] #remote-wrap {
+    flex: 1 1 100%;
+  }
+
+  body[data-page="display"] #api-wrap input,
+  body[data-page="display"] #remote-wrap input {
+    flex: 1 1 auto;
+    width: 0;
+  }
+
+  body[data-page="display"] .col-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+    gap: 0;
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--nl-surface);
+    border-bottom: 1px solid var(--nl-line-strong);
+  }
+
+  body[data-page="display"] .col-tabs button {
+    flex: 1 1 0;
+  }
+
+  body[data-page="display"] .display-main {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 8px 8px 0;
+  }
+
+  body[data-page="display"] .display-main > [data-col] {
+    display: none;
+  }
+
+  body[data-page="display"] .display-main > [data-col].is-active {
+    display: flex;
+  }
+
+  body[data-page="display"] .display-main > .panel {
+    height: auto;
+    max-height: none;
+  }
+
+  body[data-page="display"] .display-main > .panel > .panel-body {
+    overflow: visible;
+  }
+
+  body[data-page="display"] .display-main .messages {
+    height: auto;
+    max-height: none;
+  }
+
+  body[data-page="display"] .display-secondary {
+    display: none;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px 8px 0;
+  }
+
+  body[data-page="display"] .display-secondary.is-active {
+    display: grid;
+  }
+
+  body[data-page="display"] .display-secondary .full-who .panel-body {
+    max-height: none;
+    overflow: visible;
+  }
+
+  body[data-page="display"] .vrow {
+    grid-template-columns: 118px minmax(0, 1fr);
+    padding-inline: 8px;
+  }
+
+  body[data-page="display"] .cell-user {
+    max-width: 145px;
+  }
+
+  body[data-page="display"] .msg {
+    grid-template-columns: 48px minmax(76px, 108px) minmax(0, 1fr);
+  }
+
+  body[data-page="display"] .msg .st {
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: start;
+  }
+
+  body[data-page="display"] .msg .detail {
+    grid-column: 2 / 4;
+    grid-row: 3;
+  }
+
+  body[data-page="display"] .who-whats th:nth-child(2),
+  body[data-page="display"] .who-whats td:nth-child(2) {
+    width: 30%;
+  }
+
+  body[data-page="display"] #sec-msglog,
+  body[data-page="display"] .section-title {
+    display: none;
+  }
+}

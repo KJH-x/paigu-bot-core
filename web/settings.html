@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="app.css" />
   <link rel="stylesheet" href="./manage.css" />
   <link rel="stylesheet" href="newlook.css" />
+  <link rel="stylesheet" href="workbench.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
@@ -49,7 +50,6 @@
           <a href="display.html">展示</a>
           <a href="settlement.html">结算</a>
           <a href="replay.html">回放</a>
-          <a href="sim.html">模拟器</a>
         </span>
       </div>
     </header>
@@ -68,68 +68,68 @@
     <div id="form" class="hidden">
       <div class="layout">
         <section class="panel admin-section" id="sec-gateway">
-          <div class="panel-head"><span>接入（gateway）</span></div>
+          <div class="panel-head"><span>NapCat 接入</span></div>
           <div class="panel-body">
-            <label class="field"><span>bind</span><input id="gw-bind" /></label>
+            <label class="field"><span>监听地址</span><input id="gw-bind" /></label>
             <div class="split">
-              <label class="field"><span>heartbeat_secs</span><input id="gw-heartbeat" type="number" min="1" /></label>
-              <label class="field"><span>reply_enabled（真实群必须关闭）</span><input id="gw-reply" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>admin_commands_enabled（管理员命令落地执行）</span><input id="gw-admincmds" type="checkbox" style="width:auto" /></label>
+              <label class="field"><span>心跳间隔（秒）</span><input id="gw-heartbeat" type="number" min="1" /></label>
+              <label class="field"><span>发送回复（真实群保持关闭）</span><input id="gw-reply" type="checkbox" style="width:auto" /></label>
+              <label class="field"><span>执行管理员命令</span><input id="gw-admincmds" type="checkbox" style="width:auto" /></label>
             </div>
-            <label class="field"><span>whitelist_groups（逗号分隔）</span><input id="gw-whitelist" /></label>
-            <label class="field"><span>whitelist_members（成员白名单，逗号分隔 user_id/身份/显示名；空 = 不限制）</span><input id="gw-whitelist-members" /></label>
-            <label class="field"><span>allowed_actions（逗号分隔，禁止 send_*）</span><input id="gw-actions" /></label>
+            <label class="field"><span>接收群号（逗号分隔）</span><input id="gw-whitelist" /></label>
+            <label class="field"><span>接收成员（逗号分隔；留空不限）</span><input id="gw-whitelist-members" /></label>
+            <label class="field"><span>允许的只读动作（逗号分隔）</span><input id="gw-actions" /></label>
             <div class="row">
-              <button id="gw-reply-toggle" class="small">热切换 reply_enabled</button>
-              <button id="gw-admin-toggle" class="small">热切换 admin_commands_enabled</button>
-              <span class="hint">走后端 POST /api/config/reply、/api/config/admin-commands（只改单开关，不走整表保存）</span>
+              <button id="gw-reply-toggle" class="small">切换回复开关</button>
+              <button id="gw-admin-toggle" class="small">切换管理员命令</button>
+              <span class="hint">立即生效；其他字段使用顶部保存。</span>
             </div>
           </div>
         </section>
 
         <section class="panel admin-section" id="sec-display">
-          <div class="panel-head"><span>展示（display）</span></div>
+          <div class="panel-head"><span>展示设置</span></div>
           <div class="panel-body">
             <div class="split">
-              <label class="field"><span>refresh_ms</span><input id="dp-refresh" type="number" min="500" /></label>
-              <label class="field"><span>data_source</span>
+              <label class="field"><span>刷新间隔（毫秒）</span><input id="dp-refresh" type="number" min="500" /></label>
+              <label class="field"><span>数据来源</span>
                 <select id="dp-source"><option value="local">local</option><option value="remote">remote</option></select>
               </label>
             </div>
-            <label class="field"><span>remote_base_url</span><input id="dp-remote" placeholder="https://…/rounds/{round_id} 或 …/current.json" /></label>
+            <label class="field"><span>远程快照地址</span><input id="dp-remote" placeholder="https://…/rounds/{round_id} 或 …/current.json" /></label>
           </div>
         </section>
       </div>
 
       <div class="layout" style="margin-top:12px">
         <section class="panel admin-section" id="sec-llm">
-          <div class="panel-head"><span>LLM（llm）</span></div>
+          <div class="panel-head"><span>消息理解</span></div>
           <div class="panel-body">
             <div class="split">
-              <label class="field"><span>enabled</span><input id="llm-enabled" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>fallback_to_rules</span><input id="llm-fallback" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>base_url</span><input id="llm-base" /></label>
-              <label class="field"><span>model</span><input id="llm-model" /></label>
-              <label class="field"><span>api_key_env</span><input id="llm-keyenv" /></label>
-              <label class="field"><span>timeout_secs</span><input id="llm-timeout" type="number" min="1" /></label>
-              <label class="field"><span>max_tokens</span><input id="llm-maxtokens" type="number" min="1" /></label>
-              <label class="field"><span>temperature</span><input id="llm-temp" type="number" step="0.05" min="0" max="2" /></label>
+              <label class="field"><span>启用模型</span><input id="llm-enabled" type="checkbox" style="width:auto" /></label>
+              <label class="field"><span>失败时使用规则</span><input id="llm-fallback" type="checkbox" style="width:auto" /></label>
+              <label class="field"><span>服务地址</span><input id="llm-base" /></label>
+              <label class="field"><span>模型名称</span><input id="llm-model" /></label>
+              <label class="field"><span>密钥环境变量</span><input id="llm-keyenv" /></label>
+              <label class="field"><span>超时（秒）</span><input id="llm-timeout" type="number" min="1" /></label>
+              <label class="field"><span>最大输出长度</span><input id="llm-maxtokens" type="number" min="1" /></label>
+              <label class="field"><span>随机度</span><input id="llm-temp" type="number" step="0.05" min="0" max="2" /></label>
             </div>
-            <label class="field"><span>prompt_template</span><textarea id="llm-prompt" rows="12"></textarea></label>
+            <label class="field"><span>提示词</span><textarea id="llm-prompt" rows="12"></textarea></label>
           </div>
         </section>
 
         <section class="panel admin-section" id="sec-members">
           <div class="panel-head">
-            <span>成员（members）· CN 具体名</span>
+            <span>成员名称与别名</span>
             <span class="spacer"></span>
             <button id="members-cn-save" class="small">保存成员 CN</button>
           </div>
           <div class="panel-body">
             <div class="split">
-              <label class="field"><span>group_id</span><input id="mb-group" /></label>
-              <label class="field"><span>cache_path</span><input id="mb-cache" /></label>
-              <label class="field"><span>daily_pull_at</span><input id="mb-pull" placeholder="19:00" /></label>
+              <label class="field"><span>群号</span><input id="mb-group" /></label>
+              <label class="field"><span>成员缓存文件</span><input id="mb-cache" /></label>
+              <label class="field"><span>每日拉取时间</span><input id="mb-pull" placeholder="19:00" /></label>
             </div>
             <div class="row">
               <button id="members-refresh" class="small">拉取群成员</button>
@@ -153,7 +153,7 @@
       <div class="layout" style="margin-top:12px">
         <section class="panel admin-section" id="sec-messages">
           <div class="panel-head">
-            <span>消息日志编辑器（C4）</span>
+            <span>消息日志</span>
             <span class="spacer"></span>
             <span id="msg-info" class="hint"></span>
             <button id="msg-refresh" class="small">刷新消息</button>
@@ -171,7 +171,7 @@
         </section>
 
         <section class="panel admin-section" id="sec-snapshot">
-          <div class="panel-head"><span>快照导出 / 导入（C4）</span></div>
+          <div class="panel-head"><span>快照导出 / 导入</span></div>
           <div class="panel-body">
             <div class="row">
               <label class="field" style="flex:1;margin:0"><span>out_dir（可选；留空用后端默认目录）</span><input id="snap-out" placeholder="例如 data/snapshots" /></label>

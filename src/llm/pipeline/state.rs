@@ -103,7 +103,8 @@ impl Pipeline {
         state
             .messages
             .iter()
-            .filter(|m| m.seq > since)
+            // 消息流不展示被丢弃（非白名单群/非群消息等）记录，避免刷屏。
+            .filter(|m| m.seq > since && m.status != "Dropped")
             .map(|m| {
                 json!({
                     "seq": m.seq,

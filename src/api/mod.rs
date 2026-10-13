@@ -13,7 +13,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::middleware::map_response;
+use axum::response::Response;
 use axum::routing::get_service;
 use axum::{Json, Router};
 use serde_json::{json, Value};
@@ -84,7 +86,6 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
     let web = web_dir();
     let display_page = ServeFile::new(web.join("display.html"));
     let admin_page = ServeFile::new(web.join("admin.html"));
-    let sim_page = ServeFile::new(web.join("sim.html"));
     let replay_page = ServeFile::new(web.join("replay.html"));
     let settlement_page = ServeFile::new(web.join("settlement.html"));
     let round_page = ServeFile::new(web.join("round.html"));
@@ -103,7 +104,6 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .merge(settlement_routes::routes())
         .route("/", get_service(display_page))
         .route("/admin", get_service(admin_page))
-        .route("/sim", get_service(sim_page))
         .route("/replay", get_service(replay_page))
         .route("/settlement", get_service(settlement_page))
         .route("/round", get_service(round_page))
@@ -111,6 +111,12 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .nest_service("/web", ServeDir::new(web.clone()))
         .fallback_service(ServeDir::new(web))
         .with_state(state)
+        .layer(map_response(|mut resp: Response| async move {
+            // 静态资源（JS/CSS/HTML）每次刷新都重新校验，避免改动后浏览器用旧缓存。
+            resp.headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            resp
+        }))
         .layer(cors_layer())
 }
 

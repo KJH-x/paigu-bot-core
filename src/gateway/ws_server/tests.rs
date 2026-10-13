@@ -125,6 +125,69 @@ async fn send_action_without_client_errors() {
 }
 
 #[tokio::test]
+async fn reacts_with_emoji_on_routed_message() {
+    let store = test_store_with(|cfg| {
+        cfg.gateway.whitelist_groups = vec!["123456789".to_string()];
+        cfg.gateway.react_emoji_id = Some(76);
+    });
+    let gw = Gateway::new(store, Arc::new(NullSink));
+    let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
+    gw.clients.lock().unwrap().insert(1, tx);
+
+    let event = json!({
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": 123456789,
+        "user_id": 10000,
+        "message_id": 555,
+        "message": [{ "type": "text", "data": { "text": "排 通行证 1" } }],
+        "sender": { "user_id": 10000, "nickname": "甲", "role": "member" },
+        "time": 1000
+    });
+    gw.on_text(&event.to_string()).await;
+
+    let mut frame = None;
+    while let Ok(Some(WsMessage::Text(text))) =
+        tokio::time::timeout(Duration::from_secs(1), rx.recv()).await
+    {
+        let value: Value = serde_json::from_str(text.as_str()).unwrap();
+        if value["action"] == "set_msg_emoji_like" {
+            frame = Some(value);
+            break;
+        }
+    }
+    let frame = frame.expect("应发出 set_msg_emoji_like");
+    assert_eq!(frame["params"]["emoji_id"], 76);
+    assert_eq!(frame["params"]["message_id"], 555);
+}
+
+#[tokio::test]
+async fn no_emoji_reaction_when_disabled() {
+    let store = test_store_with(|cfg| {
+        cfg.gateway.whitelist_groups = vec!["123456789".to_string()];
+        cfg.gateway.react_emoji_id = None;
+    });
+    let gw = Gateway::new(store, Arc::new(NullSink));
+    let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
+    gw.clients.lock().unwrap().insert(1, tx);
+
+    let event = json!({
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": 123456789,
+        "user_id": 10000,
+        "message_id": 556,
+        "message": [{ "type": "text", "data": { "text": "排 通行证 1" } }],
+        "sender": { "user_id": 10000, "nickname": "甲", "role": "member" },
+        "time": 1000
+    });
+    gw.on_text(&event.to_string()).await;
+
+    let sent = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await;
+    assert!(sent.is_err(), "关闭时不应发出任何动作");
+}
+
+#[tokio::test]
 async fn dispatch_response_round_trips_echo() {
     let gw = test_gateway();
     let (tx, rx) = oneshot::channel();

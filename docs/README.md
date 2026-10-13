@@ -5,6 +5,8 @@
 
 > ✅ **SPEC-UPDATE-2026-09-24 已实现（正文已更新）**：[SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) 的用户口径 U1–U9 已为**现行口径**，并同步进 [REQUIREMENTS.md](./REQUIREMENTS.md) / [POLICY.md](./POLICY.md) / [DESIGN.md](./DESIGN.md) / [INTERFACES.md](./INTERFACES.md)（原 `⚠️ 已废弃` 标记已改为 `✅ 已更新`）。未落地的实现差距记为 [TODOS.md](./TODOS.md)「本轮遗留（Wave G2）」。
 
+> 🧪 **测试轮隔离与批量测试消息（2026-10-13，已实现）**：[SPEC-TEST-ROUND-ISOLATION.md](./SPEC-TEST-ROUND-ISOLATION.md)。要点：轮次新增 `category: "test"|"normal"`；`gateway.test_group_id`；伪造解包**仅测试轮+测试群的 NC 消息**；新增 `POST /api/sim/messages`（裸数组 / `messages` 包装，逐条处理，缺字段即 drop）；移除模拟器页（保留消息编辑）；e2e 增加 1920×1080/100% 排版验收。
+
 ## 一、必读顺序（接手工作前）
 
 | 序 | 文档 | 内容 | 必读 |
@@ -49,7 +51,7 @@
 ## 四、当前状态快照
 
 - 详见 [GAP-ANALYSIS.md](./GAP-ANALYSIS.md)（完成状态）与 [TODOS.md](./TODOS.md)（待办）。
-- 快速事实（2026-09-25）：`cargo test` 200 passed · `cargo clippy -- -D warnings` 通过 · e2e 12/12 · real-samples/real-xlsx 逐格 ALL PASS · `npm run privacy` OK（真实昵称跟踪文件 0 命中）。
+- 快速事实（2026-10-13）：`cargo test` 223 passed · `cargo clippy -- -D warnings` 通过 · e2e 16/16（含 1920×1080/100% 排版）· `npm run privacy` OK（真实昵称跟踪文件 0 命中）。
 
 ## 五、归档 / 历史
 

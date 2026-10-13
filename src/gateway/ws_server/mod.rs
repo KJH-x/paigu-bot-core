@@ -91,6 +91,12 @@ impl Gateway {
             anyhow::bail!("action not allowed: {action}");
         }
 
+        self.dispatch(action, params).await
+    }
+
+    /// 直接下发 OneBot 动作（**不做白名单/开关校验**）：仅供已由配置显式授权的内部调用
+    /// （如 `react_emoji_id` 触发的 `set_msg_emoji_like`）使用。
+    async fn dispatch(&self, action: &str, params: Value) -> anyhow::Result<Value> {
         let sender = {
             let clients = self.clients.lock().unwrap();
             clients.values().next().cloned()
@@ -300,6 +306,23 @@ impl Gateway {
                 }
             }
             RouteKind::Message => {
+                // 以表情回应已收到的消息（`set_msg_emoji_like`），不发送文本。
+                if let (Some(emoji_id), Some(message_id)) =
+                    (cfg.gateway.react_emoji_id, ev.message_id.clone())
+                {
+                    let gw = self.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = gw
+                            .dispatch(
+                                "set_msg_emoji_like",
+                                json!({ "message_id": message_id, "emoji_id": emoji_id }),
+                            )
+                            .await
+                        {
+                            warn!(error = %e, "failed to react with emoji");
+                        }
+                    });
+                }
                 let incoming = onebot::to_incoming_event(&ev);
                 let sink = self.sink.clone();
                 tokio::spawn(async move {

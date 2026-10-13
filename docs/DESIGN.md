@@ -147,9 +147,10 @@
 | GET | `/api/board` | 当前排位快照 + 状态 |
 | GET | `/api/display?since=<version>` | 增量：`{version, board, messages, who_whats, status, changed}` |
 | GET | `/api/messages?since=<seq>` | 增量消息流 |
-| POST | `/api/sim/message` | `{user_id, nickname, text, offset_ms, group_id?, is_admin?}` → `{outcome, board, version}` |
+| POST | `/api/sim/message` | `{user_id\|id, text, timestamp, nickname?, is_admin?, message_id?, group_id?}` → `{outcome, board, version}`（**仅测试轮**，逐条 drop） |
+| POST | `/api/sim/messages` | 裸数组 或 `{messages:[…]}` → `{ok, round_id, category, count, summary, results, board, version}`（**仅测试轮**，逐条） |
 | POST | `/api/sim/identity` | `{user_id, nickname, is_admin?, priority?}` |
-| POST | `/api/sim/reset` | 清空模拟会话 |
+| POST | `/api/sim/reset` | 清空测试会话（手动） |
 | GET | `/api/members` | 成员列表（刷新缓存 → `data/members.seed.json` → `data/members.example.json` → 空；每项附 `cn`/`resolved`） |
 | POST | `/api/members/refresh` | 经 Gateway 拉取 `get_group_member_list` |
 | GET | `/api/gateway/status` | WS 连接状态 |

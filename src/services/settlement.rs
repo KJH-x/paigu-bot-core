@@ -737,6 +737,7 @@ mod tests {
                     aliases: vec![],
                 }],
             }],
+            category: crate::round::RoundCategory::Normal,
         }
     }
 

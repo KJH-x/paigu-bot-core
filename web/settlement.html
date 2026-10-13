@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="app.css" />
   <link rel="stylesheet" href="./settlement.css" />
   <link rel="stylesheet" href="newlook.css" />
+  <link rel="stylesheet" href="workbench.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
@@ -44,7 +45,6 @@
           <a href="index.html">首页</a>
           <a href="display.html">展示</a>
           <a href="admin.html">管理</a>
-          <a href="sim.html">模拟器</a>
         </span>
       </div>
     </header>
@@ -63,7 +63,7 @@
     <datalist id="item-ids"></datalist>
     <datalist id="variant-ids"></datalist>
 
-    <div class="layout">
+    <div class="layout settlement-workspace">
       <section class="panel" id="settle">
         <div class="panel-head">
           <span>结算配置</span>
@@ -93,35 +93,35 @@
           <div class="card step-card" id="sec-discount">
             <div class="card-head">
               <span class="step-mark">2</span>
-              <span>折扣（discounts）</span>
+              <span>折扣</span>
               <span class="spacer"></span>
               <button id="disc-add" class="small">添加折扣</button>
             </div>
-            <label class="field"><span>作用范围 scope_mode</span>
+            <label class="field"><span>优惠作用范围</span>
               <select id="scope-mode">
-                <option value="ExcludeGift">B：所有商品，不含特典</option>
-                <option value="IncludeGift">A：含已认购特典</option>
+                  <option value="ExcludeGift">实购商品，不含特典</option>
+                  <option value="IncludeGift">所有商品，含已认购特典</option>
               </select>
             </label>
-            <div class="hint">满减＝每包达门槛减 amount；全单＝按折扣率回摊。份数 n：-1 表示全部，n≥1 只作用金额最高的前 n 个包。</div>
+            <div class="hint">满减按每包门槛计算；整单优惠按比例分摊。适用包数为 -1 时作用全部，其余按包金额从高到低计算。</div>
             <div id="discount-list" class="rows"></div>
           </div>
 
           <div class="card step-card" id="sec-tier">
             <div class="card-head">
               <span class="step-mark">3</span>
-              <span>特典档位（gift_tiers）</span>
+              <span>特典档位</span>
               <span class="spacer"></span>
               <button id="tier-add" class="small">添加档位</button>
             </div>
-            <div class="hint">每个下单包金额满门槛即附赠；多档叠加、单包独立、不跨包累计；各档可设各自价格。已认购特典会显示 <span class="mono">claimed</span> 状态。</div>
+            <div class="hint">每包满门槛即可附赠，多档叠加、不跨包累计。各档独立设置单价与认购数量。</div>
             <div id="tier-list" class="rows"></div>
           </div>
 
           <div class="card step-card" id="sec-reduce">
             <div class="card-head">
               <span class="step-mark">4</span>
-              <span>减均（reduce_average）</span>
+              <span>减均</span>
             </div>
             <label class="row tight">
               <input id="reduce-include" type="checkbox" style="width:auto" />
@@ -134,7 +134,7 @@
       <section class="panel" id="order">
         <div class="panel-head">
           <span class="step-mark">5</span>
-          <span>下单表（拖拽 item → 包）</span>
+          <span>下单表</span>
           <span class="spacer"></span>
           <button id="load-allocation" class="small">从当前排位生成</button>
           <button id="load-sample" class="small">载入占位示例</button>

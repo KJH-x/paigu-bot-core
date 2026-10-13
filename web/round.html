@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="app.css" />
   <link rel="stylesheet" href="./manage.css" />
   <link rel="stylesheet" href="newlook.css" />
+  <link rel="stylesheet" href="workbench.css" />
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
@@ -48,7 +49,6 @@
           <a href="display.html">展示</a>
           <a href="settlement.html">结算</a>
           <a href="replay.html">回放</a>
-          <a href="sim.html">模拟器</a>
         </span>
       </div>
     </header>
@@ -66,27 +66,20 @@
       <span id="sec-round" aria-hidden="true"></span>
       <section class="panel admin-section" id="sec-rounds">
         <div class="panel-head">
-          <span>轮次管理（U3）</span>
+          <span>轮次管理</span>
           <span class="spacer"></span>
           <span id="rounds-info" class="hint"></span>
           <button id="rounds-refresh" class="small">刷新轮次</button>
         </div>
         <div class="panel-body">
-          <div class="explain">
-            <b>轮次标识 <code>round_id</code> 与展示名 <code>title</code> 可以不同。</b>
-            <code>round_id</code> 是稳定标识：用于消息日志 <code>data/messages/&lt;round_id&gt;.jsonl</code>、
-            快照目录与远程 <code>rounds/&lt;round_id&gt;/current</code>；创建后建议不再改动。
-            <code>title</code> 仅用于界面展示。
-          </div>
 
           <div class="new-round" style="margin-top:10px">
-            <label class="field"><span>round_id（稳定标识：字母/数字/中文/_-，≤64）</span><input id="rd-new-id" placeholder="例如 月行水上-2026" /></label>
-            <label class="field"><span>title（展示名，可留空＝同 round_id）</span><input id="rd-new-title" placeholder="例如 月行水上" /></label>
-            <label class="field"><span>copy_from（复制其商品/阶段，可选）</span><select id="rd-new-copy"><option value="">（不复制）</option></select></label>
+            <label class="field"><span>轮次编号</span><input id="rd-new-id" placeholder="例如 新团-2026" /></label>
+            <label class="field"><span>轮次名称</span><input id="rd-new-title" placeholder="留空使用编号" /></label>
+            <label class="field"><span>复制已有轮次</span><select id="rd-new-copy"><option value="">不复制</option></select></label>
             <button id="rd-new-btn" class="primary">新建轮次</button>
           </div>
 
-          <div class="hint" style="margin-top:10px">激活模式：<b>continue</b>＝仅切换（无既有状态时等价 fresh）；<b>fresh</b>＝切换并清空内存排位；<b>replay</b>＝切换并自动计算重放。切换与重放互不绑定。</div>
 
           <div id="rounds-list" class="round-list" style="margin-top:8px"></div>
           <div id="rounds-empty" class="empty">尚未加载轮次</div>
@@ -98,18 +91,18 @@
         <div class="panel-head">
           <span>当前激活轮次设置</span>
           <span class="spacer"></span>
-          <span id="rd-active-info" class="hint"></span>
+          <span id="rd-active-info" class="hidden"></span>
         </div>
         <div class="panel-body">
           <div class="split">
-            <label class="field"><span>round_id（稳定标识，只读）</span><input id="rd-id" readonly /></label>
-            <label class="field"><span>title（展示名）</span><input id="rd-title" /></label>
-            <label class="field"><span>group_id</span><input id="rd-group" /></label>
+            <label class="field hidden"><span>轮次编号</span><input id="rd-id" readonly /></label>
+            <label class="field"><span>轮次名称</span><input id="rd-title" /></label>
+            <label class="field"><span>群号</span><input id="rd-group" /></label>
           </div>
-          <label class="field"><span>priority_users（预存用户，逗号分隔）</span><input id="rd-priority" /></label>
+          <label class="field"><span>预存成员</span><input id="rd-priority" /></label>
           <div class="split">
-            <label class="field"><span>priority_window.start（本地时间）</span><input id="rd-start" type="datetime-local" /></label>
-            <label class="field"><span>priority_window.end（独占，本地时间）</span><input id="rd-end" type="datetime-local" /></label>
+            <label class="field"><span>优先开始</span><input id="rd-start" type="datetime-local" /></label>
+            <label class="field"><span>优先结束</span><input id="rd-end" type="datetime-local" /></label>
           </div>
           <div class="hint" id="rd-window-ms"></div>
         </div>
@@ -117,12 +110,12 @@
 
       <section class="panel admin-section" id="sec-phases" style="margin-top:12px">
         <div class="panel-head">
-          <span>阶段时间窗（round.phases）</span>
+          <span>阶段管理</span>
           <span class="spacer"></span>
           <button id="phase-add" class="small">添加阶段</button>
         </div>
         <div class="panel-body">
-          <div class="hint">字段 phase / start_ms / end_ms；phase ∈ Phase0、PhaseI、PhaseII、PhaseIII、Settling、Locked；半开区间，空列表 = 不限制。日期旁显示相对日（周几 + 今天/明天/后天/X 天前/后）。</div>
+          <div class="hint">按本地时间设置阶段；留空不限制。</div>
           <div id="phases" style="margin-top:8px"></div>
         </div>
       </section>
@@ -136,11 +129,6 @@
           <button id="item-add" class="small">添加商品</button>
         </div>
         <div class="panel-body">
-          <div class="hint">
-            价格以「分」为单位。变体显示 <b>原价 A ± 调价 B = 最终价 C</b>：改 A 或 B 联动 C，改 C 联动 B，<b>A 永不联动</b>；
-            <span class="price-pos">+ 为红</span>、<span class="price-neg">- 为蓝</span>。
-            <code>class</code>（A/B）由「种类 + 是否有变体」自动推导（有变体⇒A，无变体⇒B），只读显示。
-          </div>
           <div id="kind-tabs" class="kind-tabs" style="margin-top:8px"></div>
           <div id="items" class="cat-list"></div>
           <div id="item-add-end" class="dashed add-end" role="button" tabindex="0">＋ 添加商品（选择种类后添加）</div>

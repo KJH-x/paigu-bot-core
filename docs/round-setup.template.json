@@ -1,0 +1,76 @@
+{
+  "title": "示例轮次",
+  "group_id": "123456789",
+  "category": "normal",
+  "dry_run": false,
+  "priority_users": ["user_a", "user_b"],
+  "priority_window": { "start_ms": 1788192000000, "end_ms": 1791475140000 },
+  "phases": [
+    { "phase": "PhaseIII", "start_ms": 1788192000000, "end_ms": 1791388740000 }
+  ],
+  "items": [
+    {
+      "item_id": "pass_sp",
+      "name": "通行认证SP-月行水上",
+      "kind": "拼团",
+      "class": "A",
+      "aliases": ["通行证", "通行认证SP"],
+      "unit_price_cents": 5000,
+      "max_quantity": null,
+      "variants": [
+        {
+          "variant_id": "v_jcl",
+          "name": "结城理",
+          "unit_price_cents": 5000,
+          "adjust_cents": -500,
+          "capacity": null,
+          "aliases": []
+        },
+        {
+          "variant_id": "v_hlw",
+          "name": "虎狼丸",
+          "unit_price_cents": 2500,
+          "adjust_cents": 0,
+          "capacity": null,
+          "aliases": []
+        }
+      ]
+    },
+    {
+      "item_id": "item_1",
+      "name": "纪念徽章",
+      "kind": "单领",
+      "aliases": [],
+      "unit_price_cents": 1800,
+      "max_quantity": 2,
+      "variants": []
+    },
+    {
+      "item_id": "item_3",
+      "name": "纪念整盒",
+      "kind": "整盒",
+      "aliases": ["box整盒"],
+      "unit_price_cents": 8800,
+      "max_quantity": null,
+      "variants": []
+    },
+    {
+      "item_id": "gift_card",
+      "name": "特典卡组-校园凭证",
+      "kind": "特典",
+      "aliases": ["特典卡组", "特典"],
+      "unit_price_cents": 1200,
+      "max_quantity": null,
+      "variants": [
+        {
+          "variant_id": "v_jcl",
+          "name": "结城理",
+          "unit_price_cents": 1200,
+          "adjust_cents": -200,
+          "capacity": null,
+          "aliases": []
+        }
+      ]
+    }
+  ]
+}

@@ -7,8 +7,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::ApiState;
+use crate::round::{PhaseWindow, RoundCategory};
 use crate::settings::rounds;
-use crate::settings::RoundSettings;
+use crate::settings::{ItemConfig, PriorityWindow, RoundSettings};
 
 use super::{replay, ServiceError};
 
@@ -49,6 +50,9 @@ pub struct CreateRoundBody {
     pub title: Option<String>,
     #[serde(default)]
     pub copy_from: Option<String>,
+    /// 轮次类别（缺省沿用 `copy_from` 或 `normal`）。
+    #[serde(default)]
+    pub category: Option<RoundCategory>,
 }
 
 /// `POST /api/rounds`：新建轮次（`copy_from` 存在则复制其商品/阶段）。
@@ -86,6 +90,7 @@ pub async fn create_round(state: &ApiState, body: CreateRoundBody) -> Result<Val
             priority_window: None,
             phases: Vec::new(),
             items: Vec::new(),
+            category: RoundCategory::Normal,
         },
     };
     if let Some(title) = body
@@ -95,6 +100,20 @@ pub async fn create_round(state: &ApiState, body: CreateRoundBody) -> Result<Val
         .filter(|s| !s.is_empty())
     {
         round.title = title.to_string();
+    }
+    if let Some(category) = body.category {
+        round.category = category;
+    }
+    if let Some(issue) = category_issues(&round, cfg.gateway.test_group_id.as_deref())
+        .into_iter()
+        .find(|issue| issue["level"] == "error")
+    {
+        return Err(ServiceError::Unprocessable(
+            issue["message"]
+                .as_str()
+                .unwrap_or("轮次类别与群绑定不一致")
+                .to_string(),
+        ));
     }
     if !cfg
         .gateway
@@ -181,6 +200,177 @@ pub async fn activate_round(
     }))
 }
 
+/// `POST /api/rounds/:id/setup` 请求体：`RoundSettings` 形态（缺省字段保留既有值，
+/// 列表字段提供即整体替换）+ 可选 `dry_run`（仅校验不落盘）。
+#[derive(Deserialize, Default)]
+pub struct SetupBody {
+    /// 若提供须与路径 `:id` 一致。
+    #[serde(default)]
+    pub round_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub priority_users: Option<Vec<String>>,
+    #[serde(default)]
+    pub priority_window: Option<PriorityWindow>,
+    #[serde(default)]
+    pub phases: Option<Vec<PhaseWindow>>,
+    #[serde(default)]
+    pub items: Option<Vec<ItemConfig>>,
+    /// 轮次类别（缺省保留现值）。
+    #[serde(default)]
+    pub category: Option<RoundCategory>,
+    /// 仅校验并返回 `issues`，不写盘（默认 false）。
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `POST /api/rounds/:id/setup`：**开团前填写**（Phase 0 档案）。
+///
+/// 请求体为 `RoundSettings` 形态（`title`/`group_id`/`priority_users`/`priority_window`/
+/// `phases`/`items`；缺省字段保留既有值，列表字段提供即整体替换）：写入
+/// `data/rounds/<id>.json`；若该轮次为**激活轮次**，同步热载到运行配置
+/// （`config/app.json` 的 `round`，写入前后均落盘轮次文件）。
+/// `dry_run=true` 时只校验并返回 `issues`。返回
+/// `{ok,dry_run,written,applied_to_active,revision?,issues,round?}`（`ok` = 无 error 级 issue）。
+pub async fn setup_round(
+    state: &ApiState,
+    id: &str,
+    body: SetupBody,
+) -> Result<Value, ServiceError> {
+    let id = id.trim().to_string();
+    if !rounds::is_valid_round_id(&id) {
+        return Err(ServiceError::BadRequest(
+            "round_id 非法（非空、≤64 且仅允许字母/数字/中文/_-）".to_string(),
+        ));
+    }
+    if let Some(body_id) = clean_opt(body.round_id.as_deref()) {
+        if body_id != id {
+            return Err(ServiceError::BadRequest(format!(
+                "请求体 round_id（{body_id}）与路径（{id}）不一致"
+            )));
+        }
+    }
+
+    let cfg = state.cfg.get().await;
+    let active = cfg
+        .active_round_id
+        .clone()
+        .unwrap_or_else(|| cfg.round.round_id.clone());
+    let is_active = id == active || id == cfg.round.round_id;
+
+    let base = rounds::read_round(&id).unwrap_or_else(|| {
+        if id == cfg.round.round_id {
+            cfg.round.clone()
+        } else {
+            RoundSettings {
+                round_id: id.clone(),
+                title: id.clone(),
+                group_id: cfg.round.group_id.clone(),
+                priority_users: Vec::new(),
+                priority_window: None,
+                phases: Vec::new(),
+                items: Vec::new(),
+                category: RoundCategory::Normal,
+            }
+        }
+    });
+
+    let round = merge_setup(&id, base, &body);
+
+    let mut issues = check_issues(&round);
+    if !cfg
+        .gateway
+        .whitelist_groups
+        .iter()
+        .any(|group| group == &round.group_id)
+    {
+        issues.push(issue(
+            "error",
+            "group_not_whitelisted",
+            format!("轮次群号 {} 不在网关群白名单中", round.group_id),
+            "round.group_id",
+        ));
+    }
+    issues.extend(category_issues(
+        &round,
+        cfg.gateway.test_group_id.as_deref(),
+    ));
+    let ok = !issues.iter().any(|i| i["level"] == "error");
+
+    if body.dry_run {
+        return Ok(json!({
+            "ok": ok,
+            "round_id": id,
+            "dry_run": true,
+            "written": false,
+            "applied_to_active": false,
+            "issues": issues,
+        }));
+    }
+
+    if is_active && crate::services::settlement::round_locked(&id).unwrap_or(false) {
+        return Err(ServiceError::Locked(
+            "轮次已锁定，不能修改开团档案".to_string(),
+        ));
+    }
+
+    rounds::write_round(&round).map_err(|e| ServiceError::Internal(e.into()))?;
+
+    let mut revision = cfg.revision;
+    let mut applied_to_active = false;
+    if is_active {
+        // 同步热载：`ConfigStore::put` 会一并落盘 config 与轮次文件并递增 revision。
+        let mut next = cfg.clone();
+        next.round = round.clone();
+        match state.cfg.put(next, cfg.revision).await {
+            Ok(rev) => {
+                revision = rev;
+                applied_to_active = true;
+            }
+            Err(crate::settings::ConfigError::StaleRevision { actual, .. }) => {
+                return Err(ServiceError::StaleRevision(actual));
+            }
+            Err(e) => return Err(ServiceError::Internal(e.into())),
+        }
+    }
+
+    Ok(json!({
+        "ok": ok,
+        "round_id": id,
+        "dry_run": false,
+        "written": true,
+        "applied_to_active": applied_to_active,
+        "revision": revision,
+        "issues": issues,
+        "round": round_summary(&round, is_active, None),
+    }))
+}
+
+/// 合并 POST 体：`title`/`group_id` 缺省保留现值；`priority_users`/`phases`/`items`
+/// 提供即整体替换、缺省保留；`priority_window` 提供即替换、缺省保留。`round_id` 以路径为准。
+fn merge_setup(id: &str, base: RoundSettings, body: &SetupBody) -> RoundSettings {
+    RoundSettings {
+        round_id: id.to_string(),
+        title: clean_opt(body.title.as_deref()).unwrap_or(base.title),
+        group_id: clean_opt(body.group_id.as_deref()).unwrap_or(base.group_id),
+        priority_users: body.priority_users.clone().unwrap_or(base.priority_users),
+        priority_window: body.priority_window.clone().or(base.priority_window),
+        phases: body.phases.clone().unwrap_or(base.phases),
+        items: body.items.clone().unwrap_or(base.items),
+        category: body.category.unwrap_or(base.category),
+    }
+}
+
+fn clean_opt(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// `POST /api/rounds/:id/check`：轮次结构校验。
 pub async fn check_round(state: &ApiState, id: &str) -> Result<Value, ServiceError> {
     let round = rounds::read_round(id.trim())
@@ -200,6 +390,10 @@ pub async fn check_round(state: &ApiState, id: &str) -> Result<Value, ServiceErr
             "round.group_id",
         ));
     }
+    issues.extend(category_issues(
+        &round,
+        cfg.gateway.test_group_id.as_deref(),
+    ));
     let ok = !issues.iter().any(|i| i["level"] == "error");
     Ok(json!({ "ok": ok, "issues": issues }))
 }
@@ -230,6 +424,7 @@ fn round_summary(round: &RoundSettings, active: bool, modified: Option<SystemTim
         "round_id": round.round_id,
         "title": round.title,
         "group_id": round.group_id,
+        "category": round.category.as_str(),
         "items": round.items.len(),
         "variants": variants,
         "active": active,
@@ -239,6 +434,42 @@ fn round_summary(round: &RoundSettings, active: bool, modified: Option<SystemTim
 
 fn issue(level: &str, code: &str, message: String, where_: &str) -> Value {
     json!({ "level": level, "code": code, "message": message, "where": where_ })
+}
+
+/// 轮次类别与群绑定的校验：**测试轮只绑定测试群，正常轮只绑定正常群**。
+fn category_issues(round: &RoundSettings, test_group_id: Option<&str>) -> Vec<Value> {
+    let mut issues = Vec::new();
+    match round.category {
+        RoundCategory::Test => match test_group_id {
+            Some(test_group) if test_group == round.group_id => {}
+            Some(test_group) => issues.push(issue(
+                "error",
+                "test_round_group_mismatch",
+                format!(
+                    "测试轮群号 {} 与测试群 {} 不一致",
+                    round.group_id, test_group
+                ),
+                "round.category",
+            )),
+            None => issues.push(issue(
+                "error",
+                "test_round_group_mismatch",
+                "未配置 gateway.test_group_id，无法作为测试轮".to_string(),
+                "round.category",
+            )),
+        },
+        RoundCategory::Normal => {
+            if test_group_id == Some(round.group_id.as_str()) {
+                issues.push(issue(
+                    "error",
+                    "normal_round_uses_test_group",
+                    format!("正常轮不能绑定测试群 {}", round.group_id),
+                    "round.category",
+                ));
+            }
+        }
+    }
+    issues
 }
 
 /// 两个 owner 集合是否指向**不同商品**（用于跨商品冲突判定）。
@@ -515,6 +746,7 @@ mod tests {
                     vec![variant("v1", 0), variant("v1", 0)],
                 ),
             ],
+            category: RoundCategory::Normal,
         };
         let issues = check_issues(&round);
         let codes: Vec<&str> = issues.iter().filter_map(|i| i["code"].as_str()).collect();
@@ -550,6 +782,7 @@ mod tests {
                 item("a", "拼团", vec!["甲"], vec![variant("v1", 100)]),
                 item("b", "单领", vec!["乙"], vec![]),
             ],
+            category: RoundCategory::Normal,
         };
         // 让 b 的别名与 a 的商品名冲突。
         let mut round = round;
@@ -575,8 +808,121 @@ mod tests {
                 item("a", "拼团", vec!["甲"], vec![variant("v1", 100)]),
                 item("b", "单领", vec!["乙"], vec![]),
             ],
+            category: RoundCategory::Normal,
         };
         let issues = check_issues(&round);
         assert!(!issues.iter().any(|i| i["level"] == "error"));
+    }
+
+    #[test]
+    fn setup_merge_keeps_absent_and_replaces_provided() {
+        let base = RoundSettings {
+            round_id: "r0".to_string(),
+            title: "旧标题".to_string(),
+            group_id: "123456789".to_string(),
+            priority_users: vec!["u1".to_string()],
+            priority_window: Some(PriorityWindow {
+                start_ms: 1,
+                end_ms: 2,
+            }),
+            phases: vec![],
+            items: vec![item("a", "单领", vec![], vec![])],
+            category: RoundCategory::Normal,
+        };
+
+        // 全缺省：仅 `round_id` 归一为路径 id，其余保留。
+        let same = merge_setup("r1", base.clone(), &SetupBody::default());
+        assert_eq!(same.round_id, "r1");
+        assert_eq!(same.title, "旧标题");
+        assert_eq!(same.group_id, "123456789");
+        assert_eq!(same.priority_users, vec!["u1".to_string()]);
+        assert!(same.priority_window.is_some());
+        assert_eq!(same.items.len(), 1);
+
+        // 提供即整体替换（列表可清空）。
+        let body = SetupBody {
+            title: Some(" 新标题 ".to_string()),
+            priority_users: Some(vec![]),
+            items: Some(vec![item(
+                "b",
+                "拼团",
+                vec!["甲"],
+                vec![variant("v1", 100)],
+            )]),
+            ..SetupBody::default()
+        };
+        let changed = merge_setup("r1", base, &body);
+        assert_eq!(changed.title, "新标题");
+        assert!(changed.priority_users.is_empty());
+        assert_eq!(changed.items.len(), 1);
+        assert_eq!(changed.items[0].item_id, "b");
+        // 未提供字段保留。
+        assert_eq!(changed.group_id, "123456789");
+    }
+
+    #[test]
+    fn clean_opt_trims_and_drops_blank() {
+        assert_eq!(clean_opt(None::<&str>), None);
+        assert_eq!(clean_opt(Some("   ")), None);
+        assert_eq!(clean_opt(Some(" 甲 ")), Some("甲".to_string()));
+    }
+
+    #[test]
+    fn category_binding_checks_test_and_normal() {
+        let base = RoundSettings {
+            round_id: "t".to_string(),
+            title: "t".to_string(),
+            group_id: "111".to_string(),
+            priority_users: vec![],
+            priority_window: None,
+            phases: vec![],
+            items: vec![],
+            category: RoundCategory::Test,
+        };
+        // 测试轮 + 匹配测试群 → 无 issue。
+        assert!(category_issues(&base, Some("111")).is_empty());
+        // 测试轮 + 不匹配 → error。
+        assert!(category_issues(&base, Some("222"))
+            .iter()
+            .any(|i| i["code"] == "test_round_group_mismatch"));
+        // 测试轮 + 未配置测试群 → error。
+        assert!(category_issues(&base, None)
+            .iter()
+            .any(|i| i["level"] == "error"));
+
+        let normal = RoundSettings {
+            category: RoundCategory::Normal,
+            ..base
+        };
+        // 正常轮 + 正常群 → 无 issue。
+        assert!(category_issues(&normal, Some("222")).is_empty());
+        // 正常轮 + 测试群 → error。
+        assert!(category_issues(&normal, Some("111"))
+            .iter()
+            .any(|i| i["code"] == "normal_round_uses_test_group"));
+    }
+
+    #[test]
+    fn merge_setup_carries_category() {
+        let base = RoundSettings {
+            round_id: "r0".to_string(),
+            title: "t".to_string(),
+            group_id: "111".to_string(),
+            priority_users: vec![],
+            priority_window: None,
+            phases: vec![],
+            items: vec![],
+            category: RoundCategory::Test,
+        };
+        let same = merge_setup("r1", base.clone(), &SetupBody::default());
+        assert_eq!(same.category, RoundCategory::Test);
+        let body = SetupBody {
+            category: Some(RoundCategory::Normal),
+            ..SetupBody::default()
+        };
+        assert_eq!(
+            merge_setup("r1", base, &body).category,
+            RoundCategory::Normal
+        );
     }
 }

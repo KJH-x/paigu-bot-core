@@ -67,7 +67,9 @@
   function setVal(id, v) { var el = $(id); if (el) el.value = v == null ? '' : v; }
 
   function intOr0(v) { var n = parseInt(v, 10); return isNaN(n) ? 0 : n; }
-  function adjStr(v) { return v > 0 ? '+' + v : String(v); }
+  function money(v) { return (intOr0(v) / 100).toFixed(2); }
+  function cents(v) { var n = Number(v); return Number.isFinite(n) ? Math.round(n * 100) : 0; }
+  function adjStr(v) { return (v > 0 ? '+' : '') + money(v); }
 
   function relDay(ms) {
     var shell = window.PAIGU_SHELL;
@@ -200,8 +202,8 @@
       var vi = parseInt(host.getAttribute('data-vi'), 10);
       var v = it.variants[vi];
       if (!v) return [];
-      if (f === 'name') return v.name ? [v.name] : [];
-      return v.aliases;
+      if (f === 'name') return [];
+      return v.aliases.filter(function (token) { return token !== v.name; });
     }
     return [];
   }
@@ -318,13 +320,24 @@
       host.appendChild(e);
     }
     scheduleConflictCheck(false);
+    updateAdjustSummaries();
+  }
+
+  function updateAdjustSummaries() {
+    var summaries = document.querySelectorAll('[data-adjust-summary]');
+    for (var i = 0; i < summaries.length; i++) {
+      var item = state.items[+summaries[i].getAttribute('data-adjust-summary')];
+      var total = (item.variants || []).reduce(function (sum, variant) { return sum + intOr0(variant.adjust_cents); }, 0);
+      summaries[i].textContent = '调价合计 ' + money(total) + ' 元' + (total ? ' · 合计须为 0' : ' · 已平衡');
+      summaries[i].classList.toggle('invalid', total !== 0);
+    }
   }
 
   function renderRows(host, list, isSingle) {
     var head = document.createElement('div');
     head.className = 'single-row single-head';
-    head.innerHTML = '<span></span><span>商品名</span><span>原价（分）</span>' +
-      '<span>' + (isSingle ? '上限' : '数量') + '</span><span>别名（锁定后不从商品名更新）</span><span></span>';
+    head.innerHTML = '<span></span><span>商品名</span><span>原价（元）</span>' +
+      '<span>' + (isSingle ? '可排数量' : '数量') + '</span><span>别名</span><span></span>';
     host.appendChild(head);
 
     list.forEach(function (entry, k) {
@@ -339,12 +352,12 @@
     row.setAttribute('data-idx', String(idx));
     var maxq = isSingle
       ? '<input data-scope="item" data-f="max_quantity" data-idx="' + idx + '" type="number" min="0" value="' +
-        (it.max_quantity == null ? '' : esc(it.max_quantity)) + '" placeholder="上限" />'
+        (it.max_quantity == null ? '' : esc(it.max_quantity)) + '" placeholder="不限" />'
       : '<span class="hint" title="整盒无单领上限">—</span>';
     row.innerHTML =
       '<span class="rownum">#' + rownum + '</span>' +
       '<input data-scope="item" data-f="name" data-idx="' + idx + '" value="' + esc(it.name) + '" placeholder="商品名（填完自动产生下一行）" title="item_id: ' + esc(it.item_id) + '" />' +
-      '<input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="1" value="' + esc(it.unit_price_cents) + '" placeholder="原价(分)" />' +
+      '<input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="0.01" value="' + money(it.unit_price_cents) + '" placeholder="原价（元）" />' +
       '<span class="maxq-cell">' + maxq + '</span>' +
       aliasWrapHtml('item', idx, null, it.aliases, it.__locked) +
       '<span class="row-actions"><button type="button" class="danger small" data-act="del-item" data-idx="' + idx + '">删除</button></span>';
@@ -382,9 +395,8 @@
     var grid = document.createElement('div');
     grid.className = 'cat-grid';
     grid.innerHTML =
-      '<label class="field"><span>item_id</span><input data-scope="item" data-f="item_id" data-idx="' + idx + '" value="' + esc(it.item_id) + '" /></label>' +
-      '<label class="field"><span>商品名 name</span><input data-scope="item" data-f="name" data-idx="' + idx + '" value="' + esc(it.name) + '" placeholder="商品名" /></label>' +
-      '<label class="field"><span>原价 unit_price_cents（分）</span><input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="1" value="' + esc(it.unit_price_cents) + '" /></label>' +
+      '<label class="field"><span>商品名</span><input data-scope="item" data-f="name" data-idx="' + idx + '" value="' + esc(it.name) + '" placeholder="商品名" /></label>' +
+      '<label class="field"><span>原价（元）</span><input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="0.01" value="' + money(it.unit_price_cents) + '" /></label>' +
       (it.kind === 'single'
         ? '<label class="field"><span>单领上限 max_quantity</span><input data-scope="item" data-f="max_quantity" data-idx="' + idx + '" type="number" min="0" value="' + (it.max_quantity == null ? '' : esc(it.max_quantity)) + '" /></label>'
         : '');
@@ -392,7 +404,7 @@
 
     var aliasRow = document.createElement('div');
     aliasRow.style.marginTop = '8px';
-    aliasRow.innerHTML = '<div class="hint" style="margin-bottom:3px">商品别名（LLM 建议针对此层；锁定后不参与）</div>' +
+    aliasRow.innerHTML = '<div class="hint" style="margin-bottom:3px">商品别名</div>' +
       aliasWrapHtml('item', idx, null, it.aliases, it.__locked);
     card.appendChild(aliasRow);
 
@@ -406,18 +418,18 @@
         return '<tr data-vi="' + vi + '">' +
           '<td class="vid" title="自动生成，不可编辑">' + esc(v.variant_id || '(空)') + '</td>' +
           '<td class="vname">' + cfNameHtml('variant', idx, vi, 'name', v.name, '', ' placeholder="变体名"') + '</td>' +
-          '<td class="pcell"><input class="variant-price-base" data-scope="variant" data-f="unit_price_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="number" step="1" value="' + esc(v.unit_price_cents) + '" title="原价 A" /></td>' +
-          '<td class="pcell"><input class="variant-price-adjust' + clsB + '" data-scope="variant" data-f="adjust_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="numeric" value="' + esc(adjStr(v.adjust_cents)) + '" title="调价 B" /></td>' +
-          '<td class="pcell"><input class="variant-price-final' + clsC + '" data-scope="variant" data-f="final" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="numeric" value="' + esc(fin) + '" title="最终价 C = A + B" /></td>' +
-          '<td class="pcell"><input data-scope="variant" data-f="capacity" data-idx="' + idx + '" data-vi="' + vi + '" type="number" min="0" value="' + (v.capacity == null ? '' : esc(v.capacity)) + '" placeholder="上限" /></td>' +
+          '<td class="pcell"><input class="variant-price-base" data-scope="variant" data-f="unit_price_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="number" step="0.01" value="' + money(v.unit_price_cents) + '" title="原价（元）" /></td>' +
+          '<td class="pcell"><input class="variant-price-adjust' + clsB + '" data-scope="variant" data-f="adjust_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + esc(adjStr(v.adjust_cents)) + '" title="调价（元）" /></td>' +
+          '<td class="pcell"><input class="variant-price-final' + clsC + '" data-scope="variant" data-f="final" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + money(fin) + '" title="最终价（元）" /></td>' +
+          '<td class="pcell"><input data-scope="variant" data-f="capacity" data-idx="' + idx + '" data-vi="' + vi + '" type="number" min="0" value="' + (v.capacity == null ? '' : esc(v.capacity)) + '" placeholder="不限" /></td>' +
           '<td>' + aliasWrapHtml('variant', idx, vi, v.aliases, v.__locked) + '</td>' +
           '<td><button type="button" class="danger small" data-act="del-variant" data-idx="' + idx + '" data-vi="' + vi + '">×</button></td>' +
           '</tr>';
       }).join('');
       wrap.innerHTML = '<table class="vtable"><thead><tr>' +
-        '<th>变体 ID（只读·自动）</th><th>名称</th><th>原价 A</th><th>调价 B</th><th>最终价 C</th><th>上限</th><th>别名</th><th>操作</th>' +
+        '<th>编号</th><th>名称</th><th>原价（元）</th><th>调价（元）</th><th>最终价（元）</th><th>可排数量</th><th>别名</th><th>操作</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table>' +
-        '<div class="hint">A/B/C 联动：改 A 或 B ⇒ C 变；改 C ⇒ B 变；A 永不联动。<span class="price-pos">+ 红</span> / <span class="price-neg">- 蓝</span>。数量限制按整盒/整体处理，故已移除 box_size 与 pieces。</div>';
+        '<div class="price-summary" data-adjust-summary="' + idx + '"></div>';
       card.appendChild(wrap);
     } else {
       var hint = document.createElement('div');
@@ -552,6 +564,13 @@
     if (!it) return;
     var f = t.dataset.f;
 
+    if (f === 'unit_price_cents' || f === 'adjust_cents' || f === 'final') {
+      var priceText = String(t.value).trim();
+      var validPrice = priceText === '' || /^[+-]?\d+(?:\.\d{0,2})?$/.test(priceText);
+      t.setCustomValidity(validPrice ? '' : '金额最多保留两位小数');
+      if (!validPrice) return;
+    }
+
     if (t.dataset.scope === 'item') {
       if (f === 'name') {
         it.name = t.value;
@@ -561,7 +580,7 @@
       } else if (f === 'item_id') {
         it.item_id = t.value;
       } else if (f === 'unit_price_cents') {
-        it.unit_price_cents = intOr0(t.value);
+        it.unit_price_cents = cents(t.value);
       } else if (f === 'max_quantity') {
         it.max_quantity = t.value.trim() === '' ? null : intOr0(t.value);
       } else if (f === 'aliases') {
@@ -579,10 +598,10 @@
         autoAlias('variant', idx, vi, t.value);
         scheduleConflictCheck(true);
       } else if (f === 'unit_price_cents') {
-        v.unit_price_cents = intOr0(t.value);
+        v.unit_price_cents = cents(t.value);
         syncFinal(t);
       } else if (f === 'adjust_cents') {
-        v.adjust_cents = intOr0(t.value);
+        v.adjust_cents = cents(t.value);
         paintPrice(t);
         syncFinal(t);
       } else if (f === 'final') {
@@ -590,7 +609,7 @@
           paintPrice(t);
           return;
         }
-        var c = intOr0(t.value);
+        var c = cents(t.value);
         v.adjust_cents = c - intOr0(v.unit_price_cents);
         var adj = t.closest('tr').querySelector('.variant-price-adjust');
         if (adj) { adj.value = adjStr(v.adjust_cents); paintPrice(adj); }
@@ -604,6 +623,7 @@
         scheduleConflictCheck(true);
       }
     }
+    updateAdjustSummaries();
   }
 
   function onChange(ev) {
@@ -678,8 +698,8 @@
     var adj = tr.querySelector('.variant-price-adjust');
     var fin = tr.querySelector('.variant-price-final');
     if (!fin) return;
-    var c = intOr0(base && base.value) + intOr0(adj && adj.value);
-    fin.value = String(c);
+    var c = cents(base && base.value) + cents(adj && adj.value);
+    fin.value = money(c);
     paintPrice(fin);
   }
 
@@ -767,7 +787,7 @@
     state.llmBusy = true;
     $('alias-llm-btn').disabled = true;
     setLlmStatus('等待回复…', 'busy');
-    P.post('/api/items/suggest-aliases', { items: entries, mode: 'aliases' }).then(function (res) {
+    P.post('/api/items/suggest-aliases', { items: entries, mode: 'aliases' }, { timeout: 60000 }).then(function (res) {
       var sugg = (res && res.suggestions) || [];
       var filled = 0;
       var best = 0;
@@ -838,9 +858,8 @@
     card.className = 'round-card' + (active ? ' active' : '');
     var updated = r.updated_at ? String(r.updated_at).replace('T', ' ').slice(0, 19) : '—';
     var actions =
-      '<button type="button" class="small" data-act="activate" data-mode="continue" data-id="' + esc(r.round_id) + '">激活(continue)</button>' +
-      '<button type="button" class="small" data-act="activate" data-mode="fresh" data-id="' + esc(r.round_id) + '">激活并清空(fresh)</button>' +
-      '<button type="button" class="small" data-act="activate" data-mode="replay" data-id="' + esc(r.round_id) + '">激活并重放(replay)</button>' +
+      '<button type="button" class="small" data-act="activate" data-mode="continue" data-id="' + esc(r.round_id) + '">激活</button>' +
+      '<button type="button" class="small" data-act="activate" data-mode="replay" data-id="' + esc(r.round_id) + '">激活并重算</button>' +
       '<button type="button" class="small" data-act="check" data-id="' + esc(r.round_id) + '">校验</button>' +
       '<button type="button" class="danger small" data-act="del-round" data-id="' + esc(r.round_id) + '"' + (active ? ' disabled title="激活中不可删除"' : '') + '>删除</button>';
     card.innerHTML =
@@ -969,8 +988,7 @@
     var e = M.localInputToMs(val('rd-end'));
     var el = $('rd-window-ms');
     if (!el) return;
-    el.textContent = 'start_ms=' + (s == null ? '—' : s) + '（' + (s == null ? '—' : relDay(s)) + '） · ' +
-      'end_ms=' + (e == null ? '—' : e) + '（' + (e == null ? '—' : relDay(e)) + '）';
+    el.textContent = (s == null ? '开始未限制' : relDay(s)) + ' → ' + (e == null ? '结束未限制' : relDay(e));
   }
 
   function applyToForm(cfg) {
@@ -1062,8 +1080,14 @@
 
   function save() {
     if (!state.config) { banner('尚未载入配置，无法保存。', true); return; }
+    var priceInputs = document.querySelectorAll('#items input[data-f="unit_price_cents"], #items input[data-f="adjust_cents"], #items input[data-f="final"]');
+    for (var p = 0; p < priceInputs.length; p++) if (!priceInputs[p].reportValidity()) return;
     var partialError = partialItemError();
     if (partialError) { banner(partialError, true); return; }
+    var unbalanced = state.items.find(function (item) {
+      return (item.variants || []).reduce(function (total, variant) { return total + intOr0(variant.adjust_cents); }, 0) !== 0;
+    });
+    if (unbalanced) { banner('「' + unbalanced.name + '」调价合计须为 0，请先平衡调价。', true); return; }
     var hasConflict = paintConflicts();
     var cfg = collectConfig();
     $('save').disabled = true;
@@ -1216,6 +1240,10 @@
   }
 
   function init() {
+    var roundBody = $('sec-rounds').querySelector('.panel-body');
+    roundBody.appendChild($('sec-round-basic'));
+    roundBody.appendChild($('sec-phases'));
+    $('rd-window-ms').classList.add('time-summary');
     bind();
     loadRounds();
     load().catch(function () {});

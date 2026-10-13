@@ -12,7 +12,7 @@
 | C2 重放+可改附加条件 | `ReplayEngine` 可重放事件；无「从消息日志重算」；无 overrides | 缺 `replay(messages, overrides)`；缺 override（优先队列/阶段/商品/折扣）；缺 diff | **缺口大** |
 | C3 解耦+接口映射表 | 模块已有，但无完整接口文档 | 缺 `docs/INTERFACES.md` | **中** |
 | C4 管理改数据+快照 | admin 仅改 config；无消息编辑；无快照导出 | 缺消息日志编辑（最高权限）；缺结构化快照包（config+日志+事件+结果+manifest） | **缺口大** |
-| C5 全真模拟 WS client | `web/sim` 走 `POST /api/sim/message`（**旁路**，非 WS） | 需改为**WS 客户端**，真实连 `ws://…:9801`，共用管道 | **缺口大** |
+| C5 全真模拟 WS client | 脚本 `scripts/sim-run/record.mjs` 为**真 WS 客户端**（连 `ws://…:9801` 发 OneBot 事件，共用管道）；模拟器页 `web/sim` 已移除，测试注入改走 HTTP（`/api/sim/message(s)`，**仅测试轮**、逐条） | 无需浏览器端旁路 | **已收口** |
 | C6 脚本倍率模拟 | 无 | 缺脚本按 `--speed` 倍率经 WS 发消息 | **缺** |
 | C7 录制+自动重放 | 无 | 缺 `record.jsonl` 录制与 `replay` 自动重放 | **缺** |
 | 阶段模型 Phase 0/I/II/III/结算/锁定 | `RoundStatus` 枚举存在，但**无时间窗与权限矩阵** | 缺 `RoundPhase` 时间窗 + 权限矩阵 + 越权 Reject | **缺口大** |

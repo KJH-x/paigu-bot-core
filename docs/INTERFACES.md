@@ -101,13 +101,14 @@
 | GET | `/api/messages?since=<seq>` | query `since` | `{messages,version}` | — | sim/display | `display_routes.rs:39,77` |
 | PUT/DELETE | `/api/messages/:record_id` | `record_revision` + 可编辑字段 | 单条消息 + 权威重算结果 | `409` 记录冲突/旧 seq 歧义；`423` 已锁定 | 消息编辑器 | `message_routes.rs` |
 | POST | `/api/messages/:record_id/reroute` | `{record_revision}` | 当前白名单重新路由 + 权威重算 | `409`/`423` | 消息编辑器 | `message_routes.rs` |
-| POST | `/api/sim/message` | `{user_id,nickname,text,offset_ms?,group_id?,is_admin?}` | `{outcome,board,version}` | —（业务态在 `outcome.status`） | `web/sim.js`（sim 页已改 **WS 客户端**；此 HTTP 路由保留给脚本/测试） | `sim_routes.rs:29,47` |
-| POST | `/api/sim/identity` | `{user_id,nickname,is_admin?,priority?}` | `{ok,identity,identities}` | — | `web/sim.js:209` | `sim_routes.rs:30,84` |
-| POST | `/api/sim/reset` | `{}` | `{ok,version}` | — | `web/sim.js:257` | `sim_routes.rs:31,97` |
+| POST | `/api/sim/message` | `{user_id\|id,text,timestamp,nickname?,is_admin?,message_id?,group_id?}` | `{outcome,board,version}` | `400 {error:"not_a_test_round"}`；缺字段/非测试群 → `outcome.status="Dropped"` | 脚本/测试（**仅测试轮**；模拟器页已移除） | `sim_routes.rs` |
+| POST | `/api/sim/messages` | 裸数组 或 `{messages:[…]}`（每项同上，`timestamp` 逐条出现） | `{ok,round_id,category,count,summary,results,board,version}` | `400 {error:"not_a_test_round"}`；逐条 `Dropped`（**不整批拒绝**） | 脚本/测试（**仅测试轮**） | `sim_routes.rs` |
+| POST | `/api/sim/identity` | `{user_id,nickname,is_admin?,priority?}` | `{ok,identity,identities}` | — | 脚本/测试 | `sim_routes.rs` |
+| POST | `/api/sim/reset` | `{}` | `{ok,version}` | — | 手动重置 | `sim_routes.rs` |
 | GET | `/api/members` | — | `{members,source:"seed"\|"example"\|"empty"}` | — | admin/sim | `member_routes.rs:51,55` |
 | POST | `/api/members/refresh` | `{}` | `{members,source:"gateway"}` | `502 {error}` | admin | `member_routes.rs:52,91` |
 | GET | `/api/replay`、`/api/replay/*` | 见 §8 | `ReplayResult` / diff | — | replay 页 | `src/api/replay_routes.rs`（**已实现**，Wave 1–4） |
-| GET | `/` `/admin` `/sim` `/replay` | — | 静态 HTML | 404 | 浏览器 | `api/mod.rs:72-75` |
+| GET | `/` `/admin` `/replay` | — | 静态 HTML | 404 | 浏览器 | `api/mod.rs` |
 | GET | `/web/*` + fallback | — | 静态文件 | 404 | 浏览器 | `api/mod.rs:76-77` |
 
 ### 2.3 前端接口（`web`，仅经 HTTP，不直读引擎）
@@ -119,8 +120,7 @@
 | `web/common.js` | `createBoardRenderer(host,{persistent})` | keyed diff 渲染器，复用 DOM、3s 高亮（replay 页 `persistent`） | `web/common.js`（`web/README.md:70`） |
 | `web/display.js` | 轮询循环 | `GET /api/config` → 每 `refresh_ms` `GET /api/display?since=<version>` | `web/display.js:290,337` |
 | `web/admin.js` | 配置读写 | `GET/PUT /api/config`、`POST /api/config/reload`、`GET /api/members`、`POST /api/members/refresh` | `web/admin.js:279-371` |
-| `web/sim.js` | 模拟器（**真 WS 客户端**，连同一 Gateway 发 OneBot 事件；Wave 1–4） | `GET /api/members` + WS `ws://…:9801`（HTTP `/api/sim/*` 保留） | `web/sim.js` |
-| `web/replay.js` | 重放步进 | **静态文件** `fetch('replay_view.json')`（不读 `/api/display`） | `web/replay.js:1-60`、`web/README.md:69` |
+| `web/replay.js` | 当前轮次复盘 | `GET /api/replay/view`；手动导入文件为可选来源 | `web/replay.js`、`src/llm/pipeline/replay_view.rs` |
 
 ---
 
@@ -372,6 +372,9 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 |---|---|
 | `POST /api/config/reply` | 热切换 gateway.reply_enabled（B-1，默认关闭） |
 | `POST /api/config/admin-commands` | 热切换 gateway.admin_commands_enabled（D-1） |
+| `GatewayConfig.accept_forged_messages` + `GatewayConfig.test_group_id` + `RoundSettings.category` | **伪造来源消息**（测试用，默认 false）：仅当 `accept_forged_messages=true` **且** 当前轮为**测试轮**（`category:"test"`）**且** 消息来自**测试群**（`gateway.test_group_id`）时，`Pipeline::handle`（**NC 入口**）才解包 `{"id":"<qq>","text":"<内容>","timestamp":<时间>}` 双层 JSON（`unwrap_forged_envelope`）；`process` 核心不再感知伪造（隔离只作用于来自 NC 的消息）。`timestamp` 支持整数毫秒 / 纯数字串 / RFC3339 / 本地 `YYYY-MM-DD HH:MM[:SS]`，缺省用外层时间；群/消息 id 沿用外层 |
+| `RoundSettings.category` | 轮次类别 `"test" \| "normal"`（默认 `normal`）：**测试轮只绑定测试群、正常轮只绑定正常群**（`test_round_group_mismatch` / `normal_round_uses_test_group`） |
+| `GatewayConfig.react_emoji_id` | 收到**已路由**消息后以 `set_msg_emoji_like` 回应（如 `76`=👍），**不发文本**（默认 None 关闭）；经 `Gateway::dispatch` 下发（该内部路径不受 `allowed_actions` 限制，由本配置显式授权） |
 | `Pipeline::run_admin_command` | /开团 /锁位 /结团 /状态 /导出；锁定后拒绝排/撤/改 |
 | `ParsedIntent::Modify` | 改单：撤销本人该商品既有认购 + 重新认购（cancel_for_modify） |
 
@@ -394,6 +397,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 |---|---|
 | `GET /api/rounds` | `{rounds:[{round_id,title,group_id,items,variants,active,updated_at}], active_round_id}`；按 mtime 降序 |
 | `POST /api/rounds` | body `{round_id, title?, copy_from?}`；`round_id` 非空、≤64、仅字母/数字/中文/`_`/`-`；`copy_from` 存在则复制其商品/阶段 |
+| `POST /api/rounds/:id/setup` | **开团前填写**（Phase 0 档案）：body = `RoundSettings` 形态（`title`/`group_id`/`priority_users`/`priority_window`/`phases`/`items`）**+ `dry_run?`**（默认 false，仅校验不落盘）。缺省字段保留既有值，列表字段提供即整体替换；body `round_id`（若提供）须与路径一致。写入 `data/rounds/<id>.json`；**若为激活轮次则同步热载运行配置**（锁定中拒绝，423）。返回 `{ok,dry_run,written,applied_to_active,revision?,issues,round?}`（`ok` = 无 error 级 issue）。模板见 [round-setup.template.json](./round-setup.template.json) |
 | `POST /api/rounds/:id/activate` | body `{mode?:"continue"\|"fresh"\|"replay"}`（**默认 continue**）；`continue` 仅切换激活（无既有状态时等价 `fresh`），`fresh` 重置流水线，`replay` 重置并用该轮消息重放；**切换与重放解耦**。返回 `{ok,active_round_id,mode,reset,replayed,version}` |
 | `POST /api/rounds/:id/check` | `{ok,issues:[{level,code,message,where}]}`；含 `duplicate_item_id`/`alias_conflict`/`name_conflict`/`category_variant_mismatch`/`class_derived_mismatch`（warn）等 |
 | `DELETE /api/rounds/:id` | `{ok,removed}`；激活中的轮次拒绝 |
@@ -422,3 +426,11 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `/round.html` | 轮次与商品管理页（`web/round.html` + `round.js`）：轮次管理、商品目录编辑器（4 种类、A±B=C、别名本地词切+LLM 建议+锁定+冲突校验、末尾虚线卡/缝隙「+」插入、单领多行、整盒独立种类）、消息日志折叠面板 |
 | `/settings.html` | 其余配置页（`web/settings.html` + `settings.js`）：gateway/llm/display/members(CN)/白名单等；**不进 Stepper** |
 | `/round`、`/settings` | `src/api/mod.rs` 已提供短路由；`.html` 地址继续由静态文件服务兼容 |
+
+## 8.8 当前激活轮次复盘（2026-10-13）
+
+历史步骤按**当前目录配置**解释已接受事件，不宣称还原各时刻的旧目录版本；末步采用当前实时快照，保证与实际排位一致。接口不从落盘原始消息重新启动处理管线，重启后能否看到历史取决于当前管线是否已恢复。
+
+`GET /api/replay/view` 是只读接口，返回 `{round_id,title,revision,version,items,messages,steps,board,who_whats,source:"active_round",message_count}`。每个步骤含 `{index,message_seq,board,who_whats}`，`board` 为该消息之后的完整 `AllocationSnapshot`。步骤使用当前管线已接受的领域事件前缀计算，不重新解析消息、不调用 LLM、不改配置/日志/实时排位；消息列表不包含 Drop。读取时轮次或配置发生变化返回错误，前端不混用跨轮次数据。
+
+复盘默认显示最新一步，并在工作流的轮次、配置版本、排位版本或消息数量变化时刷新。当前步成员汇总与所选步同步。接口失败/空轮次不回退占位示例；旧服务缺少该接口时，只读显示当前排位并明确提示逐步历史尚不可用。手动导入文件后停止自动跟随，点击“当前轮次 · 刷新”恢复。

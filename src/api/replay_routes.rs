@@ -14,10 +14,18 @@ use super::{ApiError, ApiState};
 pub fn routes() -> Router<Arc<ApiState>> {
     Router::new()
         .route("/api/replay", post(run_replay))
+        .route("/api/replay/view", get(replay_view))
         .route("/api/replay/diff", get(replay_diff))
         .route("/api/events", get(list_raw_events))
         .route("/api/snapshot/export", post(snapshot_export))
         .route("/api/snapshot/import", post(snapshot_import))
+}
+
+async fn replay_view(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
+    let value = replay::active_view(&state)
+        .await
+        .map_err(ServiceError::into_api)?;
+    Ok(Json(value))
 }
 
 async fn run_replay(

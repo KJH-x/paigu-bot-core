@@ -5,7 +5,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde_json::Value;
 
-use crate::services::rounds::{self, ActivateBody, CreateRoundBody};
+use crate::services::rounds::{self, ActivateBody, CreateRoundBody, SetupBody};
 use crate::services::ServiceError;
 
 use super::{ApiError, ApiState};
@@ -13,9 +13,21 @@ use super::{ApiError, ApiState};
 pub fn routes() -> Router<Arc<ApiState>> {
     Router::new()
         .route("/api/rounds", get(list_rounds).post(create_round))
+        .route("/api/rounds/:id/setup", post(setup_round))
         .route("/api/rounds/:id/activate", post(activate_round))
         .route("/api/rounds/:id/check", post(check_round))
         .route("/api/rounds/:id", delete(delete_round))
+}
+
+async fn setup_round(
+    State(state): State<Arc<ApiState>>,
+    Path(id): Path<String>,
+    Json(body): Json<SetupBody>,
+) -> Result<Json<Value>, ApiError> {
+    rounds::setup_round(&state, &id, body)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
 }
 
 async fn list_rounds(State(state): State<Arc<ApiState>>) -> Json<Value> {

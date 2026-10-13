@@ -48,7 +48,7 @@
     setVal('llm-keyenv', llm.api_key_env);
     setVal('llm-timeout', llm.timeout_secs);
     setVal('llm-maxtokens', llm.max_tokens);
-    setVal('llm-temp', llm.temperature);
+    setVal('llm-temp', llm.temperature == null ? '' : Number(Number(llm.temperature).toFixed(2)));
     setVal('llm-prompt', llm.prompt_template);
 
     var dp = cfg.display || {};

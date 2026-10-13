@@ -24,7 +24,7 @@
     { n: 5, label: '复盘', href: 'replay.html', icon: 'replay', title: '复盘 · 重放' }
   ];
 
-  var PAGE_DEFAULT = { index: 2, display: 2, sim: 2, admin: 1, round: 1, settings: 1, settlement: 3, replay: 5 };
+  var PAGE_DEFAULT = { index: 0, display: 2, admin: 0, round: 1, settings: 0, settlement: 3, replay: 5 };
 
   var state = { workflow: null, ok: false, step: null, timer: null };
   var listeners = [];
@@ -79,7 +79,7 @@
 
   function pageDefault() {
     var p = pageName().replace(/\.html$/i, '');
-    return PAGE_DEFAULT[p] || 2;
+    return Object.prototype.hasOwnProperty.call(PAGE_DEFAULT, p) ? PAGE_DEFAULT[p] : 2;
   }
 
   function apiBase() {
@@ -456,6 +456,7 @@
   }
 
   function init() {
+    organizeChrome();
     installMermaidLite();
     renderStepper();
     renderMobileTabs();
@@ -478,6 +479,28 @@
     scheduleFetch();
     if (document.readyState === 'complete') applyHash();
     else window.addEventListener('load', applyHash);
+  }
+
+  function organizeChrome() {
+    var header = document.querySelector('.app-topbar');
+    if (!header) return;
+    var row = header.querySelector('.shell-row');
+    var tools = header.querySelector('.tools-row');
+    if (!row || !tools) return;
+    var labels = row.querySelectorAll('label');
+    for (var i = 0; i < labels.length; i++) {
+      labels[i].classList.add('connection-field');
+      tools.appendChild(labels[i]);
+    }
+    var status = row.querySelector('.wf-status');
+    var theme = row.querySelector('#theme-toggle');
+    if (status && theme) row.insertBefore(status, theme);
+    function measureHeader() {
+      root.style.setProperty('--shell-height', Math.ceil(header.getBoundingClientRect().height) + 'px');
+    }
+    measureHeader();
+    if (window.ResizeObserver) new ResizeObserver(measureHeader).observe(header);
+    else window.addEventListener('resize', measureHeader);
   }
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }

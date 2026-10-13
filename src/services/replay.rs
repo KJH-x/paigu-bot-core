@@ -111,6 +111,14 @@ pub async fn run_replay(state: &ApiState, body: ReplayBody) -> Result<Value, Ser
     Ok(replay_result_json(&result))
 }
 
+pub async fn active_view(state: &ApiState) -> Result<Value, ServiceError> {
+    state
+        .pipeline
+        .replay_view()
+        .await
+        .map_err(ServiceError::from)
+}
+
 pub async fn replay_diff(state: &ApiState) -> Result<Value, ServiceError> {
     let cfg = state.cfg.get().await;
     let round_id = cfg.round.round_id.clone();

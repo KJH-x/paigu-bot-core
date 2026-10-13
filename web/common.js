@@ -3,6 +3,8 @@
 
   var DEFAULT_API = 'http://127.0.0.1:21081';
   var DEFAULT_WS = 'ws://127.0.0.1:9801';
+  // user_id -> 展示名（由 normalizeBoard 从 board.user_summaries / who_whats 构建）
+  var curUserNames = {};
   var INLINE = (global.PAIGU_WEB && typeof global.PAIGU_WEB === 'object') ? global.PAIGU_WEB : {};
 
   function qs(name) {
@@ -190,12 +192,22 @@
     var REASON_META = {
       NewClaimFilled: { cls: 'changed-new', icon: '▲' },
       CancelReleased: { cls: 'changed-release', icon: '▼' },
-      AutoMovedForward: { cls: 'changed-成员32', icon: '↷' },
+      AutoMovedForward: { cls: 'changed-fwd', icon: '↷' },
       TailSegmentCreated: { cls: 'changed-tail', icon: '⛓' },
       TailSegmentUpdated: { cls: 'changed-tail', icon: '⛓' },
       AdminFixed: { cls: 'changed-admin', icon: '✚' },
       AdminUnlocked: { cls: 'changed-admin', icon: '✚' },
-      RecomputedByRuleChange: { cls: 'changed-成员32', icon: '↻' }
+      RecomputedByRuleChange: { cls: 'changed-fwd', icon: '↻' }
+    };
+
+    var KIND_TEXT = {
+      split: '拼团',
+      group: '拼团',
+      single: '单领',
+      whole_box: '整盒',
+      wholebox: '整盒',
+      box: '整盒',
+      gift: '特典'
     };
 
     function setCellClass(node) {
@@ -245,11 +257,20 @@
       return node;
     }
 
+    function boxColor(i) {
+      var h = ((Number(i) || 0) * 67) % 360;
+      return 'hsl(' + h + ' 72% 55%)';
+    }
+
     function updateCell(node, cell) {
       var occupied = !!(cell.user && cell.status !== 'empty');
       node.__occupied = occupied;
       node.__locked = cell.status === 'locked' || cell.status === 'locked_empty';
       node.__reserved = cell.status === 'admin_reserved';
+      if (cell.box_index != null) {
+        node.setAttribute('data-box', cell.box_index);
+        node.style.setProperty('--bx', boxColor(cell.box_index));
+      }
       setCellClass(node);
       var label = occupied ? cell.user : '';
       if (node.__user.textContent !== label) node.__user.textContent = label;
@@ -312,8 +333,10 @@
         function (c) {
           if (c.kind === 'box') {
             var t = document.createElement('span');
-            t.className = 'box-tag';
-            t.textContent = '盒' + c.box_index;
+            t.className = 'box-sep';
+            t.setAttribute('data-box', c.box_index);
+            t.setAttribute('aria-hidden', 'true');
+            t.style.background = boxColor(c.box_index);
             return t;
           }
           return createCell(c);
@@ -360,7 +383,10 @@
 
     function updateSection(node, group) {
       var html = esc(group.name);
-      if (group.kind) html += '<span class="kind">' + esc(group.kind) + '</span>';
+      if (group.kind) {
+        var kindKey = String(group.kind).toLowerCase();
+        html += '<span class="kind">' + esc(KIND_TEXT[kindKey] || group.kind) + '</span>';
+      }
       if (node.__title.__html !== html) {
         node.__title.__html = html;
         node.__title.innerHTML = html;
@@ -477,30 +503,6 @@
     return sign + p(dd) + ' ' + p(hh) + ' ' + p(mm) + ' ' + p(t);
   }
 
-  function buildOneBotEvent(opts) {
-    opts = opts || {};
-    var offsetMs = num(opts.offsetMs != null ? opts.offsetMs : opts.offset_ms, 0) || 0;
-    var text = String(opts.text == null ? '' : opts.text);
-    var userId = opts.user_id != null ? String(opts.user_id) : '';
-    var nickname = opts.nickname != null ? String(opts.nickname) : userId;
-    var groupId = opts.group_id != null ? String(opts.group_id) : '';
-    var messageId = opts.message_id != null ? String(opts.message_id) : ('sim-' + Date.now() + '-' + Math.floor(Math.random() * 1e6));
-    var selfId = opts.self_id != null ? opts.self_id : 3000000000;
-    var role = opts.is_admin ? 'admin' : 'member';
-    return {
-      post_type: 'message',
-      message_type: 'group',
-      self_id: selfId,
-      user_id: userId,
-      group_id: groupId,
-      time: Math.floor((Date.now() + offsetMs) / 1000),
-      message_id: messageId,
-      raw_message: text,
-      message: [{ type: 'text', data: { text: text } }],
-      sender: { user_id: userId, nickname: nickname, card: nickname, role: role }
-    };
-  }
-
   function buildMeta(config) {
     var round = (config && config.round) || {};
     var items = asArray(round.items);
@@ -548,7 +550,8 @@
       return { index: fallbackIndex, box_index: boxIndex, user: raw, status: 'filled', policy: 'normal', segment_id: null };
     }
     var status = raw.status || raw.state || (raw.user || raw.display_name || raw.displayName || raw.nickname || raw.user_id ? 'filled' : 'empty');
-    var user = raw.user || raw.display_name || raw.displayName || raw.nickname || raw.user_id || '';
+    var uid = raw.user_id != null ? String(raw.user_id) : '';
+    var user = raw.user || raw.display_name || raw.displayName || raw.nickname || curUserNames[uid] || raw.user_id || '';
     return {
       index: num(raw.slot_index != null ? raw.slot_index : (raw.slot != null ? raw.slot : raw.index), fallbackIndex),
       box_index: num(raw.box_index, boxIndex),
@@ -596,6 +599,27 @@
     var src = pickBoardSource(payload);
     var items = [];
     var map = {};
+
+    // user_id -> 展示名：优先 board.user_summaries，其次 who_whats(identity)
+    curUserNames = {};
+    (function buildNames() {
+      var us = (payload && payload.board && payload.board.user_summaries) || [];
+      for (var i = 0; i < us.length; i++) {
+        var u = us[i];
+        if (u && u.user_id != null) {
+          var nm = u.display_name || u.display || u.cn;
+          if (nm) curUserNames[String(u.user_id)] = nm;
+        }
+      }
+      var ws = (payload && payload.who_whats) || [];
+      for (var j = 0; j < ws.length; j++) {
+        var w = ws[j];
+        if (w && w.identity) {
+          var nm2 = w.display || w.cn || w.identity;
+          if (nm2 && !curUserNames[String(w.identity)]) curUserNames[String(w.identity)] = nm2;
+        }
+      }
+    })();
 
     function itemMeta(itemId, variantId) {
       var m = meta && meta.itemById ? meta.itemById[itemId] : null;
@@ -940,7 +964,6 @@
     createSmartScroll: createSmartScroll,
     parseOffset: parseOffset,
     formatOffset: formatOffset,
-    buildOneBotEvent: buildOneBotEvent,
     buildMeta: buildMeta,
     pickBoardSource: pickBoardSource,
     normalizeBoard: normalizeBoard,

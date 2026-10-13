@@ -17,7 +17,8 @@
     locked: false,
     draftTimer: null,
     draftSaveChain: Promise.resolve(),
-    suppressSave: false
+    suppressSave: false,
+    catalog: []
   };
 
   function defaultConfig() {
@@ -77,6 +78,22 @@
     sel.value = value;
     sel.addEventListener('change', function () { onChange(sel.value); });
     return sel;
+  }
+
+  function labelField(control, title) {
+    var label = el('label', 'cfg-field');
+    label.appendChild(el('span', '', title));
+    control.setAttribute('aria-label', title);
+    label.appendChild(control);
+    return label;
+  }
+
+  function labelConfigRow(row, titles) {
+    var controls = Array.prototype.slice.call(row.children).filter(function (node) { return node.tagName === 'INPUT' || node.tagName === 'SELECT'; });
+    controls.forEach(function (control, index) {
+      var next = control.nextSibling;
+      row.insertBefore(labelField(control, titles[index]), next);
+    });
   }
 
   function buttonEl(text, cls, onClick) {
@@ -210,6 +227,7 @@
       row.appendChild(buttonEl('删除', 'small danger', function () {
         state.config.discounts.splice(i, 1); renderConfig(); scheduleEval();
       }));
+      labelConfigRow(row, ['规则名称', '优惠方式', '减额（元）', '门槛（元）', '折扣率（%）', '适用包数（-1 为全部）']);
       host.appendChild(row);
     });
   }
@@ -269,6 +287,7 @@
       row.appendChild(buttonEl('删除', 'small danger', function () {
         state.config.gift_tiers.splice(i, 1); renderConfig(); scheduleEval();
       }));
+      labelConfigRow(row, ['档位名称', '门槛（元）', '特典名称', '单价（元）', '认购数量']);
       host.appendChild(row);
     });
     refreshClaimedWarn();
@@ -375,12 +394,17 @@
     });
     row.appendChild(handle);
 
-    row.appendChild(inputEl('text', line.item_id, 'item_id', function (v) {
-      line.item_id = v.trim(); scheduleEval();
-    }, 'item-ids'));
-    row.appendChild(inputEl('text', line.variant_id || '', 'variant', function (v) {
-      line.variant_id = v.trim() ? v.trim() : null; scheduleEval();
-    }, 'variant-ids'));
+    var itemOptions = state.catalog.map(function (item) { return [item.item_id, item.name || item.item_id]; });
+    if (!itemOptions.some(function (option) { return option[0] === line.item_id; })) itemOptions.unshift([line.item_id, line.item_id]);
+    row.appendChild(labelField(selectEl(itemOptions, line.item_id, function (v) {
+      line.item_id = v; line.variant_id = null; renderOrderTable(); scheduleEval();
+    }), '商品'));
+    var item = state.catalog.find(function (entry) { return entry.item_id === line.item_id; });
+    var variantOptions = [['', '单领 / 无款式']].concat(((item && item.variants) || []).map(function (variant) { return [variant.variant_id, variant.name || variant.variant_id]; }));
+    if (line.variant_id && !variantOptions.some(function (option) { return option[0] === line.variant_id; })) variantOptions.push([line.variant_id, line.variant_id]);
+    row.appendChild(labelField(selectEl(variantOptions, line.variant_id || '', function (v) {
+      line.variant_id = v || null; scheduleEval();
+    }), '款式'));
 
     var qty = inputEl('number', line.qty, '数量', function (v) {
       line.qty = Math.max(0, intOf(v, 0));
@@ -388,13 +412,13 @@
       scheduleEval();
     });
     qty.min = '0';
-    row.appendChild(qty);
+    row.appendChild(labelField(qty, '数量'));
 
-    row.appendChild(inputEl('number', line.unit_price_cents ? line.unit_price_cents / 100 : '', '单价(元)', function (v) {
+    row.appendChild(labelField(inputEl('number', line.unit_price_cents ? line.unit_price_cents / 100 : '', '单价(元)', function (v) {
       line.unit_price_cents = toCents(v);
       row.querySelector('.line-total').textContent = totalText(line);
       scheduleEval();
-    }));
+    }), '单价（元）'));
 
     var giftLabel = el('label', 'gift-toggle');
     var gift = document.createElement('input');
@@ -757,6 +781,10 @@
   }
 
   function loadSample() {
+    state.catalog = state.catalog.filter(function (item) { return item.item_id !== 'item_a' && item.item_id !== 'item_b'; }).concat([
+      {item_id:'item_a',name:'示例商品 A',variants:[{variant_id:'v1',name:'款式一'},{variant_id:'v2',name:'款式二'}]},
+      {item_id:'item_b',name:'示例商品 B',variants:[]}
+    ]);
     state.config = normalizeConfig({
       pricing: [{ item_id: 'item_a', variant_id: null, mode: 'AdjustBy', value: 1000 }],
       discounts: [{ rule_id: 'd_whole', kind: 'WholeOrder', amount: 0, threshold: null, ratio_ppm: 100000, shares: -1 }],
@@ -817,6 +845,7 @@
     P.get('/api/config').then(function (res) {
       var cfg = res && res.config ? res.config : res;
       var items = (cfg && cfg.round && cfg.round.items) || [];
+      state.catalog = items;
       var itemList = $('item-ids');
       var varList = $('variant-ids');
       itemList.innerHTML = '';
@@ -833,6 +862,7 @@
           varList.appendChild(ov);
         });
       });
+      renderOrderTable();
     }).catch(function () { /* 可选数据 */ });
   }
 

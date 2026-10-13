@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -8,7 +10,7 @@ use tokio::sync::RwLock;
 use crate::domain::ids::{ItemId, RoundId};
 use crate::domain::item::{Item, ItemKind, ItemVariant};
 use crate::domain::money::MoneyCents;
-use crate::round::{ItemClass, PhaseWindow};
+use crate::round::{ItemClass, PhaseWindow, RoundCategory};
 
 /// 轮次库（`data/rounds/<round_id>.json`）读写与激活解析（U3）。
 pub mod rounds;
@@ -45,6 +47,18 @@ pub struct GatewayConfig {
     /// 是否允许管理员斜杠命令**落地执行**（D-1）；关闭时仅记录。
     #[serde(default)]
     pub admin_commands_enabled: bool,
+    /// 是否接受**伪造来源消息**（测试用）：入站文本本身是 `{"id":"<qq>","text":"<内容>"}`
+    /// 双层 JSON 时，改判来源为内层 `id`、正文为内层 `text`。默认关闭。
+    #[serde(default)]
+    pub accept_forged_messages: bool,
+    /// 收到消息后以指定表情回应（`set_msg_emoji_like`，如 `76` = 👍），
+    /// **不发送文本消息**；`None` = 关闭。默认关闭。
+    #[serde(default)]
+    pub react_emoji_id: Option<u32>,
+    /// **测试群**：`RoundCategory::Test` 轮次绑定的群，也是伪造解包与测试注入的唯一准入群。
+    /// `None` = 不启用测试群隔离。默认关闭。
+    #[serde(default)]
+    pub test_group_id: Option<String>,
 }
 
 fn default_heartbeat() -> u64 {
@@ -66,6 +80,9 @@ pub struct LlmSettings {
     pub temperature: f32,
     #[serde(default = "default_true")]
     pub fallback_to_rules: bool,
+    /// 疑似排谷消息是否**优先走 LLM 切分/抽取**（关键词提取；失败回退规则）。默认 false。
+    #[serde(default)]
+    pub segment_claims: bool,
     #[serde(default)]
     pub prompt_template: String,
 }
@@ -103,6 +120,10 @@ pub struct RoundSettings {
     pub phases: Vec<PhaseWindow>,
     #[serde(default)]
     pub items: Vec<ItemConfig>,
+    /// 轮次类别：**测试轮**只绑定测试群（`gateway.test_group_id`），
+    /// **正常轮**只绑定正常群。默认 `normal`，旧轮次文件缺省即正常轮。
+    #[serde(default)]
+    pub category: RoundCategory,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,7 +383,17 @@ pub fn resolve_cn(cfg: &AppConfig, user_id: &str, raw_or_clean_nickname: &str) -
             return Some(cn.to_string());
         }
     }
+    // 代排群外标签：`发信人(代名称)` 原样展示，不做昵称清洗。
+    if raw_or_clean_nickname.contains("(代") && raw_or_clean_nickname.contains(')') {
+        return Some(raw_or_clean_nickname.trim().to_string());
+    }
     let (identity, display) = crate::parser::normalize::clean_nickname(raw_or_clean_nickname);
+    // 反查：昵称缺失/为空、或本身就是 QQ 号（伪造来源只给 id）→ 用成员缓存名。
+    if identity.trim().is_empty() || is_id_like(&identity) || identity.trim() == user_id.trim() {
+        if let Some(name) = member_display_name(cfg, user_id) {
+            return Some(name);
+        }
+    }
     if !identity.trim().is_empty() {
         return Some(identity);
     }
@@ -371,6 +402,92 @@ pub fn resolve_cn(cfg: &AppConfig, user_id: &str, raw_or_clean_nickname: &str) -
     }
     let uid = user_id.trim();
     (!uid.is_empty()).then(|| uid.to_string())
+}
+
+fn is_id_like(s: &str) -> bool {
+    let s = s.trim();
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+}
+
+/// 成员缓存（`members.cache_path`）→ `user_id -> 展示名`（`card` 优先，回退 `nickname`）。
+/// 按文件 mtime 缓存，避免每条消息读盘。
+type MemberNameCache = Mutex<Option<(SystemTime, HashMap<String, String>)>>;
+
+fn member_name_map() -> &'static MemberNameCache {
+    static CACHE: OnceLock<MemberNameCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn load_member_name_map(path: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return map;
+    };
+    let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&raw) else {
+        return map;
+    };
+    for entry in list {
+        let Some(uid) = entry.get("user_id").and_then(value_to_str) else {
+            continue;
+        };
+        let card = entry.get("card").and_then(value_to_str).unwrap_or_default();
+        let nick = entry
+            .get("nickname")
+            .and_then(value_to_str)
+            .unwrap_or_default();
+        let name = if !card.trim().is_empty() { card } else { nick };
+        if !name.trim().is_empty() {
+            map.insert(uid, name);
+        }
+    }
+    map
+}
+
+fn value_to_str(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+fn with_member_map<T>(cfg: &AppConfig, f: impl FnOnce(&HashMap<String, String>) -> T) -> Option<T> {
+    let path = cfg.members.cache_path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+    let mut guard = member_name_map().lock().ok()?;
+    let stale = match (&*guard, mtime) {
+        (Some((cached, _)), Some(m)) => *cached != m,
+        (None, _) => true,
+        (Some(_), None) => false,
+    };
+    if stale {
+        let map = load_member_name_map(path);
+        *guard = Some((mtime.unwrap_or(SystemTime::UNIX_EPOCH), map));
+    }
+    guard.as_ref().map(|(_, map)| f(map))
+}
+
+/// 反查展示名：`user_id -> 成员名`（缓存）。
+pub fn member_display_name(cfg: &AppConfig, user_id: &str) -> Option<String> {
+    with_member_map(cfg, |map| map.get(user_id.trim()).cloned()).flatten()
+}
+
+/// 反查 `user_id`：按 `card`/`nickname` 精确或包含匹配名字（用于代排群内反查）。
+pub fn member_user_id_by_name(cfg: &AppConfig, name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    with_member_map(cfg, |map| {
+        map.iter()
+            .find(|(_, n)| n.trim() == name)
+            .or_else(|| map.iter().find(|(_, n)| n.contains(name)))
+            .map(|(uid, _)| uid.clone())
+    })
+    .flatten()
 }
 
 /// 优先用户判定候选串（U4）：`user_id`/昵称/归一化昵称，并加入 CN 与别名。

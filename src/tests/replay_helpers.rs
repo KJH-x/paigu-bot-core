@@ -161,7 +161,7 @@ fn tail_locked_creates_new_box() {
 }
 
 #[test]
-fn cancel_moves_slots_成员32() {
+fn cancel_moves_slots_fwd() {
     let item = fixture_split_item("item_a", "item_a", 4500, 5);
     let u1 = claim_line("u1", "item_a", 1, 100, 1, 0);
     let u2 = claim_line("u2", "item_a", 1, 101, 2, 0);

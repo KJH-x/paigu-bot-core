@@ -50,7 +50,9 @@ impl Pipeline {
         now: DateTime<Utc>,
         seq: i64,
     ) -> BareVariantOutcome {
-        // 已判定为真歧义（如大类匹配到多个商品）时保留 NeedConfirm，不做 first-match 澄清。
+        // 先消解「只报角色名但多处命中」的伪歧义：取歧义片段首 token 做 §U7 first-match。
+        absorb_ambiguous_bare_variants(&mut parsed, active_rounds);
+        // 仍有真歧义（如大类匹配到多个商品）时保留 NeedConfirm，不做 first-match 澄清。
         if !parsed.ambiguous_parts.is_empty() {
             return BareVariantOutcome::Resolved(parsed);
         }
@@ -163,6 +165,73 @@ impl Pipeline {
         {
             warn!("ParseOverride 事件写入失败: {e}");
         }
+    }
+}
+
+/// 取歧义片段的「首 token」（到首个分隔符为止），如 `克莱门莎（可能为：…）` → `克莱门莎`。
+fn leading_token(part: &str) -> Option<&str> {
+    let end = part
+        .find(|c: char| {
+            matches!(
+                c,
+                '（' | '(' | '：' | ':' | '，' | ',' | '、' | '。' | ' ' | '\t'
+            )
+        })
+        .unwrap_or(part.len());
+    let tok = part[..end].trim();
+    (!tok.is_empty()).then_some(tok)
+}
+
+/// §U7 与 LLM 输出调和：LLM 常把「只报角色名、命中多个商品」判为歧义；此处对每个歧义片段
+/// 取首 token 做 first-match（命中**可拼团**商品即采用），从而把伪歧义消化为认领；只有
+/// 确实无解（如错别字）才保留为真歧义。
+fn absorb_ambiguous_bare_variants(parsed: &mut ParsedMessage, active_rounds: &[RoundContext]) {
+    if parsed.intent != ParsedIntent::Claim || parsed.ambiguous_parts.is_empty() {
+        return;
+    }
+    let parts = std::mem::take(&mut parsed.ambiguous_parts);
+    let total = parts.len();
+    let mut kept: Vec<String> = Vec::new();
+    for part in parts {
+        let Some(token) = leading_token(&part) else {
+            kept.push(part);
+            continue;
+        };
+        let Some((rid, iid, vid)) = alias_match::first_match(token, active_rounds) else {
+            kept.push(part);
+            continue;
+        };
+        // 优先复用同名的未解析项，避免重复计数；否则新增。
+        if let Some(pi) = parsed
+            .items
+            .iter_mut()
+            .find(|pi| pi.resolved_item_id.is_none() && pi.name.trim() == token)
+        {
+            pi.resolved_round_id = Some(rid.0);
+            pi.resolved_item_id = Some(iid.0);
+            pi.resolved_variant_id = vid;
+        } else if !parsed.items.iter().any(|pi| {
+            pi.resolved_item_id.as_deref() == Some(iid.0.as_str()) && pi.resolved_variant_id == vid
+        }) {
+            parsed.items.push(ParsedClaimItem {
+                name: token.to_string(),
+                category_hint: None,
+                quantity: 1,
+                claim_type: None,
+                is_proxy_card: None,
+                slot_policy: None,
+                notes: None,
+                resolved_item_id: Some(iid.0),
+                resolved_variant_id: vid,
+                resolved_round_id: Some(rid.0),
+            });
+        }
+    }
+    let kept_len = kept.len();
+    parsed.ambiguous_parts = kept;
+    // 有片段经 first-match 消解 → 视为确定性解析（提升置信度，避免误判"置信度不足"）。
+    if kept_len < total && parsed.confidence < 0.9 {
+        parsed.confidence = 0.9;
     }
 }
 
