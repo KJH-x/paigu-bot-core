@@ -27,6 +27,7 @@ pub(super) struct State {
 
 pub(super) struct MessageRecord {
     pub(super) seq: i64,
+    pub(super) user_id: String,
     pub(super) display: String,
     pub(super) text: String,
     pub(super) status: String,
@@ -107,6 +108,7 @@ impl Pipeline {
             .iter()
             .map(|message| MessageRecord {
                 seq: message.seq,
+                user_id: message.user_id.clone(),
                 display: message.nickname.clone(),
                 text: message.text.clone(),
                 status: message.status.clone(),
@@ -137,6 +139,7 @@ impl Pipeline {
             .map(|m| {
                 json!({
                     "seq": m.seq,
+                    "user_id": m.user_id,
                     "display": m.display,
                     "text": m.text,
                     "status": m.status,

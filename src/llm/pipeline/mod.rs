@@ -424,12 +424,10 @@ impl Pipeline {
         if let Some(segments) = proxy_segments(&ev.text) {
             return self.process_proxy_segments(&ev, segments).await;
         }
-        let (identity, display_raw) = crate::parser::normalize::clean_nickname(&ev.nickname);
-        let display = if display_raw.trim().is_empty() {
-            ev.user_id.clone()
-        } else {
-            display_raw
-        };
+        let (identity, _display_raw) = crate::parser::normalize::clean_nickname(&ev.nickname);
+        // 消息流展示名与排位表同源（CN → 归一化昵称 → 成员反查 → user_id）。
+        let display = crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname)
+            .unwrap_or_else(|| ev.user_id.clone());
 
         let seq = {
             let mut state = self.state.lock().await;
@@ -442,6 +440,7 @@ impl Pipeline {
                 let seq = state.seq;
                 state.messages.push(MessageRecord {
                     seq,
+                    user_id: ev.user_id.clone(),
                     display: display.clone(),
                     text: ev.text.clone(),
                     status: "Duplicate".to_string(),
@@ -758,6 +757,7 @@ impl Pipeline {
             state.snapshot = Some(snapshot);
             state.messages.push(MessageRecord {
                 seq,
+                user_id: ev.user_id.clone(),
                 display: display.clone(),
                 text: ev.text.clone(),
                 status: "Applied".to_string(),
@@ -1012,6 +1012,7 @@ impl Pipeline {
         let mut state = self.state.lock().await;
         state.messages.push(MessageRecord {
             seq,
+            user_id: ev.user_id.clone(),
             display: display.to_string(),
             text: ev.text.clone(),
             status: status.to_string(),

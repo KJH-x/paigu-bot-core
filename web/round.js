@@ -336,7 +336,7 @@
   function renderRows(host, list, isSingle) {
     var head = document.createElement('div');
     head.className = 'single-row single-head';
-    head.innerHTML = '<span></span><span>商品名</span><span>原价（元）</span>' +
+    head.innerHTML = '<span></span><span>商品名</span><span>原价(元)</span>' +
       '<span>' + (isSingle ? '可排数量' : '数量') + '</span><span>别名</span><span></span>';
     host.appendChild(head);
 
@@ -357,7 +357,7 @@
     row.innerHTML =
       '<span class="rownum">#' + rownum + '</span>' +
       '<input data-scope="item" data-f="name" data-idx="' + idx + '" value="' + esc(it.name) + '" placeholder="商品名（填完自动产生下一行）" title="item_id: ' + esc(it.item_id) + '" />' +
-      '<input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="0.01" value="' + money(it.unit_price_cents) + '" placeholder="原价（元）" />' +
+      '<input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="0.01" value="' + money(it.unit_price_cents) + '" placeholder="原价(元)" />' +
       '<span class="maxq-cell">' + maxq + '</span>' +
       aliasWrapHtml('item', idx, null, it.aliases, it.__locked) +
       '<span class="row-actions"><button type="button" class="danger small" data-act="del-item" data-idx="' + idx + '">删除</button></span>';
@@ -396,7 +396,7 @@
     grid.className = 'cat-grid';
     grid.innerHTML =
       '<label class="field"><span>商品名</span><input data-scope="item" data-f="name" data-idx="' + idx + '" value="' + esc(it.name) + '" placeholder="商品名" /></label>' +
-      '<label class="field"><span>原价（元）</span><input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="0.01" value="' + money(it.unit_price_cents) + '" /></label>' +
+      '<label class="field"><span>原价(元)</span><input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="0.01" value="' + money(it.unit_price_cents) + '" /></label>' +
       (it.kind === 'single'
         ? '<label class="field"><span>单领上限 max_quantity</span><input data-scope="item" data-f="max_quantity" data-idx="' + idx + '" type="number" min="0" value="' + (it.max_quantity == null ? '' : esc(it.max_quantity)) + '" /></label>'
         : '');
@@ -418,16 +418,16 @@
         return '<tr data-vi="' + vi + '">' +
           '<td class="vid" title="自动生成，不可编辑">' + esc(v.variant_id || '(空)') + '</td>' +
           '<td class="vname">' + cfNameHtml('variant', idx, vi, 'name', v.name, '', ' placeholder="变体名"') + '</td>' +
-          '<td class="pcell"><input class="variant-price-base" data-scope="variant" data-f="unit_price_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="number" step="0.01" value="' + money(v.unit_price_cents) + '" title="原价（元）" /></td>' +
-          '<td class="pcell"><input class="variant-price-adjust' + clsB + '" data-scope="variant" data-f="adjust_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + esc(adjStr(v.adjust_cents)) + '" title="调价（元）" /></td>' +
-          '<td class="pcell"><input class="variant-price-final' + clsC + '" data-scope="variant" data-f="final" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + money(fin) + '" title="最终价（元）" /></td>' +
+          '<td class="pcell"><input class="variant-price-base" data-scope="variant" data-f="unit_price_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="number" step="0.01" value="' + money(v.unit_price_cents) + '" title="原价(元)" /></td>' +
+          '<td class="pcell"><input class="variant-price-adjust' + clsB + '" data-scope="variant" data-f="adjust_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + esc(adjStr(v.adjust_cents)) + '" title="调价(元)" /></td>' +
+          '<td class="pcell"><input class="variant-price-final' + clsC + '" data-scope="variant" data-f="final" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + money(fin) + '" title="最终价(元)" /></td>' +
           '<td class="pcell"><input data-scope="variant" data-f="capacity" data-idx="' + idx + '" data-vi="' + vi + '" type="number" min="0" value="' + (v.capacity == null ? '' : esc(v.capacity)) + '" placeholder="不限" /></td>' +
           '<td>' + aliasWrapHtml('variant', idx, vi, v.aliases, v.__locked) + '</td>' +
           '<td><button type="button" class="danger small" data-act="del-variant" data-idx="' + idx + '" data-vi="' + vi + '">×</button></td>' +
           '</tr>';
       }).join('');
       wrap.innerHTML = '<table class="vtable"><thead><tr>' +
-        '<th>编号</th><th>名称</th><th>原价（元）</th><th>调价（元）</th><th>最终价（元）</th><th>可排数量</th><th>别名</th><th>操作</th>' +
+        '<th>编号</th><th>名称</th><th>原价(元)</th><th>调价(元)</th><th>最终价(元)</th><th>可排数量</th><th>别名</th><th>操作</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table>' +
         '<div class="price-summary" data-adjust-summary="' + idx + '"></div>';
       card.appendChild(wrap);

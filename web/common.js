@@ -969,6 +969,16 @@
     return attempt();
   }
 
+  /** 金额（分）→ "d.dd 元"（展示用，半角小数）。 */
+  function fmtYuan(cents) {
+    return (Math.round(Number(cents) || 0) / 100).toFixed(2) + ' 元';
+  }
+
+  /** 金额（分）→ "d.dd"（输入框用，无单位）。 */
+  function fmtYuan0(cents) {
+    return (Math.round(Number(cents) || 0) / 100).toFixed(2);
+  }
+
   global.PAIGU = {    DEFAULT_API: DEFAULT_API,
     DEFAULT_WS: DEFAULT_WS,
     INLINE: INLINE,
@@ -997,6 +1007,8 @@
     createSmartScroll: createSmartScroll,
     parseOffset: parseOffset,
     formatOffset: formatOffset,
+    fmtYuan: fmtYuan,
+    fmtYuan0: fmtYuan0,
     buildMeta: buildMeta,
     pickBoardSource: pickBoardSource,
     normalizeBoard: normalizeBoard,

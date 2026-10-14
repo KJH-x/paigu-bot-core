@@ -1,4 +1,11 @@
 use crate::parser::parsed_event::ParsedClaimItem;
+use unicode_normalization::UnicodeNormalization;
+
+/// 清洗时仅去除**尾部**的标点/空白（保留前导，如昵称 `???`）。
+const TRAILING_PUNCT: &[char] = &[
+    '、', '。', '，', '．', '.', '·', '・', ' ', '\u{3000}', ':', '：', ';', '；', '!', '！', '?',
+    '？', '~', '～',
+];
 
 /// 全角字符归一为半角（`！`–`～` 段整体平移，全角空格 → 普通空格）。
 pub fn normalize_fullwidth(s: &str) -> String {
@@ -41,12 +48,22 @@ fn strip_remark(s: &str) -> String {
 /// 昵称清洗（D-05 下沉至中性模块）：全角归一 + 去括号备注 + 代理写法 `A(代B)`。
 /// 返回 `(identity, display)`；`identity` 用于白名单/优先级匹配，`display` 用于展示。
 pub fn clean_nickname(raw: &str) -> (String, String) {
-    let normalized = normalize_fullwidth(raw);
+    // NFKC：兼容字符归一（如 Mathematical Alphanumeric `𝙳𝙺𝙻𝙰` → `DKLA`、`①`→`1`）。
+    let nfkc: String = raw.nfkc().collect();
+    let normalized = normalize_fullwidth(&nfkc);
     let t = normalized.trim();
     if let Some((a, b)) = split_proxy(t) {
         return (a.clone(), format!("{a}({b})"));
     }
-    let identity = strip_remark(t);
+    let mut identity = strip_remark(t);
+    // 仅去尾部标点/空白（保留前导，如 `???`）。
+    while identity
+        .chars()
+        .last()
+        .is_some_and(|c| TRAILING_PUNCT.contains(&c))
+    {
+        identity.pop();
+    }
     (identity.clone(), identity)
 }
 
@@ -123,7 +140,11 @@ mod tests {
     #[test]
     fn clean_nickname_removes_remark() {
         assert_eq!(clean_nickname("甲（备注甲）").1, "甲");
-        assert_eq!(clean_nickname("乙.（备注乙）").1, "乙.");
+        assert_eq!(clean_nickname("乙.（备注乙）").1, "乙");
+        assert_eq!(clean_nickname("甲.").1, "甲");
+        // NFKC：Mathematical bold 𝐀𝐁 → AB；仅去尾部标点
+        assert_eq!(clean_nickname("\u{1D400}\u{1D401}、").1, "AB");
+        assert_eq!(clean_nickname("???甲").1, "???甲");
         assert_eq!(clean_nickname("丙/丁（备注丙）").1, "丙/丁");
         assert_eq!(clean_nickname("戊（备注戊👀）").1, "戊");
     }

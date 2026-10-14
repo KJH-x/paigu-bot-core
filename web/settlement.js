@@ -227,7 +227,7 @@
       row.appendChild(buttonEl('删除', 'small danger', function () {
         state.config.discounts.splice(i, 1); renderConfig(); scheduleEval();
       }));
-      labelConfigRow(row, ['规则名称', '优惠方式', '减额（元）', '门槛（元）', '折扣率（%）', '适用包数（-1 为全部）']);
+      labelConfigRow(row, ['规则名称', '优惠方式', '减额(元)', '门槛(元)', '折扣率（%）', '适用包数（-1 为全部）']);
       host.appendChild(row);
     });
   }
@@ -287,7 +287,7 @@
       row.appendChild(buttonEl('删除', 'small danger', function () {
         state.config.gift_tiers.splice(i, 1); renderConfig(); scheduleEval();
       }));
-      labelConfigRow(row, ['档位名称', '门槛（元）', '特典名称', '单价（元）', '认购数量']);
+      labelConfigRow(row, ['档位名称', '门槛(元)', '特典名称', '单价(元)', '认购数量']);
       host.appendChild(row);
     });
     refreshClaimedWarn();
@@ -418,7 +418,7 @@
       line.unit_price_cents = toCents(v);
       row.querySelector('.line-total').textContent = totalText(line);
       scheduleEval();
-    }), '单价（元）'));
+    }), '单价(元)'));
 
     var giftLabel = el('label', 'gift-toggle');
     var gift = document.createElement('input');

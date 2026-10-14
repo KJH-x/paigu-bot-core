@@ -68,6 +68,7 @@ impl Pipeline {
             let mut st = self.state.lock().await;
             st.messages.push(MessageRecord {
                 seq,
+                user_id: ev.user_id.clone(),
                 display: display.to_string(),
                 text: ev.text.clone(),
                 status: status.to_string(),
