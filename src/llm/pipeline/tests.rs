@@ -792,6 +792,31 @@ fn gate_nc_unwraps_only_for_test_round_and_test_group() {
     );
 }
 
+#[test]
+fn forged_batch_unpacks_into_multiple() {
+    use crate::round::RoundCategory;
+    let mut cfg = base_config();
+    cfg.gateway.accept_forged_messages = true;
+    cfg.gateway.test_group_id = Some("123456789".to_string());
+    cfg.round.category = RoundCategory::Test;
+    cfg.round.group_id = "123456789".to_string();
+
+    let text = r#"[{"id":"1","text":"排 通行证 1","timestamp":1000},{"id":"2","text":"排 人事部 1","timestamp":2000}]"#;
+    let evs = gate_nc_multi(&cfg, event("99999", "外层", text, 5));
+    assert_eq!(evs.len(), 2, "数组应解包为 2 条");
+    assert_eq!(evs[0].user_id, "1");
+    assert_eq!(evs[0].text, "排 通行证 1");
+    assert_eq!(evs[0].timestamp_ms, 1000);
+    assert_eq!(evs[1].user_id, "2");
+    assert!(evs[0].message_id.contains('#'));
+    // 非测试群 → 不解包（单条原样透传）。
+    let plain = gate_nc_multi(&cfg, event("99999", "x", text, 5));
+    cfg.gateway.test_group_id = Some("777".to_string());
+    let not_test = gate_nc_multi(&cfg, event("99999", "x", text, 5));
+    assert_eq!(not_test.len(), 1);
+    let _ = plain;
+}
+
 #[tokio::test]
 async fn anonymous_proxy_uses_sender_permission() {
     let mut cfg = base_config();

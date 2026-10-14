@@ -63,6 +63,7 @@ fn unwrap_forged_envelope(ev: IncomingEvent) -> IncomingEvent {
 /// NC 入口隔离（R3/R4）：仅当开启伪造解包、当前轮为**测试轮**、且消息来自**测试群**时，
 /// 才把伪造信封解包；其余情况原样透传。
 /// 真实消息处理链路（`Pipeline::process`）不再感知伪造 —— 隔离只管理来自 NC 的消息。
+#[allow(dead_code)]
 pub(crate) fn gate_nc(cfg: &AppConfig, ev: IncomingEvent) -> IncomingEvent {
     let is_test_round = cfg.round.category.is_test();
     let from_test_group = cfg.gateway.test_group_id.as_deref() == Some(ev.group_id.as_str());
@@ -71,6 +72,35 @@ pub(crate) fn gate_nc(cfg: &AppConfig, ev: IncomingEvent) -> IncomingEvent {
     } else {
         ev
     }
+}
+
+/// NC 入口隔离（多消息版）：支持伪造**批次**——文本为 JSON 数组 `[{id,text,...},…]`
+/// 时解包为多条（每条 `message_id` 追加 `#i`）；单对象则单条；非测试群/未开启原样单条。
+pub(crate) fn gate_nc_multi(cfg: &AppConfig, ev: IncomingEvent) -> Vec<IncomingEvent> {
+    let is_test_round = cfg.round.category.is_test();
+    let from_test_group = cfg.gateway.test_group_id.as_deref() == Some(ev.group_id.as_str());
+    if !(cfg.gateway.accept_forged_messages && is_test_round && from_test_group) {
+        return vec![ev];
+    }
+    if let Some(list) = parse_forged_list(&ev.text) {
+        return list
+            .into_iter()
+            .enumerate()
+            .map(|(i, e)| IncomingEvent {
+                group_id: ev.group_id.clone(),
+                user_id: e.id.clone(),
+                nickname: e.nickname.unwrap_or_else(|| e.id.clone()),
+                message_id: format!("{}#{}", ev.message_id, i),
+                text: e.text,
+                timestamp_ms: e.timestamp_ms.unwrap_or(ev.timestamp_ms),
+                is_admin: e.is_admin.unwrap_or(false),
+                sender_user_id: None,
+                sender_nickname: None,
+                raw: None,
+            })
+            .collect();
+    }
+    vec![unwrap_forged_envelope(ev)]
 }
 
 struct ForgedEnvelope {
@@ -89,6 +119,11 @@ fn parse_forged_envelope(text: &str) -> Option<ForgedEnvelope> {
         return None;
     }
     let value: Value = serde_json::from_str(trimmed).ok()?;
+    parse_forged_value(&value)
+}
+
+/// 解析单个信封对象 `{id|user_id, text, timestamp?, nickname?, is_admin?}`。
+fn parse_forged_value(value: &Value) -> Option<ForgedEnvelope> {
     let obj = value.as_object()?;
     let id = obj
         .get("id")
@@ -113,6 +148,18 @@ fn parse_forged_envelope(text: &str) -> Option<ForgedEnvelope> {
         is_admin,
         timestamp_ms,
     })
+}
+
+/// 伪造**批次**：文本为 JSON 数组 `[{id,text,...},…]` → 多条信封；否则 `None`。
+fn parse_forged_list(text: &str) -> Option<Vec<ForgedEnvelope>> {
+    let trimmed = text.trim();
+    if !trimmed.starts_with('[') {
+        return None;
+    }
+    let value: Value = serde_json::from_str(trimmed).ok()?;
+    let arr = value.as_array()?;
+    let out: Vec<ForgedEnvelope> = arr.iter().filter_map(parse_forged_value).collect();
+    (!out.is_empty()).then_some(out)
 }
 
 /// 解析时间：整数/数值 ⇒ 毫秒；字符串 ⇒ 纯数字毫秒 / RFC3339 / 本地 `YYYY-MM-DD HH:MM[:SS]`。
@@ -737,7 +784,22 @@ impl Pipeline {
     /// 统一接收入口（NC / 测试注入共用，R6）。
     pub async fn ingest(&self, ev: IncomingEvent) -> PipelineOutcome {
         let cfg = self.cfg.get().await;
-        let mut ev = gate_nc(&cfg, ev);
+        let events = gate_nc_multi(&cfg, ev);
+        let mut last: Option<PipelineOutcome> = None;
+        for e in events {
+            last = Some(self.ingest_one(&cfg, e).await);
+        }
+        last.unwrap_or(PipelineOutcome {
+            status: "Ignored".to_string(),
+            detail: String::new(),
+            reply: None,
+            version: 0,
+            snapshot: None,
+        })
+    }
+
+    /// 单条入站（批次解包后逐条调用）。
+    async fn ingest_one(&self, cfg: &AppConfig, mut ev: IncomingEvent) -> PipelineOutcome {
         // 非群消息（私聊/临时会话无群号）一律 Dropped，不进入处理（防御性；网关已先拦）。
         if ev.group_id.trim().is_empty() {
             self.persist(&ev, "Dropped", "非群消息", "drop:not_group_message")
@@ -755,7 +817,7 @@ impl Pipeline {
         if crate::parser::coalesce::is_anonymous_proxy(&ev.text)
             && crate::settings::proxy_base(&ev.user_id).is_none()
         {
-            let base = crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname)
+            let base = crate::settings::resolve_cn(cfg, &ev.user_id, &ev.nickname)
                 .unwrap_or_else(|| ev.user_id.clone());
             ev.sender_user_id = Some(ev.user_id.clone());
             ev.sender_nickname = Some(ev.nickname.clone());
@@ -765,7 +827,7 @@ impl Pipeline {
         if !(cfg.merge.enabled && cfg.merge.same_sender) {
             return self.process(ev).await;
         }
-        self.ingest_merged(cfg, ev).await
+        self.ingest_merged(cfg.clone(), ev).await
     }
 
     /// 合并摄取（急切 + 更新，R5）：以日志为准 `recompute`，保证 测试==实际、追加==新消息。
