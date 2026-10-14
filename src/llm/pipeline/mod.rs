@@ -738,6 +738,19 @@ impl Pipeline {
     pub async fn ingest(&self, ev: IncomingEvent) -> PipelineOutcome {
         let cfg = self.cfg.get().await;
         let mut ev = gate_nc(&cfg, ev);
+        // 非群消息（私聊/临时会话无群号）一律 Dropped，不进入处理（防御性；网关已先拦）。
+        if ev.group_id.trim().is_empty() {
+            self.persist(&ev, "Dropped", "非群消息", "drop:not_group_message")
+                .await;
+            let (version, snapshot) = self.board().await;
+            return PipelineOutcome {
+                status: "Dropped".to_string(),
+                detail: "非群消息".to_string(),
+                reply: None,
+                version,
+                snapshot: Some(snapshot),
+            };
+        }
         // 匿名代排 `X(代)`：席位填 `发送者(代)`，权限按发送者（`proxy_base`）。
         if crate::parser::coalesce::is_anonymous_proxy(&ev.text)
             && crate::settings::proxy_base(&ev.user_id).is_none()

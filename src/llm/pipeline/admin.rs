@@ -29,9 +29,8 @@ impl Pipeline {
                         "订单已锁定；请在结算页确认并解锁。".to_string(),
                     )
                 } else {
-                    let mut st = self.state.lock().await;
-                    st.locked = false;
-                    let v = st.version;
+                    self.set_locked(false).await;
+                    let v = self.state.lock().await.version;
                     (
                         "Applied",
                         "已开团（解锁）".to_string(),
@@ -40,9 +39,8 @@ impl Pipeline {
                 }
             }
             "锁位" | "锁定" | "结团" | "结束" | "lock" | "close" => {
-                let mut st = self.state.lock().await;
-                st.locked = true;
-                let v = st.version;
+                self.set_locked(true).await;
+                let v = self.state.lock().await.version;
                 (
                     "Applied",
                     "已锁定".to_string(),

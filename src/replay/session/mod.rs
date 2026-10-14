@@ -18,7 +18,7 @@ use crate::parser::policy;
 use crate::parser::rule_parser::RuleParser;
 use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
 use crate::replay::state_diff::StateDiff;
-use crate::round::PhaseWindow;
+use crate::round::{PhaseWindow, RoundPhase};
 use crate::settings::{AppConfig, ItemConfig};
 use crate::settlement::SettlementConfig;
 
@@ -134,6 +134,29 @@ pub struct ReplayResult {
     pub diff: ReplayDiff,
     #[serde(default)]
     pub settlement: Option<SettlementConfig>,
+    /// 轮次是否锁定（生效阶段 ∈ {Settling, Locked}，含手动 `RoundPhaseSet` 覆盖）。
+    #[serde(default)]
+    pub locked: bool,
+}
+
+/// 从事件日志折叠手动阶段覆盖（`RoundPhaseSet`，按 `(effective_at, sequence)` last-wins）。
+async fn load_manual_phase(store: &MessageLog, round_id: &str) -> Option<RoundPhase> {
+    let raw = match store.read_raw_events(round_id, 0).await {
+        Ok(raw) => raw,
+        Err(_) => return None,
+    };
+    let events: Vec<EventEnvelope> = raw
+        .into_iter()
+        .filter_map(|value| serde_json::from_value(value).ok())
+        .collect();
+    events
+        .into_iter()
+        .filter(|e| matches!(e.payload, DomainEvent::RoundPhaseSet(_)))
+        .max_by(|a, b| (a.effective_at, a.sequence).cmp(&(b.effective_at, b.sequence)))
+        .and_then(|e| match e.payload {
+            DomainEvent::RoundPhaseSet(set) => set.phase,
+            _ => None,
+        })
 }
 
 /// 从持久化消息日志重放（C2）：复用与实时同一条规则解析器 + 校验层 + 分配引擎。
@@ -144,7 +167,8 @@ pub async fn replay(
 ) -> anyhow::Result<ReplayResult> {
     let records = store.read_all(&base.round.round_id).await?;
     let parse_overrides = load_parse_overrides(store, &base.round.round_id).await;
-    replay_messages_with_parse(base, &records, overrides, &parse_overrides).await
+    let manual_phase = load_manual_phase(store, &base.round.round_id).await;
+    replay_messages_with_parse(base, &records, overrides, &parse_overrides, manual_phase).await
 }
 
 /// 从内存消息列表重放（快照导入 / 单测复用）；不消费 `ParseOverride` 事件。
@@ -153,7 +177,7 @@ pub async fn replay_messages(
     records: &[MessageRecord],
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
-    replay_messages_with_parse(base, records, overrides, &HashMap::new()).await
+    replay_messages_with_parse(base, records, overrides, &HashMap::new(), None).await
 }
 
 /// §U7：读取轮次事件日志中的 `ParseOverride`，建立 `message_id → 修正解析` 映射。
@@ -178,15 +202,16 @@ async fn replay_messages_with_parse(
     records: &[MessageRecord],
     overrides: ReplayOverrides,
     parse_overrides: &HashMap<String, ParsedMessage>,
+    manual_phase: Option<RoundPhase>,
 ) -> anyhow::Result<ReplayResult> {
     let replay_cfg = apply_overrides(base, &overrides);
 
     let (baseline_board, computed) = if overrides.is_empty() {
-        let computed = compute(&replay_cfg, records, parse_overrides).await;
+        let computed = compute(&replay_cfg, records, parse_overrides, manual_phase).await;
         (computed.board.clone(), computed)
     } else {
-        let baseline = compute(base, records, parse_overrides).await;
-        let computed = compute(&replay_cfg, records, parse_overrides).await;
+        let baseline = compute(base, records, parse_overrides, manual_phase).await;
+        let computed = compute(&replay_cfg, records, parse_overrides, manual_phase).await;
         (baseline.board, computed)
     };
 
@@ -204,6 +229,7 @@ async fn replay_messages_with_parse(
         display_names: computed.display_names,
         diff,
         settlement: overrides.settlement,
+        locked: computed.locked,
     })
 }
 
@@ -215,12 +241,14 @@ struct Computation {
     display_names: HashMap<UserId, String>,
     board: AllocationSnapshot,
     version: i64,
+    locked: bool,
 }
 
 async fn compute(
     cfg: &AppConfig,
     records: &[MessageRecord],
     parse_overrides: &HashMap<String, ParsedMessage>,
+    manual_phase: Option<RoundPhase>,
 ) -> Computation {
     let items = cfg.round.to_items();
     let round_id = RoundId(cfg.round.round_id.clone());
@@ -292,6 +320,7 @@ async fn compute(
                 &validator,
                 parse_overrides,
                 &display_names,
+                manual_phase,
             )
             .await
         } else {
@@ -310,6 +339,7 @@ async fn compute(
                 &validator,
                 parse_overrides,
                 &display_names,
+                manual_phase,
             )
             .await
         };
@@ -359,6 +389,11 @@ async fn compute(
     board.generated_at = DateTime::<Utc>::from_timestamp_millis(latest_ts).unwrap_or_else(Utc::now);
     let version = board.version;
 
+    let locked = matches!(
+        manual_phase.or_else(|| policy::phase_at(&cfg.round.phases, Utc::now().timestamp_millis())),
+        Some(RoundPhase::Settling) | Some(RoundPhase::Locked)
+    );
+
     Computation {
         messages,
         outcomes,
@@ -367,6 +402,7 @@ async fn compute(
         display_names,
         board,
         version,
+        locked,
     }
 }
 
@@ -386,6 +422,7 @@ fn skipped(status: &str, detail: impl Into<String>) -> Processed {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_one(
     cfg: &AppConfig,
     rec: &MessageRecord,
@@ -394,6 +431,7 @@ async fn process_one(
     validator: &EventValidator,
     parse_overrides: &HashMap<String, ParsedMessage>,
     display_names: &HashMap<UserId, String>,
+    manual_phase: Option<RoundPhase>,
 ) -> Processed {
     let display = if rec.nickname.trim().is_empty() {
         rec.user_id.clone()
@@ -501,11 +539,11 @@ async fn process_one(
         return skipped("Rejected", "优先时段仅限预存(购物金)用户");
     }
 
-    if !cfg.round.phases.is_empty() {
-        if let Some(phase) = policy::phase_at(&cfg.round.phases, rec.timestamp_ms) {
-            if let Some(detail) = policy::phase_rejection(cfg, &event, phase, is_priority) {
-                return skipped("Rejected", detail);
-            }
+    if let Some(phase) =
+        manual_phase.or_else(|| policy::phase_at(&cfg.round.phases, rec.timestamp_ms))
+    {
+        if let Some(detail) = policy::phase_rejection(cfg, &event, phase, is_priority) {
+            return skipped("Rejected", detail);
         }
     }
 

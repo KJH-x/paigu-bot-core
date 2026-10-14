@@ -156,7 +156,8 @@ pub struct RoundOpened {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoundPhaseSet {
-    pub phase: crate::round::RoundPhase,
+    /// 手动阶段覆盖；`None` = 清除覆盖（回到时间窗推导）。
+    pub phase: Option<crate::round::RoundPhase>,
     pub set_by: crate::domain::ids::UserId,
 }
 

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use serde_json::{json, Value};
 
 use crate::domain::claim::Eligibility;
-use crate::domain::event::EventEnvelope;
+use crate::domain::event::{DomainEvent, EventEnvelope};
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::messages::MessageRecord as LogMessageRecord;
 use crate::replay::session::ReplayResult;
@@ -54,14 +54,42 @@ impl Pipeline {
         self.state.lock().await.locked
     }
 
+    /// 锁/解锁：写 `RoundPhaseSet` 事件（事件溯源的锁=阶段），并即时更新内存缓存。
+    /// `true` → 阶段覆盖为 `Settling`（锁定）；`false` → 清除覆盖。
     pub async fn set_locked(&self, locked: bool) {
+        let cfg = self.cfg.get().await;
+        let by = crate::domain::ids::UserId("admin".to_string());
+        let event = EventEnvelope {
+            event_id: crate::domain::ids::EventId(uuid::Uuid::new_v4().to_string()),
+            round_id: crate::domain::ids::RoundId(cfg.round.round_id.clone()),
+            group_id: cfg.round.group_id.clone(),
+            user_id: by.clone(),
+            raw_message_id: None,
+            event_type: "round_phase_set".to_string(),
+            effective_at: chrono::Utc::now(),
+            sequence: crate::messages::next_seq(),
+            payload: DomainEvent::RoundPhaseSet(crate::domain::event::RoundPhaseSet {
+                phase: if locked {
+                    Some(crate::round::RoundPhase::Settling)
+                } else {
+                    None
+                },
+                set_by: by,
+            }),
+            status: crate::domain::event::EventStatus::Active,
+        };
+        if let Ok(value) = serde_json::to_value(&event) {
+            if let Err(e) = self.messages.append_raw_event(&cfg.round.round_id, &value).await {
+                tracing::warn!("RoundPhaseSet 事件写入失败: {e}");
+            }
+        }
         self.state.lock().await.locked = locked;
     }
 
     /// 将持久化日志的权威重放结果一次性应用到实时管线。
     pub async fn apply_replay(&self, result: &ReplayResult, records: &[LogMessageRecord]) {
         let mut state = self.state.lock().await;
-        let locked = state.locked;
+        let locked = result.locked;
         let mut seen = HashSet::new();
         let mut identity = std::collections::HashMap::new();
         for record in records {
