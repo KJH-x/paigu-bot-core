@@ -143,7 +143,14 @@ pub fn normalize_message(ev: &RouteMessageEvent) -> String {
         }
     }
 
-    text.trim().chars().take(MAX_INBOUND_TEXT_CHARS).collect()
+    // F8：非 JSON 文本按上限截断；**JSON 对象/数组（伪造信封或批次）不截断**，
+    // 否则大批次测试注入会被截断成非法 JSON 而无法解包。
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        trimmed.to_string()
+    } else {
+        trimmed.chars().take(MAX_INBOUND_TEXT_CHARS).collect()
+    }
 }
 
 pub fn sanitize(text: &str) -> String {
