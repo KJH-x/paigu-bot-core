@@ -36,7 +36,7 @@ pub struct ParsedClaimItem {
     pub notes: Option<String>,
     #[serde(default)]
     pub resolved_item_id: Option<String>,
-    #[serde(default, alias = "resolved_variant_id")]
+    #[serde(default)]
     pub resolved_subitem_id: Option<String>,
     #[serde(default)]
     pub resolved_round_id: Option<String>,

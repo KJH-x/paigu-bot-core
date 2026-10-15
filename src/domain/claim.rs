@@ -45,7 +45,7 @@ impl SlotPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaimLine {
     pub item_id: ItemId,
-    #[serde(default, alias = "variant_id")]
+    #[serde(default)]
     pub subitem_id: Option<String>,
     pub quantity: u32,
     pub claim_type: ClaimType,
@@ -163,7 +163,7 @@ pub struct EffectiveClaimLine {
     pub line_index: u32,
     pub user_id: UserId,
     pub item_id: ItemId,
-    #[serde(default, alias = "variant_id")]
+    #[serde(default)]
     pub subitem_id: Option<String>,
     pub quantity: u32,
     pub claim_type: ClaimType,

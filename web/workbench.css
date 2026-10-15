@@ -99,7 +99,7 @@ body[data-page="round"] .single-row input[type="number"] { text-align: right; }
   body[data-page="round"] #sec-items .panel-body { max-height: calc(100vh - var(--shell-height, 110px) - 92px); overflow: auto; }
   body[data-page="round"] #sec-rounds > .panel-body { max-height: calc(100vh - var(--shell-height, 110px) - 92px); overflow: auto; }
   body[data-page="round"] #kind-tabs { position: sticky; top: 0; z-index: 3; background: var(--nl-surface); }
-  body[data-page="round"] .cat-item-head { position: sticky; top: 34px; z-index: 2; }
+  body[data-page="round"] .cat-item-head { position: sticky; top: var(--kind-tabs-h, 34px); z-index: 2; }
   body[data-page="round"] table.vtable th:last-child,
   body[data-page="round"] table.vtable td:last-child { width: 44px; }
   body[data-page="round"] .cat-grid .hint, body[data-page="round"] .alias-wrap .hint { margin-inline: 4px; }
@@ -121,16 +121,6 @@ body[data-page="round"] .single-row input[type="number"] { text-align: right; }
   body[data-page="settings"] .cn-table thead th { position: sticky; top: 0; z-index: 1; background: var(--nl-surface); }
   body[data-page="settings"] .cn-table input { width: 100%; }
   body[data-page="settings"] .admin-section:nth-of-type(n) { --section-accent: var(--page-accent); --section-wash: var(--page-wash); }
-  body[data-page="sim"] .sim-workspace { display: grid; grid-template-columns: 460px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 8px; height: calc(100vh - var(--shell-height, 110px) - 16px); }
-  body[data-page="sim"] #sim-send { grid-column: 1; grid-row: 1; }
-  body[data-page="sim"] #sim-board { grid-column: 2; grid-row: 1 / 3; }
-  body[data-page="sim"] #sim-transcript { grid-column: 1; grid-row: 2; margin: 0 !important; }
-  body[data-page="sim"] #sim-board, body[data-page="sim"] #sim-transcript { display: flex; flex-direction: column; min-height: 0; }
-  body[data-page="sim"] #sim-board .panel-body { max-height: none !important; min-height: 0; overflow: auto; flex: 1; }
-  body[data-page="sim"] #transcript { max-height: none; height: 100%; overflow: auto; }
-  body[data-page="sim"] #sim-transcript .panel-body { min-height: 0; overflow: auto; flex: 1; }
-  body[data-page="sim"] .field { padding: 4px 0; background: none; border: 0; }
-  body[data-page="sim"] .turn { padding: 8px; }
   body[data-page="settlement"] .settlement-workspace { grid-template-columns: 580px minmax(0, 1fr); align-items: start; padding: 8px; }
   body[data-page="settlement"] #settle .panel-body { max-height: calc(100vh - var(--shell-height, 110px) - 94px); overflow: auto; }
   body[data-page="settlement"] #order > .panel-head { flex-wrap: wrap; padding: 8px 10px; }
@@ -164,7 +154,7 @@ body[data-page="round"] .single-row input[type="number"] { text-align: right; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .45); display: flex; align-items: center; justify-content: center; }
 .modal { min-width: 340px; max-width: min(560px, 92vw); max-height: 86vh; overflow: auto; padding: 14px; border: 1px solid var(--nl-line); border-radius: 8px; background-color: var(--nl-surface); background-image: repeating-linear-gradient(45deg, rgba(127, 127, 127, .10) 0 8px, transparent 8px 18px); box-shadow: 0 12px 40px rgba(0, 0, 0, .35); }
 .modal .modal-title { font-weight: 600; margin-bottom: 8px; }
-.modal .modal-src { font-size: 12px; opacity: .8; margin-bottom: 8px; overflow-wrap: anywhere; }
+.modal .modal-src { font-size: 12px; opacity: .8; margin-bottom: 8px; overflow-wrap: anywhere; white-space: pre-line; }
 .modal .field { display: block; margin-bottom: 8px; font-size: 12px; }
 .modal .field input { display: block; width: 100%; margin-top: 2px; }
 .modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }

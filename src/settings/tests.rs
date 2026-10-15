@@ -297,19 +297,3 @@ async fn reload_bumps_revision() {
     assert_eq!(store.get().await.revision, before + 1);
     let _ = std::fs::remove_file(&path);
 }
-
-#[test]
-fn legacy_variant_keys_deserialize_into_subitems() {
-    let json = r#"{
-        "item_id": "pass",
-        "name": "通行证",
-        "kind": "group",
-        "variants": [
-            {"variant_id": "v1", "name": "甲", "unit_price_cents": 5000}
-        ]
-    }"#;
-    let item: ItemConfig = serde_json::from_str(json).expect("legacy json");
-    assert_eq!(item.subitems.len(), 1);
-    assert_eq!(item.subitems[0].subitem_id, "v1");
-    assert_eq!(item.subitems[0].name, "甲");
-}

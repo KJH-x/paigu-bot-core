@@ -169,7 +169,7 @@ pub struct ItemConfig {
     /// 整盒路由（§5）：拼团项（`kind="group"`）在「子项为空」时重定向到的整盒商品 id。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub box_item_id: Option<String>,
-    #[serde(default, alias = "variants")]
+    #[serde(default)]
     pub subitems: Vec<SubitemConfig>,
 }
 
@@ -192,7 +192,6 @@ pub fn box_redirect_map(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubitemConfig {
-    #[serde(alias = "variant_id")]
     pub subitem_id: String,
     pub name: String,
     /// 子项原价 A（分）。
@@ -478,7 +477,13 @@ fn load_member_name_map(path: &str) -> HashMap<String, String> {
             .get("nickname")
             .and_then(value_to_str)
             .unwrap_or_default();
-        let name = if !card.trim().is_empty() { card } else { nick };
+        let raw = if !card.trim().is_empty() {
+            card
+        } else {
+            nick
+        };
+        // 统一昵称来源=群名片；此处做同样清洗（截首个括号/空白 + NFKC + 尾标点）。
+        let (name, _display) = crate::parser::normalize::clean_nickname(&raw);
         if !name.trim().is_empty() {
             map.insert(uid, name);
         }

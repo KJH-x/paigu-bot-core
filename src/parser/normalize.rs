@@ -38,14 +38,20 @@ fn split_proxy(s: &str) -> Option<(String, String)> {
     Some((a.to_string(), b.to_string()))
 }
 
+/// 去掉群名片里的注释：从首个**括号或空白**处截断。
+/// 约定每张群名片**至少包含 CN**，少部分带注释（空格/括号等），如 `HOA 有猫猫喊我` → `HOA`。
 fn strip_remark(s: &str) -> String {
-    match s.char_indices().find(|(_, c)| *c == '(' || *c == '（') {
-        Some((i, _)) => s[..i].trim().to_string(),
+    let cut = s
+        .char_indices()
+        .find(|(_, c)| *c == '(' || *c == '（' || c.is_whitespace())
+        .map(|(i, _)| i);
+    match cut {
+        Some(i) => s[..i].trim().to_string(),
         None => s.trim().to_string(),
     }
 }
 
-/// 昵称清洗（D-05 下沉至中性模块）：全角归一 + 去括号备注 + 代理写法 `A(代B)`。
+/// 昵称清洗（D-05 下沉至中性模块）：NFKC + 全角归一 + **截断首个括号/空白** + 去尾标点 + 代理写法 `A(代B)`。
 /// 返回 `(identity, display)`；`identity` 用于白名单/优先级匹配，`display` 用于展示。
 pub fn clean_nickname(raw: &str) -> (String, String) {
     // NFKC：兼容字符归一（如 Mathematical Alphanumeric `𝙳𝙺𝙻𝙰` → `DKLA`、`①`→`1`）。
@@ -147,6 +153,9 @@ mod tests {
         assert_eq!(clean_nickname("???甲").1, "???甲");
         assert_eq!(clean_nickname("丙/丁（备注丙）").1, "丙/丁");
         assert_eq!(clean_nickname("戊（备注戊👀）").1, "戊");
+        // 群名片 = CN + 可选注释（空格/全角空格分隔）→ 截首个空白。
+        assert_eq!(clean_nickname("HOA 有猫猫喊我").1, "HOA");
+        assert_eq!(clean_nickname("甲　乙").1, "甲");
     }
 
     #[test]

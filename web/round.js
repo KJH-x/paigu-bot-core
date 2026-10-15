@@ -285,6 +285,8 @@
         esc(k.label) + '<span class="cnt">' + cnt + '</span></button>';
     });
     host.innerHTML = html;
+    // sticky 偏移随实际高度（避免硬编码）：`.cat-item-head` 用 `var(--kind-tabs-h)`。
+    document.documentElement.style.setProperty('--kind-tabs-h', host.offsetHeight + 'px');
   }
 
   /* ------------------------------ 渲染：商品 ------------------------------ */

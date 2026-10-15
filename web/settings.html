@@ -121,11 +121,12 @@
         </section>
 
         <section class="panel admin-section" id="sec-members">
-          <div class="panel-head">
-            <span>成员名称与别名</span>
-            <span class="spacer"></span>
-            <button id="members-cn-save" class="small">保存成员 CN</button>
-          </div>
+            <div class="panel-head">
+              <span>成员名称与别名</span>
+              <span class="spacer"></span>
+              <button id="members-cn-llm" class="small">LLM 清理群名片</button>
+              <button id="members-cn-save" class="small">保存成员 CN</button>
+            </div>
           <div class="panel-body">
             <div class="split">
               <label class="field"><span>群号</span><input id="mb-group" /></label>
@@ -137,15 +138,15 @@
               <span id="members-info" class="hint"></span>
             </div>
             <div class="explain" style="margin-top:8px">
-              <b>CN = 净化后的群昵称，绑定 QQ(user_id)</b>。用途：① 请求匹配；② <b>制作结算表格/账单里的人名</b>（回退顺序：CN → 归一化昵称 → user_id）。
-              人工编辑 CN 后写入 <code>members.cn_overrides</code>（config 热载 + 乐观并发 409）。
+              <b>昵称来源统一 = 群名片（card）</b>；<b>CN = 清洗后的群名片，绑定 QQ(user_id)</b>。用途：① 请求匹配；② <b>制作结算表格/账单里的人名</b>（回退顺序：CN → 清洗后群名片 → user_id）。
+              未编辑者 CN 自动填充（= 清洗后群名片，清洗会截断到首个括号/空白）；人工编辑 CN 后写入 <code>members.cn_overrides</code> 并停止自动填充（config 热载 + 乐观并发 409）。
             </div>
             <div class="row" style="margin-top:8px;gap:8px">
-              <input id="members-filter" type="search" placeholder="筛选：名称 / 原始名称 / CN / 别名 / 拼音（全拼或首字母）" style="flex:1" />
+              <input id="members-filter" type="search" placeholder="筛选：群名片 / CN / 别名 / 拼音（全拼或首字母）" style="flex:1" />
             </div>
             <div class="table-scroll" style="max-height:40vh;margin-top:8px">
               <table class="grid cn-table">
-                <thead><tr><th>user_id</th><th>原始名称</th><th>子项/昵称（清洗后，可编辑）</th><th>CN</th><th>别名</th><th>角色</th><th>操作</th></tr></thead>
+                <thead><tr><th>user_id</th><th>群名片</th><th>昵称（清洗后，可编辑）</th><th>CN</th><th>别名</th><th>角色</th><th>操作</th></tr></thead>
                 <tbody id="members-body"></tbody>
               </table>
               <div id="members-empty" class="empty">尚未加载成员列表</div>

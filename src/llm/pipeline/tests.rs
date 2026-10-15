@@ -817,6 +817,25 @@ fn forged_batch_unpacks_into_multiple() {
     let _ = plain;
 }
 
+#[test]
+fn forged_batch_is_sorted_by_timestamp() {
+    use crate::round::RoundCategory;
+    let mut cfg = base_config();
+    cfg.gateway.accept_forged_messages = true;
+    cfg.gateway.test_group_id = Some("123456789".to_string());
+    cfg.round.category = RoundCategory::Test;
+    cfg.round.group_id = "123456789".to_string();
+
+    let text = r#"[{"id":"b","text":"第二条","timestamp":2000},{"id":"a","text":"第一条","timestamp":1000}]"#;
+    let evs = gate_nc_multi(&cfg, event("99999", "外层", text, 5));
+    assert_eq!(evs.len(), 2);
+    assert_eq!(evs[0].user_id, "a", "应按 timestamp 升序");
+    assert_eq!(evs[0].timestamp_ms, 1000);
+    assert_eq!(evs[1].user_id, "b");
+    assert!(evs[0].message_id.ends_with("#0"));
+    assert!(evs[1].message_id.ends_with("#1"));
+}
+
 #[tokio::test]
 async fn anonymous_proxy_uses_sender_permission() {
     let mut cfg = base_config();

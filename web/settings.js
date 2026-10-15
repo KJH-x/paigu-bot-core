@@ -106,10 +106,10 @@
   function collectOverrides() {
     var out = [];
     (state.members || []).forEach(function (m) {
-      var cn = (m.cn || '').trim();
       var aliases = M.dedupe(m.aliases || []);
-      if (!cn && !aliases.length) return;
-      out.push({ user_id: m.user_id, cn: cn, aliases: aliases });
+      // 未编辑的 CN 由前端自动填充（=清洗后群名片），不落库；仅持久化用户编辑过的 CN / 别名。
+      if (!m.cnTouched && !aliases.length) return;
+      out.push({ user_id: m.user_id, cn: (m.cn || '').trim(), aliases: aliases });
     });
     return out;
   }
@@ -192,14 +192,17 @@
       m = m || {};
       var uid = m.user_id != null ? String(m.user_id) : '';
       var ov = byId[uid];
+      var card = m.card != null ? String(m.card) : '';
+      var rawName = card.trim() ? card : (m.nickname != null ? String(m.nickname) : '');
+      var cleaned = P.cleanNickname(rawName);
       return {
         user_id: uid,
         nickname: m.nickname != null ? String(m.nickname) : '',
-        raw: m.nickname != null ? String(m.nickname) : '',
-        cleaned: m.cleaned || P.cleanNickname(m.nickname || ''),
+        raw: rawName,
+        cleaned: cleaned,
         role: m.role || '',
         resolved: m.resolved != null ? String(m.resolved) : '',
-        cn: ov ? ov.cn : (m.cn != null ? String(m.cn) : ''),
+        cn: ov ? ov.cn : cleaned,
         cnTouched: !!(ov && ov.cn),
         aliases: ov ? M.asStrArray(ov.aliases) : [],
         fallback: !!m.fallback
@@ -266,6 +269,7 @@
     if (t.classList.contains('clean')) {
       entry.cleaned = t.value;
       if (!entry.cnTouched) entry.cn = t.value;
+      entry.cnTouched = true;
       return;
     }
     if (t.classList.contains('aliases')) entry.aliases = M.splitTokens(t.value);
@@ -307,8 +311,25 @@
       }).then(function () { $('members-refresh').disabled = false; });
   }
 
-  /* ------------------------------ 快照 ------------------------------ */
+  function llmCleanMembers() {
+    var btn = $('members-cn-llm');
+    if (btn) btn.disabled = true;
+    P.post('/api/members/cn-suggest', {}).then(function (res) {
+      var sug = (res && res.suggestions) || [];
+      var byId = {};
+      sug.forEach(function (s) { byId[s.user_id] = s.cn; });
+      var filled = 0;
+      (state.members || []).forEach(function (m) {
+        if (byId[m.user_id]) { m.cn = byId[m.user_id]; m.cnTouched = true; filled++; }
+      });
+      renderMembers();
+      banner('LLM 清理完成：' + filled + ' 条建议已填入 CN，可编辑后保存。', true);
+    }).catch(function (err) {
+      banner('LLM 清理失败：' + P.errorText(err), false);
+    }).then(function () { if (btn) btn.disabled = false; });
+  }
 
+  /* ------------------------------ 快照 ------------------------------ */
   function exportSnapshot() {
     var out = val('snap-out').trim();
     var body = { format: 'file' };
@@ -381,6 +402,7 @@
     $('gw-reply-toggle').addEventListener('click', function () { toggleGateway('reply'); });
     $('gw-admin-toggle').addEventListener('click', function () { toggleGateway('admin'); });
     $('members-refresh').addEventListener('click', refreshMembers);
+  if ($('members-cn-llm')) $('members-cn-llm').addEventListener('click', llmCleanMembers);
     $('members-cn-save').addEventListener('click', save);
   $('members-body').addEventListener('input', onMembersInput);
   $('members-body').addEventListener('click', onMembersClick);

@@ -83,16 +83,24 @@ pub(crate) fn gate_nc_multi(cfg: &AppConfig, ev: IncomingEvent) -> Vec<IncomingE
         return vec![ev];
     }
     if let Some(list) = parse_forged_list(&ev.text) {
-        return list
+        let outer_ts = ev.timestamp_ms;
+        // 解包后**按时间戳升序**处理（同刻按给定顺序稳定排序）；索引 `#i` 随排序结果重排。
+        let mut entries: Vec<(i64, usize, ForgedEnvelope)> = list
             .into_iter()
             .enumerate()
-            .map(|(i, e)| IncomingEvent {
+            .map(|(i, e)| (e.timestamp_ms.unwrap_or(outer_ts), i, e))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        return entries
+            .into_iter()
+            .enumerate()
+            .map(|(i, (_, _, e))| IncomingEvent {
                 group_id: ev.group_id.clone(),
                 user_id: e.id.clone(),
                 nickname: e.nickname.unwrap_or_else(|| e.id.clone()),
                 message_id: format!("{}#{}", ev.message_id, i),
                 text: e.text,
-                timestamp_ms: e.timestamp_ms.unwrap_or(ev.timestamp_ms),
+                timestamp_ms: e.timestamp_ms.unwrap_or(outer_ts),
                 is_admin: e.is_admin.unwrap_or(false),
                 sender_user_id: None,
                 sender_nickname: None,

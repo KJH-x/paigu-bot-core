@@ -41,7 +41,6 @@ impl ItemKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ItemSubitem {
-    #[serde(alias = "variant_id")]
     pub subitem_id: String,
     pub name: String,
     pub unit_price: MoneyCents,
@@ -64,7 +63,7 @@ pub struct Item {
     pub aliases: Vec<String>,
     pub sort_order: i32,
     pub metadata: JsonValue,
-    #[serde(default, alias = "variants")]
+    #[serde(default)]
     pub subitems: Vec<ItemSubitem>,
 }
 

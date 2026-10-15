@@ -128,7 +128,7 @@
       '<div class="modal-actions"><button type="button" class="ov-cancel">取消</button><button type="button" class="ov-ok">确认</button></div>' +
       '<div class="modal-err"></div>' +
       '</div>';
-    wrap.querySelector('.modal-src').textContent = '原文：' + (m.text || '');
+    wrap.querySelector('.modal-src').textContent = '原文：' + (m.text || '') + (m.detail ? '\n说明/候选：' + m.detail : '');
     document.body.appendChild(wrap);
     function close() { wrap.remove(); }
     wrap.addEventListener('click', function (e) { if (e.target === wrap) close(); });

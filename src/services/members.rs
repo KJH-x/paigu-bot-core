@@ -55,17 +55,98 @@ pub async fn get_members(state: &ApiState) -> Value {
     json!({ "members": decorated, "source": source })
 }
 
+fn scalar_string(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// 群名片 LLM 清理：假设每张群名片至少含 CN，去除空格/括号等注释，产出 `user_id -> CN` 建议。
+pub async fn suggest_cn(state: &ApiState) -> Result<Value, super::ServiceError> {
+    let cfg = state.cfg.get().await;
+    let (members, source) = members_from_disk(Path::new(&cfg.members.cache_path));
+    let pairs: Vec<Value> = members
+        .iter()
+        .filter_map(|m| {
+            let uid = m.get("user_id").and_then(scalar_string)?;
+            let card = member_name(m);
+            if card.trim().is_empty() {
+                return None;
+            }
+            Some(json!({ "user_id": uid, "card": card }))
+        })
+        .collect();
+    if pairs.is_empty() {
+        return Ok(json!({ "suggestions": [], "source": source }));
+    }
+    let system = "你是群名片清洗助手。每张群名片至少包含一个 CN（人名/称呼），后面可能跟空格、括号等注释（状态/后缀/备注）。\
+请为每条提取最核心的 CN（去掉注释，仅保留人名本身），user_id 原样返回。只输出 JSON：{\"items\":[{\"user_id\":\"...\",\"cn\":\"...\"}]}，不要解释。";
+    let user = format!("群名片列表（JSON 数组）：\n{}", Value::Array(pairs));
+    let client = state.pipeline.llm_client();
+    let raw = client
+        .complete(&cfg.llm, system, &user)
+        .await
+        .map_err(super::ServiceError::Internal)?;
+    let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
+        super::ServiceError::Internal(anyhow::anyhow!("LLM 响应非 JSON: {e}"))
+    })?;
+    let items = parsed
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let suggestions: Vec<Value> = items
+        .into_iter()
+        .filter_map(|it| {
+            let uid = it.get("user_id").and_then(scalar_string)?;
+            let cn = it
+                .get("cn")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            (!cn.is_empty()).then(|| json!({ "user_id": uid, "cn": cn }))
+        })
+        .collect();
+    Ok(json!({ "suggestions": suggestions, "source": source }))
+}
+
+/// 群名片优先、回退昵称（与网关 `parse_identity` 一致：统一昵称来源 = 群名片）。
+pub fn member_name(m: &Value) -> String {
+    let card = m
+        .get("card")
+        .and_then(value_as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !card.is_empty() {
+        return card;
+    }
+    m.get("nickname")
+        .and_then(value_as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+/// 兼容字符串/数字 user_id 等标量取值。
+fn value_as_str(v: &Value) -> Option<&str> {
+    v.as_str()
+}
+
 /// 成员项附加 `cn`（CN 覆盖，未配置为 null）与 `resolved`（U4 展示名，CN→归一化昵称→user_id）。
 fn decorate_member(cfg: &AppConfig, member: &Value) -> Value {
     let user_id = member.get("user_id").and_then(Value::as_str).unwrap_or("");
-    let nickname = member.get("nickname").and_then(Value::as_str).unwrap_or("");
+    let name = member_name(member);
     let cn = cfg
         .members
         .cn_overrides
         .iter()
         .find(|o| o.user_id == user_id)
         .map(|o| o.cn.clone());
-    let resolved = resolve_cn(cfg, user_id, nickname).unwrap_or_default();
+    let resolved = resolve_cn(cfg, user_id, &name).unwrap_or_default();
     let mut out = member.clone();
     if let Some(obj) = out.as_object_mut() {
         obj.insert("cn".to_string(), json!(cn));
@@ -102,9 +183,9 @@ pub fn cn_display_map(cfg: &AppConfig, members: &[Value]) -> HashMap<String, Str
         if cn.is_empty() {
             continue;
         }
-        let nickname = m.get("nickname").and_then(Value::as_str).unwrap_or("");
-        if !nickname.trim().is_empty() {
-            map.insert(nickname.to_string(), cn.to_string());
+        let name = member_name(m);
+        if !name.trim().is_empty() {
+            map.insert(name.clone(), cn.to_string());
         }
         map.insert(over.cn.clone(), cn.to_string());
         for alias in &over.aliases {

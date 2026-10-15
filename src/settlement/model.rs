@@ -36,7 +36,7 @@ impl Package {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Line {
     pub item_id: String,
-    #[serde(default, alias = "variant_id")]
+    #[serde(default)]
     pub subitem_id: Option<String>,
     pub qty: u32,
     pub unit_price_cents: i64,
@@ -76,7 +76,7 @@ impl Line {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnitPrice {
     pub item_id: String,
-    #[serde(default, alias = "variant_id")]
+    #[serde(default)]
     pub subitem_id: Option<String>,
     pub unit_price_cents: i64,
 }
@@ -106,7 +106,7 @@ pub struct SettlementResult {
 pub struct LineSettlement {
     pub package_id: String,
     pub item_id: String,
-    #[serde(default, alias = "variant_id")]
+    #[serde(default)]
     pub subitem_id: Option<String>,
     pub qty: u32,
     /// 标价单价（原价）。

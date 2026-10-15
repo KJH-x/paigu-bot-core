@@ -54,11 +54,13 @@
     return v == null ? v : JSON.parse(JSON.stringify(v));
   }
 
+  // 与后端 `parser::normalize::clean_nickname` 对齐：NFKC + 截断首个括号/空白 + 去尾标点。
   function cleanNickname(raw) {
     var s = String(raw == null ? '' : raw);
-    var idx = s.search(/[（(]/);
-    if (idx >= 0) s = s.slice(0, idx);
-    return s.trim();
+    try { s = s.normalize('NFKC'); } catch (e) { /* 老浏览器忽略 */ }
+    var cut = s.match(/[（(\s]/);
+    if (cut) s = s.slice(0, cut.index);
+    return s.replace(/[\s、。，．.·・:：;；!！?？~～]+$/, '');
   }
 
   function resolveApiBase() {
@@ -843,7 +845,7 @@
     for (var i = 0; i < asArray(src).length; i++) {
       var m = src[i] || {};
       if (typeof m === 'string') { out.push({ user_id: m, nickname: m, role: '', cleaned: cleanNickname(m) }); continue; }
-      var nick = m.nickname || m.card || m.name || m.display_name || m.user_id || '';
+      var nick = m.card || m.nickname || m.name || m.display_name || m.user_id || '';
       out.push({
         user_id: m.user_id != null ? String(m.user_id) : (m.id != null ? String(m.id) : nick),
         nickname: String(nick),
