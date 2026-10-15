@@ -195,34 +195,63 @@
       return {
         user_id: uid,
         nickname: m.nickname != null ? String(m.nickname) : '',
+        raw: m.nickname != null ? String(m.nickname) : '',
         cleaned: m.cleaned || P.cleanNickname(m.nickname || ''),
         role: m.role || '',
         resolved: m.resolved != null ? String(m.resolved) : '',
         cn: ov ? ov.cn : (m.cn != null ? String(m.cn) : ''),
+        cnTouched: !!(ov && ov.cn),
         aliases: ov ? M.asStrArray(ov.aliases) : [],
         fallback: !!m.fallback
       };
     });
   }
 
+  function pinyinText(text) {
+    var out = [];
+    if (window.pinyinPro) {
+      try { out = window.pinyinPro.pinyin(String(text || ''), { toneType: 'none', type: 'array' }) || []; }
+      catch (e) { out = []; }
+    }
+    return out.join('');
+  }
+
+  function pinyinInitials(text) {
+    if (!window.pinyinPro) return '';
+    try {
+      return window.pinyinPro.pinyin(String(text || ''), { pattern: 'first', toneType: 'none', type: 'array' }).join('');
+    } catch (e) { return ''; }
+  }
+
+  function memberHaystack(m) {
+    var base = [m.user_id, m.raw, m.cleaned, m.cn, m.resolved, (m.aliases || []).join(' ')].join(' ');
+    return (base + ' ' + pinyinText(base) + ' ' + pinyinInitials(base)).toLowerCase();
+  }
+
   function renderMembers() {
     var tbody = $('members-body');
     if (!tbody) return;
     while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    var filterEl = $('members-filter');
+    var q = filterEl ? filterEl.value.trim().toLowerCase() : '';
     var list = state.members || [];
+    var shown = 0;
     list.forEach(function (m, i) {
+      if (q && memberHaystack(m).indexOf(q) < 0) return;
+      shown++;
       var tr = document.createElement('tr');
       tr.innerHTML =
         '<td class="mono mono-id">' + P.esc(m.user_id) + '</td>' +
-        '<td>' + P.esc(m.cleaned || '') + '</td>' +
+        '<td>' + P.esc(m.raw || '') + '</td>' +
+        '<td><input class="clean" data-user="' + P.esc(m.user_id) + '" value="' + P.esc(m.cleaned || '') + '" /></td>' +
         '<td><input class="cn" data-user="' + P.esc(m.user_id) + '" value="' + P.esc(m.cn || '') + '" placeholder="' + P.esc(m.resolved || m.cleaned || '') + '" /></td>' +
         '<td><input class="aliases" data-user="' + P.esc(m.user_id) + '" value="' + P.esc((m.aliases || []).join(', ')) + '" placeholder="别名，逗号分隔" /></td>' +
         '<td>' + P.esc(m.role || '') + '</td>' +
         '<td><button type="button" class="small" data-use="' + i + '">用当前昵称</button></td>';
       tbody.appendChild(tr);
     });
-    $('members-empty').hidden = list.length > 0;
-    $('members-info').textContent = list.length + ' 人' + (list.length && list[0].fallback ? '（内置子集，未接入群）' : '');
+    $('members-empty').hidden = shown > 0;
+    $('members-info').textContent = (q ? shown + ' / ' : '') + list.length + ' 人' + (list.length && list[0].fallback ? '（内置子集，未接入群）' : '');
   }
 
   function onMembersInput(ev) {
@@ -234,8 +263,13 @@
       if (state.members[i].user_id === uid) { entry = state.members[i]; break; }
     }
     if (!entry) return;
+    if (t.classList.contains('clean')) {
+      entry.cleaned = t.value;
+      if (!entry.cnTouched) entry.cn = t.value;
+      return;
+    }
     if (t.classList.contains('aliases')) entry.aliases = M.splitTokens(t.value);
-    else entry.cn = t.value;
+    else { entry.cn = t.value; entry.cnTouched = true; }
   }
 
   function onMembersClick(ev) {
@@ -245,6 +279,7 @@
     var m = state.members[i];
     if (!m) return;
     m.cn = m.cleaned || m.resolved || m.nickname || '';
+    m.cnTouched = true;
     renderMembers();
   }
 
@@ -347,8 +382,9 @@
     $('gw-admin-toggle').addEventListener('click', function () { toggleGateway('admin'); });
     $('members-refresh').addEventListener('click', refreshMembers);
     $('members-cn-save').addEventListener('click', save);
-    $('members-body').addEventListener('input', onMembersInput);
-    $('members-body').addEventListener('click', onMembersClick);
+  $('members-body').addEventListener('input', onMembersInput);
+  $('members-body').addEventListener('click', onMembersClick);
+  if ($('members-filter')) $('members-filter').addEventListener('input', renderMembers);
     $('snap-export').addEventListener('click', exportSnapshot);
     $('snap-import').addEventListener('click', importSnapshot);
 

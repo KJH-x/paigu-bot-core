@@ -26,7 +26,7 @@ pub struct SettlementConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PricingEntry {
     pub item_id: String,
-    pub variant_id: Option<String>,
+    pub subitem_id: Option<String>,
     pub mode: PricingMode,
     pub value: i64,
 }

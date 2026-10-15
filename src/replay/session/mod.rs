@@ -258,6 +258,7 @@ async fn compute(
         items: items.clone(),
     }];
     let validator = EventValidator::new(REPLAY_CONFIDENCE_THRESHOLD);
+    let box_map = crate::settings::box_redirect_map(&cfg.round.items);
 
     // U4：CN → 归一化昵称 → user_id，供分配展示名与消息人名输出。
     let mut display_names: HashMap<UserId, String> = HashMap::new();
@@ -317,6 +318,7 @@ async fn compute(
                 ordered[group[0]],
                 &items,
                 &round_contexts,
+                &box_map,
                 &validator,
                 parse_overrides,
                 &display_names,
@@ -336,6 +338,7 @@ async fn compute(
                 &synthetic,
                 &items,
                 &round_contexts,
+                &box_map,
                 &validator,
                 parse_overrides,
                 &display_names,
@@ -428,6 +431,7 @@ async fn process_one(
     rec: &MessageRecord,
     items: &[Item],
     round_contexts: &[RoundContext],
+    box_map: &std::collections::HashMap<crate::domain::ids::ItemId, crate::domain::ids::ItemId>,
     validator: &EventValidator,
     parse_overrides: &HashMap<String, ParsedMessage>,
     display_names: &HashMap<UserId, String>,
@@ -503,6 +507,7 @@ async fn process_one(
                 group_id: &rec.group_id,
                 raw_message_id: Some(rec.message_id.clone()),
                 active_rounds: round_contexts,
+                box_map,
                 now,
                 sequence: rec.seq,
             },

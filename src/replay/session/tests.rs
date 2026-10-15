@@ -1,7 +1,7 @@
 use super::*;
 use crate::messages::MessageLog;
 use crate::round::RoundPhase;
-use crate::settings::{default_config, VariantConfig};
+use crate::settings::{default_config, SubitemConfig};
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("paigu-session-{tag}-{}", uuid::Uuid::new_v4()))
@@ -23,8 +23,9 @@ fn test_config() -> AppConfig {
         unit_price_cents: 0,
         max_quantity: None,
         aliases: vec!["徽章".to_string()],
-        variants: vec![VariantConfig {
-            variant_id: "v_a".to_string(),
+        box_item_id: None,
+        subitems: vec![SubitemConfig {
+            subitem_id: "v_a".to_string(),
             name: "甲".to_string(),
             unit_price_cents: 0,
             adjust_cents: 0,

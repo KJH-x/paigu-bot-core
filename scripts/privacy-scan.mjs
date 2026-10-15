@@ -120,7 +120,9 @@ function collectConfigLeaks() {
 }
 
 function main() {
-  const tracked = gitLsFiles();
+  // 第三方 vendored 前端库（压缩产物）跳过隐私扫描：词典音节会误命中真实昵称。
+  const VENDOR_PREFIX = "web/vendor/";
+  const tracked = gitLsFiles().filter((f) => !f.startsWith(VENDOR_PREFIX));
   const findings = [];
   const add = (file, kind, detail) => findings.push({ file, kind, detail });
 

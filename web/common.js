@@ -337,7 +337,7 @@
 
     function updateRow(node, row) {
       node.__data = row;
-      var labelText = (row.variant_name || '单领') + (row.capacity ? '（' + row.capacity + '）' : '');
+      var labelText = (row.subitem_name || '单领') + (row.capacity ? '（' + row.capacity + '）' : '');
       if (node.__label.textContent !== labelText) node.__label.textContent = labelText;
 
       var desired = [];
@@ -546,14 +546,14 @@
       var id = it.item_id != null ? it.item_id : it.id;
       if (id == null) continue;
       id = String(id);
-      var variants = {};
+      var subitems = {};
       var vorder = [];
-      var vlist = asArray(it.variants);
+      var vlist = asArray(it.subitems);
       for (var v = 0; v < vlist.length; v++) {
         var vv = vlist[v] || {};
-        var vid = vv.variant_id != null ? vv.variant_id : (vv.id != null ? vv.id : '');
+        var vid = vv.subitem_id != null ? vv.subitem_id : (vv.id != null ? vv.id : '');
         vid = String(vid);
-        variants[vid] = { name: vv.name || vid, capacity: vv.capacity != null ? vv.capacity : null };
+        subitems[vid] = { name: vv.name || vid, capacity: vv.capacity != null ? vv.capacity : null };
         vorder.push(vid);
       }
       byId[id] = {
@@ -561,8 +561,8 @@
         name: it.name || id,
         kind: it.kind || '',
         aliases: asArray(it.aliases),
-        variants: variants,
-        variant_order: vorder
+        subitems: subitems,
+        subitem_order: vorder
       };
       order.push(id);
     }
@@ -654,17 +654,17 @@
       }
     })();
 
-    function itemMeta(itemId, variantId) {
+    function itemMeta(itemId, subitemId) {
       var m = meta && meta.itemById ? meta.itemById[itemId] : null;
       var name = m ? m.name : itemId;
       var kind = m ? m.kind : '';
-      var vname = variantId || '';
+      var vname = subitemId || '';
       var capacity = null;
-      if (m && m.variants && m.variants[variantId]) {
-        vname = m.variants[variantId].name || variantId;
-        capacity = m.variants[variantId].capacity;
+      if (m && m.subitems && m.subitems[subitemId]) {
+        vname = m.subitems[subitemId].name || subitemId;
+        capacity = m.subitems[subitemId].capacity;
       }
-      return { name: name, kind: kind, variant_name: vname, capacity: capacity };
+      return { name: name, kind: kind, subitem_name: vname, capacity: capacity };
     }
 
     function pushRow(row) {
@@ -675,8 +675,8 @@
 
     function rowFromItem(raw) {
       var itemId = raw.item_id != null ? String(raw.item_id) : (raw.id != null ? String(raw.id) : '');
-      var variantId = raw.variant_id != null ? String(raw.variant_id) : '';
-      var mm = itemMeta(itemId, variantId);
+      var subitemId = raw.subitem_id != null ? String(raw.subitem_id) : '';
+      var mm = itemMeta(itemId, subitemId);
       var boxes = [];
       if (Array.isArray(raw.boxes) && raw.boxes.length) {
         for (var b = 0; b < raw.boxes.length; b++) {
@@ -690,12 +690,12 @@
         boxes.push({ box_index: 1, slots: [] });
       }
       return {
-        key: itemId + '|' + variantId,
+        key: itemId + '|' + subitemId,
         item_id: itemId,
         name: raw.name || raw.item_name || mm.name,
         kind: raw.kind || mm.kind,
-        variant_id: variantId,
-        variant_name: raw.variant_name || mm.variant_name,
+        subitem_id: subitemId,
+        subitem_name: raw.subitem_name || mm.subitem_name,
         capacity: raw.capacity != null ? raw.capacity : mm.capacity,
         boxes: boxes,
         singles: asArray(raw.singles).map(function (s) {
@@ -719,15 +719,15 @@
         var key = keys[n];
         var parts = key.split('|');
         var itemId2 = parts[0];
-        var variantId2 = parts.length > 1 ? parts.slice(1).join('|') : '';
-        var mm2 = itemMeta(itemId2, variantId2);
+        var subitemId2 = parts.length > 1 ? parts.slice(1).join('|') : '';
+        var mm2 = itemMeta(itemId2, subitemId2);
         pushRow({
-          key: itemId2 + '|' + variantId2,
+          key: itemId2 + '|' + subitemId2,
           item_id: itemId2,
           name: mm2.name,
           kind: mm2.kind,
-          variant_id: variantId2,
-          variant_name: mm2.variant_name,
+          subitem_id: subitemId2,
+          subitem_name: mm2.subitem_name,
           capacity: mm2.capacity,
           boxes: [{ box_index: 1, slots: slotsFromContainer(src[key], 1) }],
           singles: [],
@@ -741,7 +741,7 @@
       var seen = {};
       for (var o = 0; o < meta.order.length; o++) {
         var m = meta.itemById[meta.order[o]];
-        var vids = (m.variant_order && m.variant_order.length) ? m.variant_order : [''];
+        var vids = (m.subitem_order && m.subitem_order.length) ? m.subitem_order : [''];
         var baseKey = m.item_id + '|';
         if (map[baseKey] && vids[0] !== '' && !seen[baseKey]) {
           ordered.push(map[baseKey]);
@@ -750,7 +750,7 @@
         for (var vi = 0; vi < vids.length; vi++) {
           var kk = m.item_id + '|' + vids[vi];
           if (seen[kk]) continue;
-          ordered.push(map[kk] || rowFromItem({ item_id: m.item_id, variant_id: vids[vi] }));
+          ordered.push(map[kk] || rowFromItem({ item_id: m.item_id, subitem_id: vids[vi] }));
           seen[kk] = true;
         }
       }
@@ -817,7 +817,7 @@
       for (var b = 0; b < it.boxes.length; b++) {
         var slots = it.boxes[b].slots;
         for (var s = 0; s < slots.length; s++) {
-          if (slots[s].user && slots[s].status !== 'empty') add(slots[s].user, it.variant_name || it.name, 1);
+          if (slots[s].user && slots[s].status !== 'empty') add(slots[s].user, it.subitem_name || it.name, 1);
         }
       }
       for (var g = 0; g < it.singles.length; g++) add(it.singles[g].display, it.name, it.singles[g].quantity);
@@ -906,11 +906,11 @@
       for (var i = 0; i < list.length; i++) {
         var c = list[i] || {};
         var itemId = c.item_id != null ? String(c.item_id) : '';
-        var variantId = c.variant_id != null ? String(c.variant_id) : '';
+        var subitemId = c.subitem_id != null ? String(c.subitem_id) : '';
         var boxIndex = num(c.box_index, 1);
         var slotIndex = num(c.slot_index != null ? c.slot_index : c.slot, 0);
         if (!itemId || !slotIndex) continue;
-        map[itemId + '|' + variantId + '#' + boxIndex + ':' + slotIndex] = {
+        map[itemId + '|' + subitemId + '#' + boxIndex + ':' + slotIndex] = {
           before: c.before != null ? c.before : null,
           after: c.after != null ? c.after : null,
           reason: c.reason || ''

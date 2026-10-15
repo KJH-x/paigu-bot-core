@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn phase_ii_derived_class_a_requires_priority() {
-        // U6：未显式配置 class 时，有变体的商品应推导为 A 并受阶段限制。
+        // U6：未显式配置 class 时，有子项的商品应推导为 A 并受阶段限制。
         let cfg = cfg_with(|c| {
             c.round.phases = vec![PhaseWindow {
                 phase: RoundPhase::PhaseII,

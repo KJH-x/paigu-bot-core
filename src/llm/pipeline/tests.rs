@@ -229,11 +229,11 @@ async fn modify_replaces_previous_claim_quantity() {
     assert_eq!(qty, 2, "改单应替换为 2：{who:?}");
 }
 
-fn slot_user(snapshot: &Value, item_id: &str, variant_id: &str) -> Option<String> {
+fn slot_user(snapshot: &Value, item_id: &str, subitem_id: &str) -> Option<String> {
     let allocations = snapshot.get("item_allocations")?.as_array()?;
     for allocation in allocations {
         if allocation.get("item_id").and_then(|v| v.as_str()) == Some(item_id)
-            && allocation.get("variant_id").and_then(|v| v.as_str()) == Some(variant_id)
+            && allocation.get("subitem_id").and_then(|v| v.as_str()) == Some(subitem_id)
         {
             let slots = allocation
                 .get("boxes")?
@@ -265,7 +265,7 @@ async fn rule_claim_success() {
 
 #[tokio::test]
 async fn llm_claim_success() {
-    let body = r#"{"intent":"claim","items":[{"item":"通行认证SP-月行水上","variant":"岳羽由加莉","quantity":1,"claim_type":"split","slot_policy":"normal"}],"confidence":0.95,"ambiguous_parts":[]}"#;
+    let body = r#"{"intent":"claim","items":[{"item":"通行认证SP-月行水上","subitem":"岳羽由加莉","quantity":1,"claim_type":"split","slot_policy":"normal"}],"confidence":0.95,"ambiguous_parts":[]}"#;
     let pipeline = test_pipeline(&base_config(), MockClient::ok(body));
     let outcome = pipeline
         .process(event("u1", "小明", "帮我抢个yukari", 1_000))
@@ -287,8 +287,8 @@ async fn non_claim_ignored() {
 }
 
 #[tokio::test]
-async fn bare_variant_first_match_resolves_to_catalog_first() {
-    let body = r#"{"intent":"claim","items":[{"variant":"结城理","quantity":1,"claim_type":"split"}],"confidence":0.95,"ambiguous_parts":[]}"#;
+async fn bare_subitem_first_match_resolves_to_catalog_first() {
+    let body = r#"{"intent":"claim","items":[{"subitem":"结城理","quantity":1,"claim_type":"split"}],"confidence":0.95,"ambiguous_parts":[]}"#;
     let pipeline = test_pipeline(&base_config(), MockClient::ok(body));
     let outcome = pipeline
         .process(event("u1", "小明", "帮我留一份yukari", 1_000))
@@ -299,7 +299,7 @@ async fn bare_variant_first_match_resolves_to_catalog_first() {
 }
 
 #[tokio::test]
-async fn rule_bare_variant_first_match() {
+async fn rule_bare_subitem_first_match() {
     let pipeline = test_pipeline(&base_config(), MockClient::ok("{}"));
     let outcome = pipeline
         .process(event("u1", "小明", "排 结城理 1", 1_000))
@@ -321,9 +321,9 @@ async fn ambiguous_category_need_confirm() {
 
 #[tokio::test]
 async fn first_match_clarification_emits_parse_override() {
-    let parse_body = r#"{"intent":"claim","items":[{"variant":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
+    let parse_body = r#"{"intent":"claim","items":[{"subitem":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
     let clarify_body =
-        r#"{"matches":[{"name":"悠人","item":"通行认证SP-月行水上","variant":"结城理"}]}"#;
+        r#"{"matches":[{"name":"悠人","item":"通行认证SP-月行水上","subitem":"结城理"}]}"#;
     let pipeline = test_pipeline(
         &base_config(),
         MockClient::script(vec![
@@ -355,9 +355,9 @@ async fn first_match_clarification_emits_parse_override() {
 /// §U7：重放消费 `ParseOverride`，与实时对同一消息结果一致。
 #[tokio::test]
 async fn replay_consumes_parse_override_matching_realtime() {
-    let parse_body = r#"{"intent":"claim","items":[{"variant":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
+    let parse_body = r#"{"intent":"claim","items":[{"subitem":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
     let clarify_body =
-        r#"{"matches":[{"name":"悠人","item":"通行认证SP-月行水上","variant":"结城理"}]}"#;
+        r#"{"matches":[{"name":"悠人","item":"通行认证SP-月行水上","subitem":"结城理"}]}"#;
     let cfg = base_config();
     let pipeline = test_pipeline(
         &cfg,
@@ -396,8 +396,8 @@ async fn replay_consumes_parse_override_matching_realtime() {
 
 #[tokio::test]
 async fn first_match_clarification_failure_falls_back_to_ignore() {
-    let parse_body = r#"{"intent":"claim","items":[{"variant":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
-    let clarify_body = r#"{"matches":[{"name":"悠人","item":"不存在的商品","variant":"谁"}]}"#;
+    let parse_body = r#"{"intent":"claim","items":[{"subitem":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
+    let clarify_body = r#"{"matches":[{"name":"悠人","item":"不存在的商品","subitem":"谁"}]}"#;
     let pipeline = test_pipeline(
         &base_config(),
         MockClient::script(vec![
@@ -421,7 +421,7 @@ async fn first_match_clarification_failure_falls_back_to_ignore() {
 async fn first_match_clarification_failure_without_fallback_rejected() {
     let mut cfg = base_config();
     cfg.llm.fallback_to_rules = false;
-    let parse_body = r#"{"intent":"claim","items":[{"variant":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
+    let parse_body = r#"{"intent":"claim","items":[{"subitem":"悠人","quantity":1,"claim_type":"split"}],"confidence":0.9,"ambiguous_parts":[]}"#;
     let pipeline = test_pipeline(
         &cfg,
         MockClient::script(vec![
@@ -658,7 +658,7 @@ async fn segment_claims_routes_multi_item_message_through_llm() {
     let mut cfg = base_config();
     cfg.llm.segment_claims = true;
     let body = r#"{"intent":"claim","items":[
-        {"item":"pass_sp","variant":"结城理","quantity":1},
+        {"item":"pass_sp","subitem":"结城理","quantity":1},
         {"item":"hr_resume","quantity":1}
     ],"confidence":0.9}"#;
     let (pipeline, _dir) = test_pipeline_with_dir(&cfg, MockClient::ok(body));
@@ -676,7 +676,7 @@ async fn segment_claims_routes_multi_item_message_through_llm() {
 }
 
 #[tokio::test]
-async fn ambiguous_bare_variant_is_first_matched_not_need_confirm() {
+async fn ambiguous_bare_subitem_is_first_matched_not_need_confirm() {
     let mut cfg = base_config();
     cfg.llm.segment_claims = true;
     // LLM 把「只报角色名」放进 ambiguous_parts（模拟 "排 结城理 1"）。

@@ -29,7 +29,7 @@ impl Pipeline {
 }
 
 /// §U7 first-match 澄清结果。
-pub(super) enum BareVariantOutcome {
+pub(super) enum BareSubitemOutcome {
     /// 全部解析成功（含经 LLM 澄清修复）。
     Resolved(ParsedMessage),
     /// 澄清失败/超时且 `fallback_to_rules`：按非排谷忽略。
@@ -39,9 +39,9 @@ pub(super) enum BareVariantOutcome {
 }
 
 impl Pipeline {
-    /// §U7：对未解析的「只报角色名/变体名」请求先做 first-match；全部 fail 时走 LLM 澄清。
+    /// §U7：对未解析的「只报角色名/子项名」请求先做 first-match；全部 fail 时走 LLM 澄清。
     /// 澄清成功后发射并落盘 `ParseOverride` 事件（供重放消费）。
-    pub(super) async fn resolve_bare_variant_claims(
+    pub(super) async fn resolve_bare_subitem_claims(
         &self,
         cfg: &AppConfig,
         ev: &IncomingEvent,
@@ -49,12 +49,12 @@ impl Pipeline {
         active_rounds: &[RoundContext],
         now: DateTime<Utc>,
         seq: i64,
-    ) -> BareVariantOutcome {
+    ) -> BareSubitemOutcome {
         // 先消解「只报角色名但多处命中」的伪歧义：取歧义片段首 token 做 §U7 first-match。
-        absorb_ambiguous_bare_variants(&mut parsed, active_rounds);
+        absorb_ambiguous_bare_subitems(&mut parsed, active_rounds);
         // 仍有真歧义（如大类匹配到多个商品）时保留 NeedConfirm，不做 first-match 澄清。
         if !parsed.ambiguous_parts.is_empty() {
-            return BareVariantOutcome::Resolved(parsed);
+            return BareSubitemOutcome::Resolved(parsed);
         }
         let mut unresolved: Vec<String> = Vec::new();
         for pi in &mut parsed.items {
@@ -65,13 +65,13 @@ impl Pipeline {
                 Some((rid, iid, vid)) => {
                     pi.resolved_round_id = Some(rid.0);
                     pi.resolved_item_id = Some(iid.0);
-                    pi.resolved_variant_id = vid;
+                    pi.resolved_subitem_id = vid;
                 }
                 None => unresolved.push(pi.name.clone()),
             }
         }
         if parsed.items.is_empty() || unresolved.is_empty() {
-            return BareVariantOutcome::Resolved(parsed);
+            return BareSubitemOutcome::Resolved(parsed);
         }
         if !cfg.llm.enabled {
             return fallback(cfg.llm.fallback_to_rules);
@@ -81,9 +81,9 @@ impl Pipeline {
             .await
         {
             Ok(Some(corrected)) => {
-                self.emit_parse_override(cfg, ev, seq, now, &corrected)
+                self.emit_parse_override(cfg, ev, seq, now, &corrected, "first-match LLM 澄清")
                     .await;
-                BareVariantOutcome::Resolved(corrected)
+                BareSubitemOutcome::Resolved(corrected)
             }
             Ok(None) | Err(_) => fallback(cfg.llm.fallback_to_rules),
         }
@@ -105,11 +105,11 @@ impl Pipeline {
 
         let mut corrected = parsed.clone();
         for (index, name) in unresolved.iter().enumerate() {
-            let Some((item_tok, variant_tok)) = out.answer_for(index, name) else {
+            let Some((item_tok, subitem_tok)) = out.answer_for(index, name) else {
                 return Ok(None);
             };
             let Some((rid, iid, vid)) =
-                resolve_clarified(item_tok.as_deref(), variant_tok.as_deref(), active_rounds)
+                resolve_clarified(item_tok.as_deref(), subitem_tok.as_deref(), active_rounds)
             else {
                 return Ok(None);
             };
@@ -122,7 +122,7 @@ impl Pipeline {
             };
             pi.resolved_round_id = Some(rid.0);
             pi.resolved_item_id = Some(iid.0);
-            pi.resolved_variant_id = vid;
+            pi.resolved_subitem_id = vid;
         }
         Ok(Some(corrected))
     }
@@ -135,6 +135,7 @@ impl Pipeline {
         seq: i64,
         now: DateTime<Utc>,
         corrected: &ParsedMessage,
+        reason: &str,
     ) {
         let round_id = RoundId(cfg.round.round_id.clone());
         let event = EventEnvelope {
@@ -152,7 +153,7 @@ impl Pipeline {
                 target_raw_message_id: ev.message_id.clone(),
                 corrected_parsed_message: serde_json::to_value(corrected).unwrap_or(Value::Null),
                 admin_user_id: UserId(ev.user_id.clone()),
-                reason: "first-match LLM 澄清".to_string(),
+                reason: reason.to_string(),
                 occurred_at: now,
             }),
             status: EventStatus::Active,
@@ -165,6 +166,37 @@ impl Pipeline {
         {
             warn!("ParseOverride 事件写入失败: {e}");
         }
+    }
+
+    /// §10：人工确认「待确认」消息 → 写 `ParseOverride` 事件（调用方随后 `recompute`）。
+    pub async fn apply_parse_override(
+        &self,
+        rec: &crate::messages::MessageRecord,
+        corrected: &ParsedMessage,
+        reason: &str,
+    ) {
+        let cfg = self.cfg.get().await;
+        let ev = IncomingEvent {
+            group_id: rec.group_id.clone(),
+            user_id: "admin".to_string(),
+            nickname: rec.nickname.clone(),
+            message_id: rec.message_id.clone(),
+            text: rec.text.clone(),
+            timestamp_ms: rec.timestamp_ms,
+            is_admin: true,
+            sender_user_id: None,
+            sender_nickname: None,
+            raw: None,
+        };
+        self.emit_parse_override(
+            &cfg,
+            &ev,
+            crate::messages::next_seq(),
+            Utc::now(),
+            corrected,
+            reason,
+        )
+        .await;
     }
 }
 
@@ -185,7 +217,7 @@ fn leading_token(part: &str) -> Option<&str> {
 /// §U7 与 LLM 输出调和：LLM 常把「只报角色名、命中多个商品」判为歧义；此处对每个歧义片段
 /// 取首 token 做 first-match（命中**可拼团**商品即采用），从而把伪歧义消化为认领；只有
 /// 确实无解（如错别字）才保留为真歧义。
-fn absorb_ambiguous_bare_variants(parsed: &mut ParsedMessage, active_rounds: &[RoundContext]) {
+fn absorb_ambiguous_bare_subitems(parsed: &mut ParsedMessage, active_rounds: &[RoundContext]) {
     if parsed.intent != ParsedIntent::Claim || parsed.ambiguous_parts.is_empty() {
         return;
     }
@@ -209,9 +241,9 @@ fn absorb_ambiguous_bare_variants(parsed: &mut ParsedMessage, active_rounds: &[R
         {
             pi.resolved_round_id = Some(rid.0);
             pi.resolved_item_id = Some(iid.0);
-            pi.resolved_variant_id = vid;
+            pi.resolved_subitem_id = vid;
         } else if !parsed.items.iter().any(|pi| {
-            pi.resolved_item_id.as_deref() == Some(iid.0.as_str()) && pi.resolved_variant_id == vid
+            pi.resolved_item_id.as_deref() == Some(iid.0.as_str()) && pi.resolved_subitem_id == vid
         }) {
             parsed.items.push(ParsedClaimItem {
                 name: token.to_string(),
@@ -222,7 +254,7 @@ fn absorb_ambiguous_bare_variants(parsed: &mut ParsedMessage, active_rounds: &[R
                 slot_policy: None,
                 notes: None,
                 resolved_item_id: Some(iid.0),
-                resolved_variant_id: vid,
+                resolved_subitem_id: vid,
                 resolved_round_id: Some(rid.0),
             });
         }
@@ -235,22 +267,22 @@ fn absorb_ambiguous_bare_variants(parsed: &mut ParsedMessage, active_rounds: &[R
     }
 }
 
-fn fallback(fallback_to_rules: bool) -> BareVariantOutcome {
+fn fallback(fallback_to_rules: bool) -> BareSubitemOutcome {
     if fallback_to_rules {
-        BareVariantOutcome::FallbackIgnore
+        BareSubitemOutcome::FallbackIgnore
     } else {
-        BareVariantOutcome::FallbackReject
+        BareSubitemOutcome::FallbackReject
     }
 }
 
-/// 在可拼团目录内解析澄清结果：优先精确商品+变体，退化为按变体 first-match。
+/// 在可拼团目录内解析澄清结果：优先精确商品+子项，退化为按子项 first-match。
 fn resolve_clarified(
     item_tok: Option<&str>,
-    variant_tok: Option<&str>,
+    subitem_tok: Option<&str>,
     active_rounds: &[RoundContext],
 ) -> Option<(RoundId, crate::domain::ids::ItemId, Option<String>)> {
     let item_tok = item_tok.map(str::trim).filter(|s| !s.is_empty());
-    let variant_tok = variant_tok.map(str::trim).filter(|s| !s.is_empty());
+    let subitem_tok = subitem_tok.map(str::trim).filter(|s| !s.is_empty());
     for round in active_rounds {
         for item in &round.items {
             if !alias_match::is_splittable(item) {
@@ -263,13 +295,13 @@ fn resolve_clarified(
             if !item_ok {
                 continue;
             }
-            match variant_tok {
+            match subitem_tok {
                 Some(v) => {
-                    if let Some(found) = item.find_variant_by_name(v) {
+                    if let Some(found) = item.find_subitem_by_name(v) {
                         return Some((
                             round.round_id.clone(),
                             item.item_id.clone(),
-                            Some(found.variant_id.clone()),
+                            Some(found.subitem_id.clone()),
                         ));
                     }
                 }
@@ -277,7 +309,7 @@ fn resolve_clarified(
             }
         }
     }
-    if let Some(v) = variant_tok {
+    if let Some(v) = subitem_tok {
         return alias_match::first_match(v, active_rounds);
     }
     None
@@ -290,7 +322,7 @@ struct LlmClarify {
     #[serde(default)]
     item: Option<String>,
     #[serde(default)]
-    variant: Option<String>,
+    subitem: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -300,7 +332,7 @@ struct LlmClarifyMatch {
     #[serde(default)]
     item: Option<String>,
     #[serde(default)]
-    variant: Option<String>,
+    subitem: Option<String>,
 }
 
 impl LlmClarify {
@@ -310,13 +342,13 @@ impl LlmClarify {
             .iter()
             .find(|m| m.name.as_deref() == Some(name))
         {
-            return Some((m.item.clone(), m.variant.clone()));
+            return Some((m.item.clone(), m.subitem.clone()));
         }
         if let Some(m) = self.matches.get(index) {
-            return Some((m.item.clone(), m.variant.clone()));
+            return Some((m.item.clone(), m.subitem.clone()));
         }
-        if index == 0 && (self.item.is_some() || self.variant.is_some()) {
-            return Some((self.item.clone(), self.variant.clone()));
+        if index == 0 && (self.item.is_some() || self.subitem.is_some()) {
+            return Some((self.item.clone(), self.subitem.clone()));
         }
         None
     }
@@ -341,7 +373,7 @@ struct LlmItem {
     #[serde(default)]
     item: Option<String>,
     #[serde(default)]
-    variant: Option<String>,
+    subitem: Option<String>,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -417,8 +449,8 @@ fn resolve_llm_item(
                 .filter(|s| !s.is_empty())
         })
         .unwrap_or("");
-    let variant_tok = item
-        .variant
+    let subitem_tok = item
+        .subitem
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
@@ -432,27 +464,27 @@ fn resolve_llm_item(
         if !item_ok {
             continue;
         }
-        match variant_tok {
+        match subitem_tok {
             None => candidates.push((candidate, None)),
-            Some(variant) => {
-                if let Some(found) = candidate.find_variant_by_name(variant) {
-                    candidates.push((candidate, Some(found.variant_id.clone())));
+            Some(subitem) => {
+                if let Some(found) = candidate.find_subitem_by_name(subitem) {
+                    candidates.push((candidate, Some(found.subitem_id.clone())));
                 }
             }
         }
     }
 
     if candidates.is_empty() {
-        if let Some(variant) = variant_tok {
+        if let Some(subitem) = subitem_tok {
             for candidate in items {
-                if let Some(found) = candidate.find_variant_by_name(variant) {
-                    candidates.push((candidate, Some(found.variant_id.clone())));
+                if let Some(found) = candidate.find_subitem_by_name(subitem) {
+                    candidates.push((candidate, Some(found.subitem_id.clone())));
                 }
             }
         }
     }
 
-    let name = variant_tok.unwrap_or(item_tok).to_string();
+    let name = subitem_tok.unwrap_or(item_tok).to_string();
     let mut parsed = ParsedClaimItem {
         name,
         category_hint: if item_tok.is_empty() {
@@ -466,27 +498,27 @@ fn resolve_llm_item(
         slot_policy: item.slot_policy.clone(),
         notes: item.notes.clone(),
         resolved_item_id: None,
-        resolved_variant_id: None,
+        resolved_subitem_id: None,
         resolved_round_id: None,
     };
 
     if candidates.len() == 1 {
-        let (candidate, variant_id) = &candidates[0];
+        let (candidate, subitem_id) = &candidates[0];
         parsed.resolved_item_id = Some(candidate.item_id.0.clone());
-        parsed.resolved_variant_id = variant_id.clone();
+        parsed.resolved_subitem_id = subitem_id.clone();
         parsed.resolved_round_id = Some(round_id.to_string());
         (parsed, None)
     } else if candidates.is_empty() {
         (parsed, None)
     } else if item_tok.is_empty() {
-        // §U7：只报角色名/变体名（未报大类）→ 按目录顺序 first-match 到第一个可拼团商品。
+        // §U7：只报角色名/子项名（未报大类）→ 按目录顺序 first-match 到第一个可拼团商品。
         match candidates
             .iter()
             .find(|(candidate, _)| alias_match::is_splittable(candidate))
         {
-            Some((candidate, variant_id)) => {
+            Some((candidate, subitem_id)) => {
                 parsed.resolved_item_id = Some(candidate.item_id.0.clone());
-                parsed.resolved_variant_id = variant_id.clone();
+                parsed.resolved_subitem_id = subitem_id.clone();
                 parsed.resolved_round_id = Some(round_id.to_string());
                 (parsed, None)
             }

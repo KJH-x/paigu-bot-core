@@ -17,10 +17,10 @@
   };
 
   var KINDS = [
-    { v: 'group', label: '拼团', variants: true },
-    { v: 'single', label: '单领', variants: false },
-    { v: 'box', label: '整盒', variants: false },
-    { v: 'gift', label: '特典', variants: true }
+    { v: 'group', label: '拼团', subitems: true },
+    { v: 'single', label: '单领', subitems: false },
+    { v: 'box', label: '整盒', subitems: false },
+    { v: 'gift', label: '特典', subitems: true }
   ];
 
   function kindMeta(v) {
@@ -78,20 +78,20 @@
 
   /* ------------------------------ 数据模型 ------------------------------ */
 
-  function normKind(kind, variants) {
+  function normKind(kind, subitems) {
     var s = String(kind == null ? '' : kind).trim().toLowerCase();
     if (s === '拼团' || s === 'group' || s === 'split') return 'group';
     if (s === '单领' || s === 'single') return 'single';
     if (s === '整盒' || s === 'box' || s === 'fullbox') return 'box';
     if (s === '特典' || s === 'gift') return 'gift';
-    return (variants && variants.length) ? 'group' : 'single';
+    return (subitems && subitems.length) ? 'group' : 'single';
   }
 
-  function normVariant(v) {
+  function normSubitem(v) {
     v = v || {};
     var aliases = M.asStrArray(v.aliases);
     return {
-      variant_id: v.variant_id == null ? '' : String(v.variant_id),
+      subitem_id: v.subitem_id == null ? '' : String(v.subitem_id),
       name: v.name == null ? '' : String(v.name),
       unit_price_cents: P.num(v.unit_price_cents, 0),
       adjust_cents: P.num(v.adjust_cents != null ? v.adjust_cents : v.price_adjust_cents, 0),
@@ -103,23 +103,23 @@
 
   function normItem(it) {
     it = it || {};
-    var variants = (Array.isArray(it.variants) ? it.variants : []).map(normVariant);
+    var subitems = (Array.isArray(it.subitems) ? it.subitems : []).map(normSubitem);
     var aliases = M.asStrArray(it.aliases);
     return {
       item_id: it.item_id == null ? '' : String(it.item_id),
       name: it.name == null ? '' : String(it.name),
-      kind: normKind(it.kind, variants),
+      kind: normKind(it.kind, subitems),
       aliases: aliases,
       unit_price_cents: P.num(it.unit_price_cents, 0),
       max_quantity: (it.max_quantity == null || it.max_quantity === '') ? null : P.num(it.max_quantity, null),
-      variants: variants,
+      subitems: subitems,
       __locked: aliases.length > 0
     };
   }
 
   function serializeItem(it) {
     var meta = kindMeta(it.kind);
-    var hasVar = meta.variants;
+    var hasVar = meta.subitems;
     var out = {
       item_id: it.item_id,
       name: it.name,
@@ -130,9 +130,9 @@
       max_quantity: (it.kind === 'single' && it.max_quantity != null) ? intOr0(it.max_quantity) : null
     };
     if (hasVar) {
-      out.variants = it.variants.map(function (v) {
+      out.subitems = it.subitems.map(function (v) {
         return {
-          variant_id: v.variant_id,
+          subitem_id: v.subitem_id,
           name: v.name,
           unit_price_cents: intOr0(v.unit_price_cents),
           adjust_cents: intOr0(v.adjust_cents),
@@ -141,7 +141,7 @@
         };
       });
     } else {
-      out.variants = [];
+      out.subitems = [];
     }
     return out;
   }
@@ -155,11 +155,11 @@
     return 'item_' + (max + 1);
   }
 
-  function nextVariantId() {
+  function nextSubitemId() {
     var max = 0;
     state.items.forEach(function (it) {
-      (it.variants || []).forEach(function (v) {
-        var m = /^v_(\d+)$/.exec(v.variant_id);
+      (it.subitems || []).forEach(function (v) {
+        var m = /^v_(\d+)$/.exec(v.subitem_id);
         if (m) max = Math.max(max, parseInt(m[1], 10));
       });
     });
@@ -178,8 +178,8 @@
     }
     state.items.forEach(function (it, i) {
       it.aliases.forEach(function (a) { add(a, i); });
-      if (kindMeta(it.kind).variants) {
-        it.variants.forEach(function (v) {
+      if (kindMeta(it.kind).subitems) {
+        it.subitems.forEach(function (v) {
           add(v.name, i);
           v.aliases.forEach(function (a) { add(a, i); });
         });
@@ -198,9 +198,9 @@
       if (f === 'name') return it.name ? [it.name] : [];
       return it.aliases;
     }
-    if (scope === 'variant') {
+    if (scope === 'subitem') {
       var vi = parseInt(host.getAttribute('data-vi'), 10);
-      var v = it.variants[vi];
+      var v = it.subitems[vi];
       if (!v) return [];
       if (f === 'name') return [];
       return v.aliases.filter(function (token) { return token !== v.name; });
@@ -303,12 +303,45 @@
     return g;
   }
 
+  function pinyinText(text) {
+    var out = [];
+    if (window.pinyinPro) {
+      try { out = window.pinyinPro.pinyin(String(text || ''), { toneType: 'none', type: 'array' }) || []; }
+      catch (e) { out = []; }
+    }
+    return out.join('');
+  }
+
+  function pinyinInitials(text) {
+    if (!window.pinyinPro) return '';
+    try {
+      return window.pinyinPro.pinyin(String(text || ''), { pattern: 'first', toneType: 'none', type: 'array' }).join('');
+    } catch (e) { return ''; }
+  }
+
+  function itemHaystack(it) {
+    var parts = [it.name];
+    (it.aliases || []).forEach(function (a) { parts.push(a); });
+    (it.subitems || []).forEach(function (v) {
+      parts.push(v.name);
+      (v.aliases || []).forEach(function (a) { parts.push(a); });
+    });
+    var base = parts.join(' ');
+    return (base + ' ' + pinyinText(base) + ' ' + pinyinInitials(base)).toLowerCase();
+  }
+
   function renderItems() {
     var host = $('items');
     if (!host) return;
     while (host.firstChild) host.removeChild(host.firstChild);
+    var filterEl = $('item-filter');
+    var q = filterEl ? filterEl.value.trim().toLowerCase() : '';
     var list = [];
-    state.items.forEach(function (it, i) { if (it.kind === state.activeKind) list.push({ it: it, i: i }); });
+    state.items.forEach(function (it, i) {
+      if (it.kind !== state.activeKind) return;
+      if (q && itemHaystack(it).indexOf(q) < 0) return;
+      list.push({ it: it, i: i });
+    });
 
     if (isRowKind(state.activeKind)) renderRows(host, list, state.activeKind === 'single');
     else renderCards(host, list);
@@ -327,7 +360,7 @@
     var summaries = document.querySelectorAll('[data-adjust-summary]');
     for (var i = 0; i < summaries.length; i++) {
       var item = state.items[+summaries[i].getAttribute('data-adjust-summary')];
-      var total = (item.variants || []).reduce(function (sum, variant) { return sum + intOr0(variant.adjust_cents); }, 0);
+      var total = (item.subitems || []).reduce(function (sum, subitem) { return sum + intOr0(subitem.adjust_cents); }, 0);
       summaries[i].textContent = '调价合计 ' + money(total) + ' 元' + (total ? ' · 合计须为 0' : ' · 已平衡');
       summaries[i].classList.toggle('invalid', total !== 0);
     }
@@ -373,7 +406,7 @@
 
   function makeItemCard(it, idx) {
     var meta = kindMeta(it.kind);
-    var derived = it.variants.length ? 'A' : 'B';
+    var derived = it.subitems.length ? 'A' : 'B';
     var card = document.createElement('div');
     card.className = 'cat-item';
     card.setAttribute('data-idx', String(idx));
@@ -382,20 +415,30 @@
       return '<option value="' + k.v + '"' + (it.kind === k.v ? ' selected' : '') + '>' + esc(k.label) + '</option>';
     }).join('');
 
+    var avgYuan = '';
+    if (meta.subitems && it.subitems.length) {
+      var sumCents = 0;
+      for (var ai = 0; ai < it.subitems.length; ai++) {
+        sumCents += intOr0(it.subitems[ai].unit_price_cents) + intOr0(it.subitems[ai].adjust_cents);
+      }
+      avgYuan = money(Math.round(sumCents / it.subitems.length));
+    }
+
     var head = document.createElement('div');
     head.className = 'cat-item-head';
     head.innerHTML = '<span class="idx">商品 #' + (idx + 1) + '</span>' +
+      '<label class="row tight"><span class="hint">商品名</span><input class="item-name" data-scope="item" data-f="name" data-idx="' + idx + '" value="' + esc(it.name) + '" placeholder="商品名" /></label>' +
       '<label class="row tight"><span class="hint">种类</span><select data-scope="item" data-f="kind" data-idx="' + idx + '">' + kindOpts + '</select></label>' +
       '<span class="derived">推导 class：<b>' + derived + '</b>' + (derived === 'A' ? '（阶段受限）' : '（不限）') + '</span>' +
+      (avgYuan ? '<span class="avg-price">子项平均价(元)：<b>' + esc(avgYuan) + '</b></span>' : '') +
       '<span class="spacer" style="flex:1"></span>' +
-      (meta.variants ? '<button type="button" class="small" data-act="add-variant" data-idx="' + idx + '">添加变体</button>' : '') +
+      (meta.subitems ? '<button type="button" class="small" data-act="add-subitem" data-idx="' + idx + '">添加子项</button>' : '') +
       '<button type="button" class="danger small" data-act="del-item" data-idx="' + idx + '">删除商品</button>';
     card.appendChild(head);
 
     var grid = document.createElement('div');
     grid.className = 'cat-grid';
     grid.innerHTML =
-      '<label class="field"><span>商品名</span><input data-scope="item" data-f="name" data-idx="' + idx + '" value="' + esc(it.name) + '" placeholder="商品名" /></label>' +
       '<label class="field"><span>原价(元)</span><input data-scope="item" data-f="unit_price_cents" data-idx="' + idx + '" type="number" step="0.01" value="' + money(it.unit_price_cents) + '" /></label>' +
       (it.kind === 'single'
         ? '<label class="field"><span>单领上限 max_quantity</span><input data-scope="item" data-f="max_quantity" data-idx="' + idx + '" type="number" min="0" value="' + (it.max_quantity == null ? '' : esc(it.max_quantity)) + '" /></label>'
@@ -408,22 +451,22 @@
       aliasWrapHtml('item', idx, null, it.aliases, it.__locked);
     card.appendChild(aliasRow);
 
-    if (meta.variants) {
+    if (meta.subitems) {
       var wrap = document.createElement('div');
       wrap.className = 'vtable-scroll';
-      var rows = it.variants.map(function (v, vi) {
+      var rows = it.subitems.map(function (v, vi) {
         var fin = intOr0(v.unit_price_cents) + intOr0(v.adjust_cents);
         var clsB = v.adjust_cents > 0 ? ' price-pos' : (v.adjust_cents < 0 ? ' price-neg' : '');
         var clsC = fin > 0 ? ' price-pos' : (fin < 0 ? ' price-neg' : '');
         return '<tr data-vi="' + vi + '">' +
-          '<td class="vid" title="自动生成，不可编辑">' + esc(v.variant_id || '(空)') + '</td>' +
-          '<td class="vname">' + cfNameHtml('variant', idx, vi, 'name', v.name, '', ' placeholder="变体名"') + '</td>' +
-          '<td class="pcell"><input class="variant-price-base" data-scope="variant" data-f="unit_price_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="number" step="0.01" value="' + money(v.unit_price_cents) + '" title="原价(元)" /></td>' +
-          '<td class="pcell"><input class="variant-price-adjust' + clsB + '" data-scope="variant" data-f="adjust_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + esc(adjStr(v.adjust_cents)) + '" title="调价(元)" /></td>' +
-          '<td class="pcell"><input class="variant-price-final' + clsC + '" data-scope="variant" data-f="final" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + money(fin) + '" title="最终价(元)" /></td>' +
-          '<td class="pcell"><input data-scope="variant" data-f="capacity" data-idx="' + idx + '" data-vi="' + vi + '" type="number" min="0" value="' + (v.capacity == null ? '' : esc(v.capacity)) + '" placeholder="不限" /></td>' +
-          '<td>' + aliasWrapHtml('variant', idx, vi, v.aliases, v.__locked) + '</td>' +
-          '<td><button type="button" class="danger small" data-act="del-variant" data-idx="' + idx + '" data-vi="' + vi + '">×</button></td>' +
+          '<td class="vid" title="自动生成，不可编辑">' + esc(v.subitem_id || '(空)') + '</td>' +
+          '<td class="vname">' + cfNameHtml('subitem', idx, vi, 'name', v.name, '', ' placeholder="子项名"') + '</td>' +
+          '<td class="pcell"><input class="subitem-price-base" data-scope="subitem" data-f="unit_price_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="number" step="0.01" value="' + money(v.unit_price_cents) + '" title="原价(元)" /></td>' +
+          '<td class="pcell"><input class="subitem-price-adjust' + clsB + '" data-scope="subitem" data-f="adjust_cents" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + esc(adjStr(v.adjust_cents)) + '" title="调价(元)" /></td>' +
+          '<td class="pcell"><input class="subitem-price-final' + clsC + '" data-scope="subitem" data-f="final" data-idx="' + idx + '" data-vi="' + vi + '" type="text" inputmode="decimal" value="' + money(fin) + '" title="最终价(元)" /></td>' +
+          '<td class="pcell"><input data-scope="subitem" data-f="capacity" data-idx="' + idx + '" data-vi="' + vi + '" type="number" min="0" value="' + (v.capacity == null ? '' : esc(v.capacity)) + '" placeholder="不限" /></td>' +
+          '<td>' + aliasWrapHtml('subitem', idx, vi, v.aliases, v.__locked) + '</td>' +
+          '<td><button type="button" class="danger small" data-act="del-subitem" data-idx="' + idx + '" data-vi="' + vi + '">×</button></td>' +
           '</tr>';
       }).join('');
       wrap.innerHTML = '<table class="vtable"><thead><tr>' +
@@ -435,7 +478,7 @@
       var hint = document.createElement('div');
       hint.className = 'hint';
       hint.style.marginTop = '6px';
-      hint.textContent = '该种类无变体（' + (it.kind === 'box' ? '整盒：商品级原价，数量按盒' : '单领：商品级原价') + '）。';
+      hint.textContent = '该种类无子项（' + (it.kind === 'box' ? '整盒：商品级原价，数量按盒' : '单领：商品级原价') + '）。';
       card.appendChild(hint);
     }
     return card;
@@ -508,14 +551,14 @@
       aliases: [],
       unit_price_cents: 0,
       max_quantity: null,
-      variants: kindMeta(kind).variants ? [newVariant()] : [],
+      subitems: kindMeta(kind).subitems ? [newSubitem()] : [],
       __locked: false
     };
   }
 
-  function newVariant() {
+  function newSubitem() {
     return {
-      variant_id: nextVariantId(),
+      subitem_id: nextSubitemId(),
       name: '',
       unit_price_cents: 0,
       adjust_cents: 0,
@@ -550,7 +593,7 @@
     var owner;
     var it = state.items[idx];
     if (!it) return;
-    owner = scope === 'item' ? it : it.variants[vi];
+    owner = scope === 'item' ? it : it.subitems[vi];
     if (!owner || owner.__locked) return;
     owner.aliases = name && name.trim() ? [name.trim()] : [];
     if (inp) inp.value = owner.aliases.join(', ');
@@ -589,13 +632,13 @@
         updateLockBtn('item', idx, null, true);
         scheduleConflictCheck(true);
       }
-    } else if (t.dataset.scope === 'variant') {
+    } else if (t.dataset.scope === 'subitem') {
       var vi = parseInt(t.dataset.vi, 10);
-      var v = it.variants[vi];
+      var v = it.subitems[vi];
       if (!v) return;
       if (f === 'name') {
         v.name = t.value;
-        autoAlias('variant', idx, vi, t.value);
+        autoAlias('subitem', idx, vi, t.value);
         scheduleConflictCheck(true);
       } else if (f === 'unit_price_cents') {
         v.unit_price_cents = cents(t.value);
@@ -611,7 +654,7 @@
         }
         var c = cents(t.value);
         v.adjust_cents = c - intOr0(v.unit_price_cents);
-        var adj = t.closest('tr').querySelector('.variant-price-adjust');
+        var adj = t.closest('tr').querySelector('.subitem-price-adjust');
         if (adj) { adj.value = adjStr(v.adjust_cents); paintPrice(adj); }
         paintPrice(t);
       } else if (f === 'capacity') {
@@ -619,7 +662,7 @@
       } else if (f === 'aliases') {
         v.aliases = M.splitTokens(t.value);
         v.__locked = true;
-        updateLockBtn('variant', idx, vi, true);
+        updateLockBtn('subitem', idx, vi, true);
         scheduleConflictCheck(true);
       }
     }
@@ -634,7 +677,7 @@
     if (!it) return;
     var f = t.dataset.f;
     if (t.dataset.scope === 'item' && f === 'kind') {
-      it.kind = normKind(t.value, it.variants);
+      it.kind = normKind(t.value, it.subitems);
       state.activeKind = it.kind;
       renderKindTabs();
       renderItems();
@@ -642,9 +685,9 @@
     }
     if (t.dataset.scope === 'item' && f === 'aliases') {
       t.value = it.aliases.join(', ');
-    } else if (t.dataset.scope === 'variant' && f === 'aliases') {
+    } else if (t.dataset.scope === 'subitem' && f === 'aliases') {
       var vi = parseInt(t.dataset.vi, 10);
-      if (it.variants[vi]) t.value = it.variants[vi].aliases.join(', ');
+      if (it.subitems[vi]) t.value = it.subitems[vi].aliases.join(', ');
     }
     scheduleConflictCheck(true);
   }
@@ -663,24 +706,24 @@
       state.items.splice(idx, 1);
       renderKindTabs();
       renderItems();
-    } else if (act === 'add-variant') {
+    } else if (act === 'add-subitem') {
       if (!it) return;
-      it.variants.push(newVariant());
+      it.subitems.push(newSubitem());
       renderItems();
-    } else if (act === 'del-variant') {
-      if (!it || !it.variants[vi]) return;
-      it.variants.splice(vi, 1);
+    } else if (act === 'del-subitem') {
+      if (!it || !it.subitems[vi]) return;
+      it.subitems.splice(vi, 1);
       renderItems();
     } else if (act === 'lock') {
       var scope = b.getAttribute('data-scope');
-      var owner = scope === 'item' ? it : (it && it.variants[vi]);
+      var owner = scope === 'item' ? it : (it && it.subitems[vi]);
       if (!owner) return;
       owner.__locked = !owner.__locked;
       updateLockBtn(scope, idx, vi, owner.__locked);
       if (!owner.__locked) scheduleConflictCheck(true);
     } else if (act === 'split') {
       var scope2 = b.getAttribute('data-scope');
-      var owner2 = scope2 === 'item' ? it : (it && it.variants[vi]);
+      var owner2 = scope2 === 'item' ? it : (it && it.subitems[vi]);
       var inp = findAliasInput(scope2, idx, vi);
       if (!owner2 || !inp) return;
       owner2.aliases = M.dedupe(M.splitTokens(inp.value));
@@ -694,9 +737,9 @@
   function syncFinal(t) {
     var tr = t.closest('tr');
     if (!tr) return;
-    var base = tr.querySelector('.variant-price-base');
-    var adj = tr.querySelector('.variant-price-adjust');
-    var fin = tr.querySelector('.variant-price-final');
+    var base = tr.querySelector('.subitem-price-base');
+    var adj = tr.querySelector('.subitem-price-adjust');
+    var fin = tr.querySelector('.subitem-price-final');
     if (!fin) return;
     var c = cents(base && base.value) + cents(adj && adj.value);
     fin.value = money(c);
@@ -867,7 +910,7 @@
       '<div class="rc-title">' + esc(r.title || r.round_id) + (active ? '<span class="badge-active">激活中</span>' : '') + '</div>' +
       '<div class="rc-id">round_id：' + esc(r.round_id) + '</div>' +
       '<div class="rc-meta">group_id ' + esc(r.group_id || '—') + ' · 商品 ' + esc(r.items == null ? '—' : r.items) +
-      ' · 变体 ' + esc(r.variants == null ? '—' : r.variants) + ' · 更新 ' + esc(updated) + '</div>' +
+      ' · 子项 ' + esc(r.subitems == null ? '—' : r.subitems) + ' · 更新 ' + esc(updated) + '</div>' +
       '</div>' +
       '<div class="rc-actions">' + actions + '</div>';
 
@@ -1042,7 +1085,7 @@
   function isDraftItem(it) {
     if (!it || String(it.name || '').trim()) return false;
     if ((it.aliases || []).length || intOr0(it.unit_price_cents) !== 0 || it.max_quantity != null) return false;
-    return !(it.variants || []).some(function (v) {
+    return !(it.subitems || []).some(function (v) {
       return String(v.name || '').trim() || (v.aliases || []).length ||
         intOr0(v.unit_price_cents) !== 0 || intOr0(v.adjust_cents) !== 0 || v.capacity != null;
     });
@@ -1085,7 +1128,7 @@
     var partialError = partialItemError();
     if (partialError) { banner(partialError, true); return; }
     var unbalanced = state.items.find(function (item) {
-      return (item.variants || []).reduce(function (total, variant) { return total + intOr0(variant.adjust_cents); }, 0) !== 0;
+      return (item.subitems || []).reduce(function (total, subitem) { return total + intOr0(subitem.adjust_cents); }, 0) !== 0;
     });
     if (unbalanced) { banner('「' + unbalanced.name + '」调价合计须为 0，请先平衡调价。', true); return; }
     var hasConflict = paintConflicts();
@@ -1096,7 +1139,7 @@
       state.revision = res && res.revision != null ? res.revision : state.revision;
       applyToForm(state.config);
       if (hasConflict) {
-        banner('已保存，但存在跨商品别名/变体名冲突（行内提醒），可用「校验」查看后端结果。', false);
+        banner('已保存，但存在跨商品别名/子项名冲突（行内提醒），可用「校验」查看后端结果。', false);
       } else {
         hideBanner();
       }
@@ -1233,6 +1276,7 @@
 
     var items = $('items');
     items.addEventListener('input', onInput);
+  if ($('item-filter')) $('item-filter').addEventListener('input', renderItems);
     items.addEventListener('change', onChange);
     items.addEventListener('click', onClick);
     items.addEventListener('keydown', onKeydown);

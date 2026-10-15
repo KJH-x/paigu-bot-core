@@ -262,32 +262,32 @@ pub async fn restore_persistent_lock(state: &ApiState) -> Result<(), ServiceErro
     Ok(())
 }
 
-/// §U6：把目录变体的 `adjust_cents`（B）合成为结算定价（`mode=AdjustBy`，精确匹配
-/// `item_id`/`variant_id`），使 `evaluate` 的「调后价」列反映 C = A + B。
+/// §U6：把目录子项的 `adjust_cents`（B）合成为结算定价（`mode=AdjustBy`，精确匹配
+/// `item_id`/`subitem_id`），使 `evaluate` 的「调后价」列反映 C = A + B。
 ///
-/// **仅内存合并，不持久化**。已有同 `(item_id, variant_id)` 的显式定价优先保留，
+/// **仅内存合并，不持久化**。已有同 `(item_id, subitem_id)` 的显式定价优先保留，
 /// 以便配置/覆盖中的显式定价仍以显式为准；请求自带 `pricing` 时整体以请求为准（不调用本函数）。
 pub fn merge_catalog_pricing(
     mut config: SettlementConfig,
     round: &RoundSettings,
 ) -> SettlementConfig {
     for item in &round.items {
-        for variant in &item.variants {
-            if variant.adjust_cents == 0 {
+        for subitem in &item.subitems {
+            if subitem.adjust_cents == 0 {
                 continue;
             }
             let exists = config.pricing.iter().any(|entry| {
                 entry.item_id == item.item_id
-                    && entry.variant_id.as_deref() == Some(variant.variant_id.as_str())
+                    && entry.subitem_id.as_deref() == Some(subitem.subitem_id.as_str())
             });
             if exists {
                 continue;
             }
             config.pricing.push(PricingEntry {
                 item_id: item.item_id.clone(),
-                variant_id: Some(variant.variant_id.clone()),
+                subitem_id: Some(subitem.subitem_id.clone()),
                 mode: PricingMode::AdjustBy,
-                value: variant.adjust_cents,
+                value: subitem.adjust_cents,
             });
         }
     }
@@ -458,17 +458,17 @@ fn prices_from_order_table(table: &OrderTable) -> Result<Vec<UnitPrice>, Service
                 return Err(ServiceError::Unprocessable(format!(
                     "非赠品 {}{} 缺少有效标价",
                     line.item_id,
-                    line.variant_id
+                    line.subitem_id
                         .as_deref()
                         .map(|v| format!("/{v}"))
                         .unwrap_or_default()
                 )));
             }
-            let key = (line.item_id.clone(), line.variant_id.clone());
+            let key = (line.item_id.clone(), line.subitem_id.clone());
             if let Some(existing) = prices.insert(key.clone(), line.unit_price_cents) {
                 if existing != line.unit_price_cents {
                     return Err(ServiceError::Unprocessable(format!(
-                        "同一商品/变体价格冲突：{}",
+                        "同一商品/子项价格冲突：{}",
                         key.0
                     )));
                 }
@@ -477,9 +477,9 @@ fn prices_from_order_table(table: &OrderTable) -> Result<Vec<UnitPrice>, Service
     }
     Ok(prices
         .into_iter()
-        .map(|((item_id, variant_id), unit_price_cents)| UnitPrice {
+        .map(|((item_id, subitem_id), unit_price_cents)| UnitPrice {
             item_id,
-            variant_id,
+            subitem_id,
             unit_price_cents,
         })
         .collect())
@@ -494,18 +494,18 @@ fn validate_prices_for_allocation(
             continue;
         }
         let price = item
-            .variant_id
+            .subitem_id
             .as_ref()
-            .and_then(|variant| {
+            .and_then(|subitem| {
                 prices.iter().find(|price| {
                     price.item_id == item.item_id.0
-                        && price.variant_id.as_deref() == Some(variant.as_str())
+                        && price.subitem_id.as_deref() == Some(subitem.as_str())
                 })
             })
             .or_else(|| {
                 prices
                     .iter()
-                    .find(|price| price.item_id == item.item_id.0 && price.variant_id.is_none())
+                    .find(|price| price.item_id == item.item_id.0 && price.subitem_id.is_none())
             });
         if price.map(|price| price.unit_price_cents > 0) != Some(true) {
             return Err(ServiceError::Unprocessable(format!(
@@ -523,7 +523,7 @@ fn ensure_plan_invariants(source: &OrderTable, planned: &OrderTable) -> Result<(
         for package in &table.packages {
             for line in &package.lines {
                 let entry = out
-                    .entry((line.item_id.clone(), line.variant_id.clone(), line.is_gift))
+                    .entry((line.item_id.clone(), line.subitem_id.clone(), line.is_gift))
                     .or_insert((0u32, 0i64));
                 entry.0 = entry.0.saturating_add(line.qty);
                 if !line.is_gift {
@@ -619,12 +619,12 @@ pub fn order_table_to_allocation(table: &OrderTable) -> AllocationSnapshot {
             if line.qty == 0 {
                 continue;
             }
-            let key = (line.item_id.clone(), line.variant_id.clone(), line.is_gift);
+            let key = (line.item_id.clone(), line.subitem_id.clone(), line.is_gift);
             let entry = grouped.entry(key).or_insert_with(|| ItemAllocation {
                 item_id: ItemId(line.item_id.clone()),
                 item_name: line.item_id.clone(),
                 kind: if line.is_gift { "gift" } else { "split" }.to_string(),
-                variant_id: line.variant_id.clone(),
+                subitem_id: line.subitem_id.clone(),
                 boxes: vec![],
                 singles: vec![],
                 waiting: vec![],
@@ -669,8 +669,8 @@ mod tests {
     #[test]
     fn order_table_to_allocation_groups_lines_by_item() {
         let table = OrderTable::new(vec![
-            Package::new("p1", vec![Line::new("a", 2, 100).variant("v1")]),
-            Package::new("p2", vec![Line::new("a", 1, 100).variant("v1")]),
+            Package::new("p1", vec![Line::new("a", 2, 100).subitem("v1")]),
+            Package::new("p2", vec![Line::new("a", 1, 100).subitem("v1")]),
         ]);
         let allocation = order_table_to_allocation(&table);
         assert_eq!(allocation.item_allocations.len(), 1);
@@ -712,7 +712,7 @@ mod tests {
     }
 
     fn round_with_adjust(adjust_cents: i64) -> RoundSettings {
-        use crate::settings::{ItemConfig, RoundSettings, VariantConfig};
+        use crate::settings::{ItemConfig, RoundSettings, SubitemConfig};
         RoundSettings {
             round_id: "r".to_string(),
             title: "t".to_string(),
@@ -728,8 +728,9 @@ mod tests {
                 aliases: vec![],
                 unit_price_cents: 5000,
                 max_quantity: None,
-                variants: vec![VariantConfig {
-                    variant_id: "v1".to_string(),
+                box_item_id: None,
+                subitems: vec![SubitemConfig {
+                    subitem_id: "v1".to_string(),
                     name: "甲".to_string(),
                     unit_price_cents: 5000,
                     adjust_cents,
@@ -750,7 +751,7 @@ mod tests {
 
         let table = OrderTable::new(vec![Package::new(
             "p1",
-            vec![Line::new("a", 1, 5000).variant("v1")],
+            vec![Line::new("a", 1, 5000).subitem("v1")],
         )]);
         let result = evaluate(&merged, &table);
         assert_eq!(result.lines[0].unit_price_cents, 5000, "标价 A 口径不变");
@@ -766,7 +767,7 @@ mod tests {
         let mut base = SettlementConfig::default();
         base.pricing.push(PricingEntry {
             item_id: "a".to_string(),
-            variant_id: Some("v1".to_string()),
+            subitem_id: Some("v1".to_string()),
             mode: PricingMode::SetFinal,
             value: 6000,
         });

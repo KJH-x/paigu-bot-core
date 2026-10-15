@@ -120,13 +120,13 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 | `round.items[].item_id` | String | 必填 | 商品 ID | 是 |
 | `round.items[].name` | String | 必填 | 商品名 | 是 |
 | `round.items[].kind` | String | 必填 | **种类**：`拼团`/`单领`/`整盒`/`特典`（兼容 `group`/`single`/`box`/`gift` 与旧 `split`/`single`/`gift`；其余按拼团） | 是（`src/settings/mod.rs`，2026-09-24 更新） |
-| `round.items[].class` | Option<String> | `None` | `A`/`B`；缺省**自动推导**（有变体⇒A，无变体⇒B），显式合法值可覆盖 | 否 |
+| `round.items[].class` | Option<String> | `None` | `A`/`B`；缺省**自动推导**（有子项⇒A，无子项⇒B），显式合法值可覆盖 | 否 |
 | `round.items[].aliases` | Vec<String> | `[]` | 商品别名 | 是 |
-| `round.items[].variants` | Vec<VariantConfig> | `[]` | 变体 | 是 |
-| `…variants[].variant_id` | String | 必填 | 变体 ID | 是 |
-| `…variants[].name` | String | 必填 | 变体名 | 是 |
-| `…variants[].capacity` | Option<u32> | `None` | 盒容量（`null` 时 FullBox/包尾取消息数量） | 是 |
-| `…variants[].aliases` | Vec<String> | `[]` | 变体别名 | 是 |
+| `round.items[].subitems` | Vec<SubitemConfig> | `[]` | 子项 | 是 |
+| `…subitems[].subitem_id` | String | 必填 | 子项 ID | 是 |
+| `…subitems[].name` | String | 必填 | 子项名 | 是 |
+| `…subitems[].capacity` | Option<u32> | `None` | 盒容量（`null` 时 FullBox/包尾取消息数量） | 是 |
+| `…subitems[].aliases` | Vec<String> | `[]` | 子项别名 | 是 |
 | `display.refresh_ms` | u64 | `5000` | 展示页轮询间隔 | 是（前端载入时读，`web/display.js:337`） |
 | `display.data_source` | String | `"local"` | `local`/`remote` | 是 |
 | `display.remote_base_url` | String | `""` | 远程快照基址 | 是 |
@@ -134,7 +134,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 | `members.cache_path` | String | 必填 | 成员缓存文件 | 是 |
 | `members.daily_pull_at` | String | `"19:00"` | 每日拉取时刻 | 是（调度每轮读，`src/main.rs:146`） |
 
-> 注意（**2026-09-25 核对**，见 [DESIGN.md](./DESIGN.md) §4、[INTERFACES.md](./INTERFACES.md) §8.7）：商品级 `unit_price_cents` 为**原价**（无调价）；**仅变体**有 `unit_price_cents`(A) + `adjust_cents`(B)（最终价 **C=A+B**，已落库并接入结算）。`box_size` 与 `variants[].pieces` 已从配置模型移除；`max_quantity` 仅单领使用。
+> 注意（**2026-09-25 核对**，见 [DESIGN.md](./DESIGN.md) §4、[INTERFACES.md](./INTERFACES.md) §8.7）：商品级 `unit_price_cents` 为**原价**（无调价）；**仅子项**有 `unit_price_cents`(A) + `adjust_cents`(B)（最终价 **C=A+B**，已落库并接入结算）。`box_size` 与 `subitems[].pieces` 已从配置模型移除；`max_quantity` 仅单领使用。
 
 ### 4.2 环境变量
 
@@ -210,14 +210,14 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 {
   "intent": "claim",
   "items": [
-    { "item": "通行认证SP-月行水上", "variant": "岳羽由加莉", "quantity": 1,
+    { "item": "通行认证SP-月行水上", "subitem": "岳羽由加莉", "quantity": 1,
       "claim_type": "split", "slot_policy": "normal" }
   ],
   "confidence": 0.95,
   "ambiguous_parts": []
 }
 ```
-> 说明：契约文档用 `variant:"岳羽由加莉"`；解析器实际同时接受 `item`/`name`/`variant`，按商品名/别名/ID 匹配（`src/llm/pipeline.rs:617-690`）。`slot_policy` 实际值为 `normal|tail|fullbox`（提示词），归一化后映射为 `Normal|TailLocked|FullBox`（`src/parser/normalize.rs:17-31`）。
+> 说明：契约文档用 `subitem:"岳羽由加莉"`；解析器实际同时接受 `item`/`name`/`subitem`，按商品名/别名/ID 匹配（`src/llm/pipeline.rs:617-690`）。`slot_policy` 实际值为 `normal|tail|fullbox`（提示词），归一化后映射为 `Normal|TailLocked|FullBox`（`src/parser/normalize.rs:17-31`）。
 - **结果示例**（实测 `POST /api/sim/message` 的 `outcome`）：
 ```json
 {
@@ -249,11 +249,11 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 ```
 - 管理员斜杠命令：仅 `is_admin` 可用，非管理员 `/` 命令被拒绝（`src/llm/pipeline.rs:122-134`）。
 
-### F5 排谷执行（变体 / 单领 / 包盒 / 包尾 / 撤销 / 幂等）
+### F5 排谷执行（子项 / 单领 / 包盒 / 包尾 / 撤销 / 幂等）
 
 - **触发**：`ParsedIntent::Claim` 校验为 `Ok(event)` 后。
 - **处理**：
-  - 变体感知：状态键为 `(item_id, variant_id)`（`src/engine/allocation_engine.rs:40,50-71`）；配置商品 → `Item` 映射见 `src/settings.rs:113-152`。
+  - 子项感知：状态键为 `(item_id, subitem_id)`（`src/engine/allocation_engine.rs:40,50-71`）；配置商品 → `Item` 映射见 `src/settings.rs:113-152`。
   - `split` 普通：填第一个可填普通槽，满则开新盒（`src/engine/allocation_engine.rs:222-235`）。
   - `single`：写入 `singles`，超出 `max_quantity` 的部分进 `waiting`（`:417-456`）。
   - `FullBox`（包盒）：独占整盒，未占满的槽标记 `LockedEmpty` 并带 `segment_id`（`:202-220`）。
@@ -273,7 +273,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
       "item_id": "pass_sp",
       "item_name": "通行认证SP-月行水上",
       "kind": "split",
-      "variant_id": "v_jcl",
+      "subitem_id": "v_jcl",
       "boxes": [
         {
           "box_index": 1,
@@ -358,7 +358,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 
 - **触发**：打开 `/`（`display.html`）或 `/web/display.html`。
 - **处理**：`display.js` 初始化 → `GET /api/config` 取 `display.*` → 每 `refresh_ms`（默认 5000）`GET /api/display?since=<version>`（`web/display.js:290,337`）。
-  - **keyed diff**：`syncKeyedChildren` 复用 DOM；排位单元格 key = `item|variant#box:slot`；消息 key = `s<seq>`；who-whats key = `display`（`web/common.js:138-166,287-306`）。变化格高亮 3s（`web/common.js:197-210`）。
+  - **keyed diff**：`syncKeyedChildren` 复用 DOM；排位单元格 key = `item|subitem#box:slot`；消息 key = `s<seq>`；who-whats key = `display`（`web/common.js:138-166,287-306`）。变化格高亮 3s（`web/common.js:197-210`）。
   - **不打断**：仅在文本变化时写入；`extra` 块用 `__html` 比较后写（`web/common.js:319-322`）；smart-scroll 仅在距底 60px 内自动跟随，否则显示「有新内容 N 条」（`web/common.js:373-424`）。
   - **数据源**：`local` 走 API；`remote` 依次尝试 `<base>/rounds/<round_id>/current`、`<base>/current`（**无 `.json` 后缀**，`web/common.js:841-847`）。
 - **实测 `GET /api/display?since=0`（裁剪）**：
@@ -381,7 +381,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 ### F10 管理面板（revision / 409）
 
 - **触发**：打开 `/admin`。
-- **处理**：`load()` → `GET /api/config`（`web/admin.js:279-292`）；保存 → `PUT /api/config {config, revision}`（`:298`）；冲突（HTTP 409）→ 横幅提示「配置冲突，需重新载入」（`:305-307`）；「从磁盘重载」→ `POST /api/config/reload`（`:317`）；成员表 → `GET /api/members`、拉取 → `POST /api/members/refresh`（`:347-371`）。商品编辑器支持 items/variants 增删改（`:118-228`）；时段窗口 `datetime-local` ↔ `start_ms/end_ms`（`:46-62`）。
+- **处理**：`load()` → `GET /api/config`（`web/admin.js:279-292`）；保存 → `PUT /api/config {config, revision}`（`:298`）；冲突（HTTP 409）→ 横幅提示「配置冲突，需重新载入」（`:305-307`）；「从磁盘重载」→ `POST /api/config/reload`（`:317`）；成员表 → `GET /api/members`、拉取 → `POST /api/members/refresh`（`:347-371`）。商品编辑器支持 items/subitems 增删改（`:118-228`）；时段窗口 `datetime-local` ↔ `start_ms/end_ms`（`:46-62`）。
 - **结果**：服务端 `ConfigStore.put` 校验 revision（`src/settings.rs:246-260`），冲突返回：
 ```json
 { "error": "stale_revision", "revision": 5 }
@@ -511,9 +511,9 @@ curl -X POST http://127.0.0.1:21081/api/sim/reset -H "Content-Type: application/
 ### 7.2 事件模型
 
 - `EventEnvelope`（`src/domain/event.rs:39-51`）：`event_id, round_id, group_id, user_id, raw_message_id, event_type, effective_at, sequence, payload, status`。
-- `DomainEvent`（`#[serde(tag="event_type")]`，`src/domain/event.rs:7-37`）变体：
+- `DomainEvent`（`#[serde(tag="event_type")]`，`src/domain/event.rs:7-37`）子项：
   `ClaimCreated`、`ClaimCancelled`、`ClaimModified`、`AdminAllocationAdjusted`、`AdminSlotLocked`、`AdminSlotUnlocked`、`DiscountRulesSet`、`RoundClosed`、`RoundOpened`、`ParseOverride`。
-- 当前新栈**只会产生** `ClaimCreated` / `ClaimCancelled`（`src/parser/validation.rs:144,193`）；其余变体虽在重放/引擎中被处理，但无入站路径（见 §10）。
+- 当前新栈**只会产生** `ClaimCreated` / `ClaimCancelled`（`src/parser/validation.rs:144,193`）；其余子项虽在重放/引擎中被处理，但无入站路径（见 §10）。
 - 排序：`compare_event_order` = `effective_at ASC → sequence ASC`（`src/domain/event.rs:188-191`）。
 
 ### 7.3 `AllocationSnapshot` 关键字段
@@ -523,7 +523,7 @@ curl -X POST http://127.0.0.1:21081/api/sim/reset -H "Content-Type: application/
 - `round_id`（字符串，新类型 `RoundId` 序列化为字符串）
 - `version`（i64；新栈 = 已应用事件数，`src/llm/pipeline.rs:430`）
 - `generated_at`（RFC3339）
-- `item_allocations: Vec<ItemAllocation>`（`src/domain/allocation.rs:103-113`）：`item_id, item_name, kind, variant_id, boxes, singles, waiting`
+- `item_allocations: Vec<ItemAllocation>`（`src/domain/allocation.rs:103-113`）：`item_id, item_name, kind, subitem_id, boxes, singles, waiting`
   - `boxes[].slots[]`（`SlotAllocation`，`src/domain/allocation.rs:26-36`）：`slot_index, user_id, claim_id, claim_line_index, status, slot_policy, segment_id, lock_reason`
   - `singles[]`：`user_id, claim_id, item_id, quantity, unit_price`
   - `waiting[]`：`user_id, claim_id, item_id, quantity, claim_type, priority_level`

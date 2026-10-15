@@ -1,6 +1,6 @@
 use crate::domain::claim::ClaimLine;
 use crate::domain::event::{ClaimCancelled, ClaimCreated, DomainEvent, EventEnvelope};
-use crate::domain::ids::UserId;
+use crate::domain::ids::{ItemId, UserId};
 use crate::domain::item::RoundContext;
 use crate::parser::alias_match;
 use crate::parser::parsed_event::{ParsedIntent, ParsedMessage};
@@ -11,6 +11,8 @@ pub struct ValidateContext<'a> {
     pub group_id: &'a str,
     pub raw_message_id: Option<String>,
     pub active_rounds: &'a [RoundContext],
+    /// §5 整盒路由：拼团项（子项为空时）→ 整盒项 id 的映射。
+    pub box_map: &'a std::collections::HashMap<ItemId, ItemId>,
     pub now: chrono::DateTime<chrono::Utc>,
     pub sequence: i64,
 }
@@ -46,6 +48,7 @@ impl EventValidator {
             group_id,
             raw_message_id,
             active_rounds,
+            box_map,
             now,
             sequence,
         } = ctx;
@@ -73,7 +76,7 @@ impl EventValidator {
 
         match parsed.intent {
             ParsedIntent::Claim => {
-                // Rule-parsed messages already resolved (item, variant) with context;
+                // Rule-parsed messages already resolved (item, subitem) with context;
                 // use that hint directly. Otherwise fall back to alias matching.
                 let use_hint = parsed.items.iter().all(|pi| pi.resolved_item_id.is_some());
                 let (round_id, pairs): (
@@ -92,7 +95,7 @@ impl EventValidator {
                         .map(|pi| {
                             (
                                 crate::domain::ids::ItemId(pi.resolved_item_id.clone().unwrap()),
-                                pi.resolved_variant_id.clone(),
+                                pi.resolved_subitem_id.clone(),
                             )
                         })
                         .collect();
@@ -120,10 +123,23 @@ impl EventValidator {
                     let rid = resolved[0].round_id.clone().unwrap();
                     let pairs = resolved
                         .iter()
-                        .map(|r| (r.item_id.clone().unwrap(), r.variant_id.clone()))
+                        .map(|r| (r.item_id.clone().unwrap(), r.subitem_id.clone()))
                         .collect();
                     (rid, pairs)
                 };
+
+                // §5 整盒路由：命中拼团项且子项为空 → 重定向到其整盒项（整盒走单领队列）。
+                let (pairs, redirected): (Vec<(ItemId, Option<String>)>, Vec<bool>) = pairs
+                    .into_iter()
+                    .map(|(item_id, subitem_id)| {
+                        if subitem_id.is_none() {
+                            if let Some(box_id) = box_map.get(&item_id) {
+                                return ((box_id.clone(), None), true);
+                            }
+                        }
+                        ((item_id, subitem_id), false)
+                    })
+                    .unzip();
 
                 for pi in &parsed.items {
                     if pi.quantity == 0 {
@@ -150,10 +166,15 @@ impl EventValidator {
                     .map(|(i, pi)| {
                         let normalized = crate::parser::normalize::normalize_claim_item(pi);
                         let item_id = pairs[i].0.clone();
-                        let claim_type = match normalized.claim_type.as_deref() {
-                            Some("Single") => crate::domain::claim::ClaimType::Single,
-                            Some("GiftClaim") => crate::domain::claim::ClaimType::GiftClaim,
-                            _ => crate::domain::claim::ClaimType::Split,
+                        let claim_type = if redirected[i] {
+                            // §5：重定向到整盒 → 单领队列（整盒语义）。
+                            crate::domain::claim::ClaimType::Single
+                        } else {
+                            match normalized.claim_type.as_deref() {
+                                Some("Single") => crate::domain::claim::ClaimType::Single,
+                                Some("GiftClaim") => crate::domain::claim::ClaimType::GiftClaim,
+                                _ => crate::domain::claim::ClaimType::Split,
+                            }
                         };
                         let slot_policy = match normalized.slot_policy.as_deref() {
                             Some("TailLocked") => crate::domain::claim::SlotPolicy::TailLocked,
@@ -164,7 +185,7 @@ impl EventValidator {
                         };
                         ClaimLine {
                             item_id,
-                            variant_id: pairs[i].1.clone(),
+                            subitem_id: pairs[i].1.clone(),
                             quantity: pi.quantity,
                             claim_type,
                             slot_policy,
@@ -279,7 +300,7 @@ mod tests {
             slot_policy: Some("Normal".to_string()),
             notes: None,
             resolved_item_id: Some("item_a".to_string()),
-            resolved_variant_id: None,
+            resolved_subitem_id: None,
             resolved_round_id: Some("round_a".to_string()),
         }
     }
@@ -299,6 +320,7 @@ mod tests {
     async fn validate(parsed: ParsedMessage) -> ValidationOutcome {
         let validator = EventValidator::new(0.65);
         let user_id = UserId("u1".to_string());
+        let box_map = std::collections::HashMap::new();
         validator
             .validate(
                 parsed,
@@ -307,6 +329,7 @@ mod tests {
                     group_id: "g1",
                     raw_message_id: Some("m1".to_string()),
                     active_rounds: &[],
+                    box_map: &box_map,
                     now: chrono::Utc::now(),
                     sequence: 1,
                 },
@@ -339,5 +362,73 @@ mod tests {
     async fn unknown_intent_is_ignored() {
         let outcome = validate(parsed(ParsedIntent::Unknown, vec![])).await;
         assert!(matches!(outcome, ValidationOutcome::Ignore));
+    }
+
+    #[tokio::test]
+    async fn bare_group_claim_redirects_to_box_item() {
+        use crate::domain::claim::ClaimType;
+        let validator = EventValidator::new(0.65);
+        let user_id = UserId("u1".to_string());
+        let mut box_map = std::collections::HashMap::new();
+        box_map.insert(ItemId("item_a".to_string()), ItemId("box_a".to_string()));
+        let outcome = validator
+            .validate(
+                parsed(ParsedIntent::Claim, vec![claim_item("商品甲", 1)]),
+                ValidateContext {
+                    user_id: &user_id,
+                    group_id: "g1",
+                    raw_message_id: Some("m1".to_string()),
+                    active_rounds: &[],
+                    box_map: &box_map,
+                    now: chrono::Utc::now(),
+                    sequence: 1,
+                },
+            )
+            .await
+            .expect("validate");
+        match outcome {
+            ValidationOutcome::Ok(event) => match &event.payload {
+                DomainEvent::ClaimCreated(created) => {
+                    assert_eq!(created.items[0].item_id.0, "box_a");
+                    assert!(matches!(created.items[0].claim_type, ClaimType::Single));
+                }
+                other => panic!("expected ClaimCreated, got {other:?}"),
+            },
+            _ => panic!("expected Ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn group_claim_with_subitem_is_not_redirected() {
+        let validator = EventValidator::new(0.65);
+        let user_id = UserId("u1".to_string());
+        let mut box_map = std::collections::HashMap::new();
+        box_map.insert(ItemId("item_a".to_string()), ItemId("box_a".to_string()));
+        let mut item = claim_item("商品甲", 1);
+        item.resolved_subitem_id = Some("v1".to_string());
+        let outcome = validator
+            .validate(
+                parsed(ParsedIntent::Claim, vec![item]),
+                ValidateContext {
+                    user_id: &user_id,
+                    group_id: "g1",
+                    raw_message_id: Some("m1".to_string()),
+                    active_rounds: &[],
+                    box_map: &box_map,
+                    now: chrono::Utc::now(),
+                    sequence: 1,
+                },
+            )
+            .await
+            .expect("validate");
+        match outcome {
+            ValidationOutcome::Ok(event) => match &event.payload {
+                DomainEvent::ClaimCreated(created) => {
+                    assert_eq!(created.items[0].item_id.0, "item_a");
+                }
+                other => panic!("expected ClaimCreated, got {other:?}"),
+            },
+            _ => panic!("expected Ok"),
+        }
     }
 }

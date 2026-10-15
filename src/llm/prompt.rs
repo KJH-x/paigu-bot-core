@@ -22,9 +22,9 @@ pub fn build_system_prompt(cfg: &AppConfig) -> String {
             item.kind,
             item.aliases.join("/")
         ));
-        if !item.variants.is_empty() {
-            let variants: Vec<&str> = item.variants.iter().map(|v| v.name.as_str()).collect();
-            out.push_str(&format!(" 变体: {}", variants.join("、")));
+        if !item.subitems.is_empty() {
+            let subitems: Vec<&str> = item.subitems.iter().map(|v| v.name.as_str()).collect();
+            out.push_str(&format!(" 子项: {}", subitems.join("、")));
         }
         out.push('\n');
     }
@@ -44,7 +44,7 @@ pub fn build_system_prompt(cfg: &AppConfig) -> String {
     out.push_str(
         "\n\n# 输出契约\n只输出 JSON：\
 {\"intent\":\"claim|cancel|admin|unknown\",\
-\"items\":[{\"item\":\"商品名\",\"variant\":\"变体名\",\"quantity\":1,\
+\"items\":[{\"item\":\"商品名\",\"subitem\":\"子项名\",\"quantity\":1,\
 \"claim_type\":\"split|single\",\"slot_policy\":\"normal|tail|fullbox|wholebox\"}],\
 \"confidence\":0.0,\"ambiguous_parts\":[]}。\
 非排谷消息 → intent=unknown；商品歧义 → 填入 ambiguous_parts。\
@@ -55,10 +55,10 @@ pub fn build_system_prompt(cfg: &AppConfig) -> String {
 
 /// §U7 first-match 澄清 system prompt。
 pub fn build_first_match_system_prompt() -> String {
-    "你是排谷解析澄清器。用户只报了角色名/变体名，未报商品大类，且无法唯一匹配。\
+    "你是排谷解析澄清器。用户只报了角色名/子项名，未报商品大类，且无法唯一匹配。\
 请依据给出的商品列表，按目录顺序选择第一个含该角色名的**可拼团商品**（拼团类/特典类）。\
 允许修正错别字/同音字。只输出 JSON：\
-{\"matches\":[{\"name\":\"用户所报名\",\"item\":\"商品名\",\"variant\":\"变体名\"}]}。\
+{\"matches\":[{\"name\":\"用户所报名\",\"item\":\"商品名\",\"subitem\":\"子项名\"}]}。\
 不要计算价格、不要生成回复。"
         .to_string()
 }
@@ -82,9 +82,9 @@ pub fn build_first_match_user_prompt(
             item.kind.as_str(),
             item.aliases.join("/")
         ));
-        if !item.variants.is_empty() {
-            let variants: Vec<&str> = item.variants.iter().map(|v| v.name.as_str()).collect();
-            out.push_str(&format!(" 变体: {}", variants.join("、")));
+        if !item.subitems.is_empty() {
+            let subitems: Vec<&str> = item.subitems.iter().map(|v| v.name.as_str()).collect();
+            out.push_str(&format!(" 子项: {}", subitems.join("、")));
         }
         out.push('\n');
     }

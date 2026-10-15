@@ -172,7 +172,7 @@ pub fn evaluate(config: &SettlementConfig, table: &OrderTable) -> SettlementResu
         lines.push(LineSettlement {
             package_id: table.packages[*pi].package_id.clone(),
             item_id: line.item_id.clone(),
-            variant_id: line.variant_id.clone(),
+            subitem_id: line.subitem_id.clone(),
             qty: line.qty,
             unit_price_cents: line.unit_price_cents,
             total_cents: total,
@@ -258,8 +258,8 @@ fn adjusted_unit_price(config: &SettlementConfig, line: &Line) -> i64 {
         if entry.item_id != line.item_id {
             continue;
         }
-        if let Some(variant) = &entry.variant_id {
-            if line.variant_id.as_deref() != Some(variant.as_str()) {
+        if let Some(subitem) = &entry.subitem_id {
+            if line.subitem_id.as_deref() != Some(subitem.as_str()) {
                 continue;
             }
         }

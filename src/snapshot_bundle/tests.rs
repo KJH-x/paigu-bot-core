@@ -1,7 +1,7 @@
 use super::*;
 use crate::messages::MessageRecord;
 use crate::replay::session::{replay_messages, ReplayOverrides};
-use crate::settings::{default_config, ItemConfig, VariantConfig};
+use crate::settings::{default_config, ItemConfig, SubitemConfig};
 use serde_json::json;
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -68,8 +68,9 @@ async fn imported_bundle_replays_to_same_board() {
         unit_price_cents: 0,
         max_quantity: None,
         aliases: vec!["徽章".to_string()],
-        variants: vec![VariantConfig {
-            variant_id: "v_a".to_string(),
+        box_item_id: None,
+        subitems: vec![SubitemConfig {
+            subitem_id: "v_a".to_string(),
             name: "甲".to_string(),
             unit_price_cents: 0,
             adjust_cents: 0,

@@ -24,7 +24,7 @@ fn fixture_split_item(item_id: &str, name: &str, price_cents: i64, box_size: u32
         aliases: vec![],
         sort_order: 0,
         metadata: serde_json::json!({}),
-        variants: vec![],
+        subitems: vec![],
     }
 }
 
@@ -42,7 +42,7 @@ fn fixture_single_item(item_id: &str, name: &str, price_cents: i64, max_quantity
         aliases: vec![],
         sort_order: 0,
         metadata: serde_json::json!({}),
-        variants: vec![],
+        subitems: vec![],
     }
 }
 
@@ -63,7 +63,7 @@ fn claim_line(
         line_index: 0,
         user_id: UserId(user_id.to_string()),
         item_id: ItemId(item_id.to_string()),
-        variant_id: None,
+        subitem_id: None,
         quantity,
         claim_type: ClaimType::Split,
         slot_policy: SlotPolicy::Normal,
@@ -73,10 +73,10 @@ fn claim_line(
     }
 }
 
-fn variant_line(
+fn subitem_line(
     user_id: &str,
     item_id: &str,
-    variant_id: &str,
+    subitem_id: &str,
     quantity: u32,
     ts_ms: i64,
     seq: i64,
@@ -86,7 +86,7 @@ fn variant_line(
         line_index: 0,
         user_id: UserId(user_id.to_string()),
         item_id: ItemId(item_id.to_string()),
-        variant_id: Some(variant_id.to_string()),
+        subitem_id: Some(subitem_id.to_string()),
         quantity,
         claim_type: ClaimType::Split,
         slot_policy: SlotPolicy::Normal,
@@ -102,7 +102,7 @@ fn tail_line(user_id: &str, item_id: &str, quantity: u32, ts_ms: i64) -> Effecti
         line_index: 0,
         user_id: UserId(user_id.to_string()),
         item_id: ItemId(item_id.to_string()),
-        variant_id: None,
+        subitem_id: None,
         quantity,
         claim_type: ClaimType::Split,
         slot_policy: SlotPolicy::TailLocked,
@@ -259,7 +259,7 @@ fn replay_cancellation_removes_effective_claims() {
                 user_id: UserId("u1".to_string()),
                 items: vec![ClaimLine {
                     item_id: ItemId("badge".to_string()),
-                    variant_id: None,
+                    subitem_id: None,
                     quantity: 1,
                     claim_type: ClaimType::Split,
                     slot_policy: SlotPolicy::Normal,
@@ -327,20 +327,20 @@ fn eligibility_applies_to_item() {
 }
 
 #[test]
-fn variant_allocation_isolated_per_variant() {
-    use crate::domain::item::ItemVariant;
+fn subitem_allocation_isolated_per_subitem() {
+    use crate::domain::item::ItemSubitem;
 
     let mut split = fixture_split_item("badge", "徽章", 4500, 10);
-    split.variants = vec![
-        ItemVariant {
-            variant_id: "v_yukari".to_string(),
+    split.subitems = vec![
+        ItemSubitem {
+            subitem_id: "v_yukari".to_string(),
             name: "岳羽由加莉".to_string(),
             unit_price: MoneyCents(4500),
             capacity: Some(2),
             aliases: vec![],
         },
-        ItemVariant {
-            variant_id: "v_tora".to_string(),
+        ItemSubitem {
+            subitem_id: "v_tora".to_string(),
             name: "虎狼丸".to_string(),
             unit_price: MoneyCents(4500),
             capacity: Some(2),
@@ -349,10 +349,10 @@ fn variant_allocation_isolated_per_variant() {
     ];
     let single = fixture_single_item("gift", "特典", 1000, 10);
 
-    let a1 = variant_line("u1", "badge", "v_yukari", 1, 100, 1);
-    let a2 = variant_line("u2", "badge", "v_yukari", 1, 101, 2);
-    let b1 = variant_line("u3", "badge", "v_tora", 1, 102, 3);
-    let b2 = variant_line("u4", "badge", "v_tora", 1, 103, 4);
+    let a1 = subitem_line("u1", "badge", "v_yukari", 1, 100, 1);
+    let a2 = subitem_line("u2", "badge", "v_yukari", 1, 101, 2);
+    let b1 = subitem_line("u3", "badge", "v_tora", 1, 102, 3);
+    let b2 = subitem_line("u4", "badge", "v_tora", 1, 103, 4);
     let mut s1 = claim_line("u5", "gift", 2, 104, 5, 0);
     s1.claim_type = ClaimType::Single;
 
@@ -370,11 +370,11 @@ fn variant_allocation_isolated_per_variant() {
 
     let yukari = badge_rows
         .iter()
-        .find(|i| i.variant_id.as_deref() == Some("v_yukari"))
+        .find(|i| i.subitem_id.as_deref() == Some("v_yukari"))
         .unwrap();
     let tora = badge_rows
         .iter()
-        .find(|i| i.variant_id.as_deref() == Some("v_tora"))
+        .find(|i| i.subitem_id.as_deref() == Some("v_tora"))
         .unwrap();
 
     assert_eq!(yukari.boxes.len(), 1);

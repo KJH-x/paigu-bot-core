@@ -4,20 +4,20 @@ import path from 'node:path';
 function check(value, message) { if (!value) throw new Error(message); }
 const longName = '成员姓名特别长ABC';
 const items = [
-  {item_id:'board_fixture',name:'固定宽度验收 · 多盒拼团',kind:'拼团',variants:[
-    {variant_id:'a',name:'款式甲',capacity:2}, {variant_id:'b',name:'款式乙',capacity:3}]},
-  {item_id:'overflow_fixture',name:'固定宽度验收 · 超宽排表',kind:'拼团',variants:[{variant_id:'c',name:'款式丙',capacity:20}]}
+  {item_id:'board_fixture',name:'固定宽度验收 · 多盒拼团',kind:'拼团',subitems:[
+    {subitem_id:'a',name:'款式甲',capacity:2}, {subitem_id:'b',name:'款式乙',capacity:3}]},
+  {item_id:'overflow_fixture',name:'固定宽度验收 · 超宽排表',kind:'拼团',subitems:[{subitem_id:'c',name:'款式丙',capacity:20}]}
 ];
 const slot = (index, user='', status='filled', extra={}) => ({slot_index:index,user,status:user?status:'empty',...extra});
 function board(long) {
   return {round_id:'width-fixture',item_allocations:[
-    {item_id:'board_fixture',variant_id:'a',singles:[{display:'单领姓名成员ABC',quantity:3}],waiting:[{display:'等待姓名成员DEF',quantity:2}],boxes:[
+    {item_id:'board_fixture',subitem_id:'a',singles:[{display:'单领姓名成员ABC',quantity:3}],waiting:[{display:'等待姓名成员DEF',quantity:2}],boxes:[
       {box_index:1,slots:[slot(1,long?longName:'成员甲'),slot(2,'',null,{status:'locked_empty',policy:'tail',segment_id:'tail-fixture'})]},
       {box_index:2,slots:[slot(1,'短二'),slot(2,'Alpha')]}]},
-    {item_id:'board_fixture',variant_id:'b',boxes:[
+    {item_id:'board_fixture',subitem_id:'b',boxes:[
       {box_index:1,slots:[slot(1,'成员02'),slot(2,'成员乙', 'locked'),slot(3,'')]},
       {box_index:2,slots:[slot(1,'成员乙乙','admin_reserved'),slot(2,'中英AB'),slot(3,'')]}]},
-    {item_id:'overflow_fixture',variant_id:'c',boxes:[{box_index:1,slots:Array.from({length:20},(_,i)=>slot(i+1,'超长姓名成员'+String(i+1).padStart(2,'0')+'ABC'))}]}]
+    {item_id:'overflow_fixture',subitem_id:'c',boxes:[{box_index:1,slots:Array.from({length:20},(_,i)=>slot(i+1,'超长姓名成员'+String(i+1).padStart(2,'0')+'ABC'))}]}]
   };
 }
 

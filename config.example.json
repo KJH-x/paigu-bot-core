@@ -27,7 +27,7 @@
     "temperature": 0.1,
     "fallback_to_rules": true,
     "segment_claims": false,
-    "prompt_template": "你是排谷消息解析器。只抽取结构化信息，不计算价格、不排序、不生成回复。\n输入：QQ 群消息文本、当前商品目录、预存(购物金)用户、时段政策。\n输出：严格 JSON：{\"intent\":\"claim|cancel|admin|unknown\",\"items\":[{\"item\":\"商品名\",\"variant\":\"变体名\",\"quantity\":1,\"claim_type\":\"split|single\",\"slot_policy\":\"normal|tail|fullbox\"}],\"confidence\":0.0,\"ambiguous_parts\":[]}。\n非排谷消息（闲聊/表情/图片/无关）→ intent=unknown。\n商品歧义 → 填入 ambiguous_parts。\n中文口语别名：通行证→通行认证SP-月行水上、特典/特典卡组→特典卡组-校园凭证、一套→整套、人事部简历→人事部简历SP-月行水上、风尚速递→风尚速递SP-月行水上。"
+    "prompt_template": "你是排谷消息解析器。只抽取结构化信息，不计算价格、不排序、不生成回复。\n输入：QQ 群消息文本、当前商品目录、预存(购物金)用户、时段政策。\n输出：严格 JSON：{\"intent\":\"claim|cancel|admin|unknown\",\"items\":[{\"item\":\"商品名\",\"subitem\":\"子项名\",\"quantity\":1,\"claim_type\":\"split|single\",\"slot_policy\":\"normal|tail|fullbox\"}],\"confidence\":0.0,\"ambiguous_parts\":[]}。\n非排谷消息（闲聊/表情/图片/无关）→ intent=unknown。\n商品歧义 → 填入 ambiguous_parts。\n中文口语别名：通行证→通行认证SP-月行水上、特典/特典卡组→特典卡组-校园凭证、一套→整套、人事部简历→人事部简历SP-月行水上、风尚速递→风尚速递SP-月行水上。"
   },
   "merge": {
     "enabled": false,
@@ -49,11 +49,11 @@
         "class": "A",
         "aliases": ["通行证", "通行认证SP", "通行认证"],
         "unit_price_cents": 5000,
-        "variants": [
-          { "variant_id": "v_jcl", "name": "结城理", "unit_price_cents": 5000, "adjust_cents": -500, "capacity": null, "aliases": [] },
-          { "variant_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 5000, "adjust_cents": 0, "capacity": null, "aliases": [] },
-          { "variant_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 5000, "adjust_cents": 0, "capacity": null, "aliases": [] },
-          { "variant_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 2500, "adjust_cents": 0, "capacity": null, "aliases": [] }
+        "subitems": [
+          { "subitem_id": "v_jcl", "name": "结城理", "unit_price_cents": 5000, "adjust_cents": -500, "capacity": null, "aliases": [] },
+          { "subitem_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 5000, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "subitem_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 5000, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "subitem_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 2500, "adjust_cents": 0, "capacity": null, "aliases": [] }
         ]
       },
       {
@@ -62,11 +62,11 @@
         "kind": "split",
         "class": "A",
         "aliases": ["人事部简历", "人事部简历SP"],
-        "variants": [
-          { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
-          { "variant_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
-          { "variant_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
-          { "variant_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] }
+        "subitems": [
+          { "subitem_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
+          { "subitem_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
+          { "subitem_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
+          { "subitem_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] }
         ]
       },
       {
@@ -75,11 +75,11 @@
         "kind": "split",
         "class": "A",
         "aliases": ["风尚速递", "风尚速递SP"],
-        "variants": [
-          { "variant_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
-          { "variant_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
-          { "variant_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
-          { "variant_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] }
+        "subitems": [
+          { "subitem_id": "v_jcl", "name": "结城理", "capacity": null, "aliases": [] },
+          { "subitem_id": "v_yy", "name": "岳羽由加莉", "capacity": null, "aliases": [] },
+          { "subitem_id": "v_ajs", "name": "埃癸斯", "capacity": null, "aliases": [] },
+          { "subitem_id": "v_hlw", "name": "虎狼丸", "capacity": null, "aliases": [] }
         ]
       },
       {
@@ -89,12 +89,12 @@
         "class": "B",
         "aliases": ["特典卡组", "特典", "校园凭证"],
         "unit_price_cents": 1200,
-        "variants": [
-          { "variant_id": "v_jcl", "name": "结城理", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
-          { "variant_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
-          { "variant_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
-          { "variant_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
-          { "variant_id": "v_zt", "name": "整套", "unit_price_cents": 4800, "adjust_cents": 200, "capacity": null, "aliases": ["一套"] }
+        "subitems": [
+          { "subitem_id": "v_jcl", "name": "结城理", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "subitem_id": "v_hlw", "name": "虎狼丸", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "subitem_id": "v_ajs", "name": "埃癸斯", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "subitem_id": "v_yy", "name": "岳羽由加莉", "unit_price_cents": 1200, "adjust_cents": 0, "capacity": null, "aliases": [] },
+          { "subitem_id": "v_zt", "name": "整套", "unit_price_cents": 4800, "adjust_cents": 200, "capacity": null, "aliases": ["一套"] }
         ]
       }
     ]
@@ -103,7 +103,7 @@
   "members": { "group_id": "123456789", "cache_path": "data/members.json", "daily_pull_at": "19:00" },
   "settlement": {
     "pricing": [
-      { "item_id": "pass_sp", "variant_id": "v_hlw", "mode": "SetFinal", "value": 2500 }
+      { "item_id": "pass_sp", "subitem_id": "v_hlw", "mode": "SetFinal", "value": 2500 }
     ],
     "discounts": [
       { "rule_id": "满300减10", "kind": "Threshold", "amount": 1000, "threshold": 30000, "ratio_ppm": null, "shares": -1 }

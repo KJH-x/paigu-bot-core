@@ -418,7 +418,7 @@ pub async fn delete_round(state: &ApiState, id: &str) -> Result<Value, ServiceEr
 }
 
 fn round_summary(round: &RoundSettings, active: bool, modified: Option<SystemTime>) -> Value {
-    let variants: usize = round.items.iter().map(|it| it.variants.len()).sum();
+    let subitems: usize = round.items.iter().map(|it| it.subitems.len()).sum();
     let updated_at = modified.map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
     json!({
         "round_id": round.round_id,
@@ -426,7 +426,7 @@ fn round_summary(round: &RoundSettings, active: bool, modified: Option<SystemTim
         "group_id": round.group_id,
         "category": round.category.as_str(),
         "items": round.items.len(),
-        "variants": variants,
+        "subitems": subitems,
         "active": active,
         "updated_at": updated_at,
     })
@@ -484,10 +484,10 @@ fn owners_label(owner: &BTreeSet<String>) -> String {
 fn check_issues(round: &RoundSettings) -> Vec<Value> {
     let mut issues = Vec::new();
     let mut item_ids: BTreeMap<&str, usize> = BTreeMap::new();
-    // 跨商品冲突：item 级（商品名/别名）与 variant 级（变体名/别名）分别记 owner。
+    // 跨商品冲突：item 级（商品名/别名）与 subitem 级（子项名/别名）分别记 owner。
     let mut name_owner: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut alias_owner: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut variant_token_owner: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut subitem_token_owner: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
     for it in &round.items {
         let where_item = format!("item:{}", it.item_id);
@@ -515,7 +515,7 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
                 .insert(it.item_id.clone());
         }
         // 价格缺失
-        if it.variants.is_empty() && it.unit_price_cents == 0 {
+        if it.subitems.is_empty() && it.unit_price_cents == 0 {
             issues.push(issue(
                 "warn",
                 "missing_price",
@@ -523,14 +523,14 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
                 &where_item,
             ));
         }
-        // 种类与变体一致性（U6）
+        // 种类与子项一致性（U6）
         if let Some(cat) = it.category() {
-            if cat.requires_variants() != it.has_variants() {
+            if cat.requires_subitems() != it.has_subitems() {
                 issues.push(issue(
                     "error",
-                    "category_variant_mismatch",
+                    "category_subitem_mismatch",
                     format!(
-                        "商品 {} 种类 {} 与变体不一致（有变体必须是拼团/特典，无变体必须是单领/整盒）",
+                        "商品 {} 种类 {} 与子项不一致（有子项必须是拼团/特典，无子项必须是单领/整盒）",
                         it.item_id,
                         cat.as_str()
                     ),
@@ -545,7 +545,7 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
                     "warn",
                     "class_derived_mismatch",
                     format!(
-                        "商品 {} 的 class 与「有变体⇒A/无变体⇒B」推导不一致",
+                        "商品 {} 的 class 与「有子项⇒A/无子项⇒B」推导不一致",
                         it.item_id
                     ),
                     &where_item,
@@ -561,24 +561,24 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
                     .insert(it.item_id.clone());
             }
         }
-        // variant_id 只在**同一商品内**唯一（error）。
-        let mut seen_variant_ids: BTreeSet<&str> = BTreeSet::new();
-        for v in &it.variants {
-            let vw = format!("variant:{}/{}", it.item_id, v.variant_id);
-            if v.variant_id.trim().is_empty() {
+        // subitem_id 只在**同一商品内**唯一（error）。
+        let mut seen_subitem_ids: BTreeSet<&str> = BTreeSet::new();
+        for v in &it.subitems {
+            let vw = format!("subitem:{}/{}", it.item_id, v.subitem_id);
+            if v.subitem_id.trim().is_empty() {
                 issues.push(issue(
                     "error",
-                    "empty_variant_id",
-                    format!("商品 {} 存在空 variant_id", it.item_id),
+                    "empty_subitem_id",
+                    format!("商品 {} 存在空 subitem_id", it.item_id),
                     &where_item,
                 ));
-            } else if !seen_variant_ids.insert(v.variant_id.as_str()) {
+            } else if !seen_subitem_ids.insert(v.subitem_id.as_str()) {
                 issues.push(issue(
                     "error",
-                    "duplicate_variant_id",
+                    "duplicate_subitem_id",
                     format!(
-                        "variant_id 在同一商品内重复：{}（商品 {}）",
-                        v.variant_id, it.item_id
+                        "subitem_id 在同一商品内重复：{}（商品 {}）",
+                        v.subitem_id, it.item_id
                     ),
                     &vw,
                 ));
@@ -586,12 +586,12 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
             if v.name.trim().is_empty() {
                 issues.push(issue(
                     "error",
-                    "empty_variant_name",
-                    format!("变体 {} 的 name 为空", v.variant_id),
+                    "empty_subitem_name",
+                    format!("子项 {} 的 name 为空", v.subitem_id),
                     &vw,
                 ));
             } else {
-                variant_token_owner
+                subitem_token_owner
                     .entry(v.name.trim().to_string())
                     .or_default()
                     .insert(it.item_id.clone());
@@ -599,15 +599,15 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
             if v.unit_price_cents == 0 {
                 issues.push(issue(
                     "warn",
-                    "missing_variant_price",
-                    format!("变体 {} 缺少标价（0）", v.variant_id),
+                    "missing_subitem_price",
+                    format!("子项 {} 缺少标价（0）", v.subitem_id),
                     &vw,
                 ));
             }
             for alias in &v.aliases {
                 let alias = alias.trim();
                 if !alias.is_empty() {
-                    variant_token_owner
+                    subitem_token_owner
                         .entry(alias.to_string())
                         .or_default()
                         .insert(it.item_id.clone());
@@ -627,14 +627,14 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
         }
     }
 
-    // 商品名：跨商品重复，或与别家商品别名/变体名冲突 → error。
+    // 商品名：跨商品重复，或与别家商品别名/子项名冲突 → error。
     for (token, owners) in &name_owner {
         let hit = owners.len() > 1
             || alias_owner
                 .get(token)
                 .map(|other| crosses(owners, other))
                 .unwrap_or(false)
-            || variant_token_owner
+            || subitem_token_owner
                 .get(token)
                 .map(|other| crosses(owners, other))
                 .unwrap_or(false);
@@ -647,14 +647,14 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
             ));
         }
     }
-    // 商品别名：跨商品重复，或与别家商品名/变体名冲突 → error。
+    // 商品别名：跨商品重复，或与别家商品名/子项名冲突 → error。
     for (token, owners) in &alias_owner {
         let hit = owners.len() > 1
             || name_owner
                 .get(token)
                 .map(|other| crosses(owners, other))
                 .unwrap_or(false)
-            || variant_token_owner
+            || subitem_token_owner
                 .get(token)
                 .map(|other| crosses(owners, other))
                 .unwrap_or(false);
@@ -667,8 +667,8 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
             ));
         }
     }
-    // 变体名/别名：与别家**商品名/别名**冲突 → error；变体之间跨商品重名（角色名）不报错。
-    for (token, owners) in &variant_token_owner {
+    // 子项名/别名：与别家**商品名/别名**冲突 → error；子项之间跨商品重名（角色名）不报错。
+    for (token, owners) in &subitem_token_owner {
         let hit = name_owner
             .get(token)
             .map(|other| crosses(owners, other))
@@ -682,10 +682,10 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
                 "error",
                 "alias_conflict",
                 format!(
-                    "变体名/别名与商品名冲突：{token}（{}）",
+                    "子项名/别名与商品名冲突：{token}（{}）",
                     owners_label(owners)
                 ),
-                "variants",
+                "subitems",
             ));
         }
     }
@@ -696,12 +696,12 @@ fn check_issues(round: &RoundSettings) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{ItemConfig, VariantConfig};
+    use crate::settings::{ItemConfig, SubitemConfig};
 
-    fn variant(variant_id: &str, unit_price_cents: i64) -> VariantConfig {
-        VariantConfig {
-            variant_id: variant_id.to_string(),
-            name: variant_id.to_string(),
+    fn subitem(subitem_id: &str, unit_price_cents: i64) -> SubitemConfig {
+        SubitemConfig {
+            subitem_id: subitem_id.to_string(),
+            name: subitem_id.to_string(),
             unit_price_cents,
             adjust_cents: 0,
             capacity: None,
@@ -713,7 +713,7 @@ mod tests {
         item_id: &str,
         kind: &str,
         aliases: Vec<&str>,
-        variants: Vec<VariantConfig>,
+        subitems: Vec<SubitemConfig>,
     ) -> ItemConfig {
         ItemConfig {
             item_id: item_id.to_string(),
@@ -723,7 +723,8 @@ mod tests {
             aliases: aliases.into_iter().map(str::to_string).collect(),
             unit_price_cents: 100,
             max_quantity: None,
-            variants,
+            box_item_id: None,
+            subitems,
         }
     }
 
@@ -737,13 +738,13 @@ mod tests {
             priority_window: None,
             phases: vec![],
             items: vec![
-                item("a", "拼团", vec!["通用"], vec![variant("v1", 100)]),
+                item("a", "拼团", vec!["通用"], vec![subitem("v1", 100)]),
                 item("b", "单领", vec!["通用"], vec![]),
                 item(
                     "c",
                     "单领",
                     vec![],
-                    vec![variant("v1", 0), variant("v1", 0)],
+                    vec![subitem("v1", 0), subitem("v1", 0)],
                 ),
             ],
             category: RoundCategory::Normal,
@@ -751,13 +752,13 @@ mod tests {
         let issues = check_issues(&round);
         let codes: Vec<&str> = issues.iter().filter_map(|i| i["code"].as_str()).collect();
         assert!(codes.contains(&"alias_conflict"));
-        assert!(codes.contains(&"duplicate_variant_id"));
-        assert!(codes.contains(&"category_variant_mismatch"));
-        assert!(codes.contains(&"missing_variant_price"));
+        assert!(codes.contains(&"duplicate_subitem_id"));
+        assert!(codes.contains(&"category_subitem_mismatch"));
+        assert!(codes.contains(&"missing_subitem_price"));
         assert!(!issues.iter().any(|i| i["level"] == "no_such_level"));
     }
 
-    /// 真实 `config.example.json` 结构：多个商品复用 `v_jcl` 等 variant_id、
+    /// 真实 `config.example.json` 结构：多个商品复用 `v_jcl` 等 subitem_id、
     /// 且角色名可在多商品重复，不应报 error（§U7/§U8 口径）。
     #[test]
     fn check_ok_for_example_config_structure() {
@@ -779,7 +780,7 @@ mod tests {
             priority_window: None,
             phases: vec![],
             items: vec![
-                item("a", "拼团", vec!["甲"], vec![variant("v1", 100)]),
+                item("a", "拼团", vec!["甲"], vec![subitem("v1", 100)]),
                 item("b", "单领", vec!["乙"], vec![]),
             ],
             category: RoundCategory::Normal,
@@ -805,7 +806,7 @@ mod tests {
             priority_window: None,
             phases: vec![],
             items: vec![
-                item("a", "拼团", vec!["甲"], vec![variant("v1", 100)]),
+                item("a", "拼团", vec!["甲"], vec![subitem("v1", 100)]),
                 item("b", "单领", vec!["乙"], vec![]),
             ],
             category: RoundCategory::Normal,
@@ -847,7 +848,7 @@ mod tests {
                 "b",
                 "拼团",
                 vec!["甲"],
-                vec![variant("v1", 100)],
+                vec![subitem("v1", 100)],
             )]),
             ..SetupBody::default()
         };

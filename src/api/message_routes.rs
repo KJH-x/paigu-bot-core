@@ -19,6 +19,7 @@ pub fn routes() -> Router<Arc<ApiState>> {
             put(update_message).delete(delete_message),
         )
         .route("/api/messages/:key/reroute", post(reroute_message))
+        .route("/api/messages/:key/override", post(override_message))
 }
 
 #[derive(Deserialize)]
@@ -85,6 +86,17 @@ async fn reroute_message(
     Json(body): Json<RerouteInput>,
 ) -> Result<Json<Value>, ApiError> {
     let value = messages::reroute_message(&state, &key, body)
+        .await
+        .map_err(ServiceError::into_api)?;
+    Ok(Json(value))
+}
+
+async fn override_message(
+    State(state): State<Arc<ApiState>>,
+    Path(key): Path<String>,
+    Json(body): Json<messages::OverrideInput>,
+) -> Result<Json<Value>, ApiError> {
+    let value = messages::override_message(&state, &key, body)
         .await
         .map_err(ServiceError::into_api)?;
     Ok(Json(value))

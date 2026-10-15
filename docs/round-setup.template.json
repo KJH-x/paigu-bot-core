@@ -17,9 +17,9 @@
       "aliases": ["通行证", "通行认证SP"],
       "unit_price_cents": 5000,
       "max_quantity": null,
-      "variants": [
+      "subitems": [
         {
-          "variant_id": "v_jcl",
+          "subitem_id": "v_jcl",
           "name": "结城理",
           "unit_price_cents": 5000,
           "adjust_cents": -500,
@@ -27,7 +27,7 @@
           "aliases": []
         },
         {
-          "variant_id": "v_hlw",
+          "subitem_id": "v_hlw",
           "name": "虎狼丸",
           "unit_price_cents": 2500,
           "adjust_cents": 0,
@@ -43,7 +43,7 @@
       "aliases": [],
       "unit_price_cents": 1800,
       "max_quantity": 2,
-      "variants": []
+      "subitems": []
     },
     {
       "item_id": "item_3",
@@ -52,7 +52,7 @@
       "aliases": ["box整盒"],
       "unit_price_cents": 8800,
       "max_quantity": null,
-      "variants": []
+      "subitems": []
     },
     {
       "item_id": "gift_card",
@@ -61,9 +61,9 @@
       "aliases": ["特典卡组", "特典"],
       "unit_price_cents": 1200,
       "max_quantity": null,
-      "variants": [
+      "subitems": [
         {
-          "variant_id": "v_jcl",
+          "subitem_id": "v_jcl",
           "name": "结城理",
           "unit_price_cents": 1200,
           "adjust_cents": -200,

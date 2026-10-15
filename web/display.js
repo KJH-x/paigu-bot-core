@@ -95,7 +95,7 @@
 
   function renderBoard(items, changeMap) {
     boardRenderer.render(items, changeMap);
-    $('board-count').textContent = items.length ? (items.length + ' 变体 · ' + countSlots(items) + ' 已排') : '';
+    $('board-count').textContent = items.length ? (items.length + ' 子项 · ' + countSlots(items) + ' 已排') : '';
     boardEmpty.hidden = items.length > 0;
   }
 
@@ -108,7 +108,51 @@
     el.__txt = el.querySelector('.txt');
     el.__st = el.querySelector('.st');
     el.__detail = el.querySelector('.detail');
+    el.addEventListener('click', function () {
+      if (el.__needconfirm && el.__msg) openOverride(el.__msg);
+    });
     return el;
+  }
+
+  function openOverride(m) {
+    if (document.querySelector('.modal-backdrop')) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'modal-backdrop';
+    wrap.innerHTML =
+      '<div class="modal">' +
+      '<div class="modal-title">人工确认解析</div>' +
+      '<div class="modal-src"></div>' +
+      '<label class="field">商品名<input class="ov-item" type="text" placeholder="如 通行证"></label>' +
+      '<label class="field">子项（可选）<input class="ov-subitem" type="text"></label>' +
+      '<label class="field">数量<input class="ov-qty" type="number" min="1" max="99" value="1"></label>' +
+      '<div class="modal-actions"><button type="button" class="ov-cancel">取消</button><button type="button" class="ov-ok">确认</button></div>' +
+      '<div class="modal-err"></div>' +
+      '</div>';
+    wrap.querySelector('.modal-src').textContent = '原文：' + (m.text || '');
+    document.body.appendChild(wrap);
+    function close() { wrap.remove(); }
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) close(); });
+    wrap.querySelector('.ov-cancel').addEventListener('click', close);
+    wrap.querySelector('.ov-ok').addEventListener('click', function () {
+      var err = wrap.querySelector('.modal-err');
+      var item = wrap.querySelector('.ov-item').value.trim();
+      var subitem = wrap.querySelector('.ov-subitem').value.trim();
+      var qty = parseInt(wrap.querySelector('.ov-qty').value, 10) || 1;
+      if (!item) { err.textContent = '请填写商品名'; return; }
+      var name = subitem ? (item + ' ' + subitem) : item;
+      var parsed = {
+        intent: 'Claim', round_hint: null,
+        items: [{
+          name: name, category_hint: null, quantity: qty, claim_type: 'Split',
+          is_proxy_card: false, slot_policy: 'Normal', notes: null,
+          resolved_item_id: null, resolved_subitem_id: null, resolved_round_id: null
+        }],
+        cancel_target_hint: null, admin_command: null, confidence: 1, ambiguous_parts: []
+      };
+      P.post('/api/messages/' + encodeURIComponent(m.seq) + '/override', { parsed: parsed })
+        .then(function () { close(); if (P.toast) P.toast('已提交确认'); })
+        .catch(function (e) { err.textContent = P.errorText ? P.errorText(e) : '提交失败'; });
+    });
   }
 
   function updateMsg(node, m) {
@@ -124,6 +168,12 @@
     if (node.__st.className !== stCls) node.__st.className = stCls;
     var detail = m.detail || '';
     if (node.__detail.textContent !== detail) node.__detail.textContent = detail;
+    var nc = stKey === 'needconfirm';
+    if (node.__needconfirm !== nc) {
+      node.__needconfirm = nc;
+      node.classList.toggle('needconfirm', nc);
+    }
+    node.__msg = m;
   }
 
   function renderMessages(incoming, replace, initial) {

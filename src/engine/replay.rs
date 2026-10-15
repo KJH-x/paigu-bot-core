@@ -60,7 +60,7 @@ pub fn collect_effective_claims(
                 line_index: i as u32,
                 user_id: claim.user_id.clone(),
                 item_id: line.item_id.clone(),
-                variant_id: line.variant_id.clone(),
+                subitem_id: line.subitem_id.clone(),
                 quantity: line.quantity,
                 claim_type: line.claim_type.clone(),
                 slot_policy: line.slot_policy.clone(),

@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::domain::claim::{Eligibility, EligibilityScope};
 use crate::domain::event::EventEnvelope;
 use crate::domain::ids::{EligibilityId, ItemId, RoundId, UserId};
-use crate::domain::item::{Item, ItemKind, ItemVariant, RoundContext};
+use crate::domain::item::{Item, ItemKind, ItemSubitem, RoundContext};
 use crate::domain::money::MoneyCents;
 use crate::domain::round::{Round, RoundConfig, RoundStatus};
 use crate::domain::settlement::SettlementSnapshot;
@@ -195,23 +195,23 @@ pub(crate) fn load_round_fixture(path: &Path) -> anyhow::Result<RoundFixture> {
             })
             .unwrap_or_default();
 
-        let variants: Vec<ItemVariant> = iv
-            .get("variants")
+        let subitems: Vec<ItemSubitem> = iv
+            .get("subitems")
             .and_then(|x| x.as_array())
             .map(|arr| {
                 arr.iter()
                     .map(|vv| {
-                        let variant_id = vv
-                            .get("variant_id")
+                        let subitem_id = vv
+                            .get("subitem_id")
                             .and_then(|x| x.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let variant_name = vv
+                        let subitem_name = vv
                             .get("name")
                             .and_then(|x| x.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let variant_price = vv
+                        let subitem_price = vv
                             .get("unit_price_cents")
                             .and_then(|x| x.as_i64())
                             .or_else(|| vv.get("unit_price").and_then(|x| x.as_i64()))
@@ -220,7 +220,7 @@ pub(crate) fn load_round_fixture(path: &Path) -> anyhow::Result<RoundFixture> {
                             .get("capacity")
                             .and_then(|x| x.as_u64())
                             .map(|x| x as u32);
-                        let variant_aliases: Vec<String> = vv
+                        let subitem_aliases: Vec<String> = vv
                             .get("aliases")
                             .and_then(|x| x.as_array())
                             .map(|a| {
@@ -229,12 +229,12 @@ pub(crate) fn load_round_fixture(path: &Path) -> anyhow::Result<RoundFixture> {
                                     .collect()
                             })
                             .unwrap_or_default();
-                        ItemVariant {
-                            variant_id,
-                            name: variant_name,
-                            unit_price: MoneyCents(variant_price),
+                        ItemSubitem {
+                            subitem_id,
+                            name: subitem_name,
+                            unit_price: MoneyCents(subitem_price),
                             capacity,
-                            aliases: variant_aliases,
+                            aliases: subitem_aliases,
                         }
                     })
                     .collect()
@@ -258,7 +258,7 @@ pub(crate) fn load_round_fixture(path: &Path) -> anyhow::Result<RoundFixture> {
             aliases,
             sort_order: idx as i32,
             metadata: Value::Null,
-            variants,
+            subitems,
         });
     }
 
@@ -426,6 +426,8 @@ pub async fn verify(queue_path: &Path, fixture: RoundFixture) -> anyhow::Result<
         }
 
         let user_id = UserId(rec.user_id.clone());
+        // 旧 `simulate` 路径使用夹具 `Item`（无 `box_item_id`），不做整盒重定向。
+        let box_map = std::collections::HashMap::new();
         let validation = validator
             .validate(
                 parsed,
@@ -434,6 +436,7 @@ pub async fn verify(queue_path: &Path, fixture: RoundFixture) -> anyhow::Result<
                     group_id: &rec.group_id,
                     raw_message_id: Some(rec.message_id.clone()),
                     active_rounds: &round_contexts,
+                    box_map: &box_map,
                     now,
                     sequence: (idx + 1) as i64,
                 },
@@ -557,11 +560,11 @@ fn outcome_from_event(rec: &QueueMessageRecord, event: &EventEnvelope) -> Messag
             let items: Vec<String> = c
                 .items
                 .iter()
-                .map(|l| match &l.variant_id {
-                    Some(variant) => format!(
+                .map(|l| match &l.subitem_id {
+                    Some(subitem) => format!(
                         "{}@{}x{}[{}]",
                         l.item_id.0,
-                        variant,
+                        subitem,
                         l.quantity,
                         l.slot_policy.as_str()
                     ),
@@ -781,14 +784,14 @@ fn render_report(result: &VerifyResult) -> String {
 
     s.push_str("## 最终排结果\n\n");
     for ia in &result.final_snapshot.item_allocations {
-        let variant_label = ia
-            .variant_id
+        let subitem_label = ia
+            .subitem_id
             .as_ref()
-            .map(|v| format!(" variant={}", v))
+            .map(|v| format!(" subitem={}", v))
             .unwrap_or_default();
         s.push_str(&format!(
             "### {} ({}, {}){}\n\n",
-            ia.item_name, ia.item_id.0, ia.kind, variant_label
+            ia.item_name, ia.item_id.0, ia.kind, subitem_label
         ));
         let mut boxes = ia.boxes.clone();
         boxes.sort_by_key(|b| b.box_index);
@@ -869,7 +872,7 @@ mod tests {
             aliases: vec!["通行证".to_string()],
             sort_order: 0,
             metadata: serde_json::json!({}),
-            variants: vec![],
+            subitems: vec![],
         }
     }
 

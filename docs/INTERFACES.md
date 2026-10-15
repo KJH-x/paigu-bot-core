@@ -162,7 +162,7 @@
 |---|---|---|
 | `RoundPhase` | `Phase0, PhaseI, PhaseII, PhaseIII, Settling, Locked` | 拼团六阶段（`:3-11`） |
 | `PhaseWindow` | `phase: RoundPhase`、`start_ms: i64`、`end_ms: i64` | 时间窗（`[start,end)`，`:13-18`） |
-| `ItemClass` | `A`（盲盒/变体，不可单买）、`B`（固定价单领） | 商品类别（`:20-24`） |
+| `ItemClass` | `A`（盲盒/子项，不可单买）、`B`（固定价单领） | 商品类别（`:20-24`） |
 
 权限矩阵（`can_claim`，`:33-44`，`can_cancel` 同）：Phase0 全禁；PhaseI 仅 B；PhaseII B 全部、A 仅优先；PhaseIII/Settling 全部；Locked 全禁。
 
@@ -175,7 +175,7 @@
 | `gift_tiers` | `Vec<GiftTier>` | 特典档位 | 否 |
 | `reduce_average` | `ReduceAverageConfig` | 减均选项 | 否 |
 
-- `PricingEntry`（`:17-23`）：`item_id: String`、`variant_id: Option<String>`、`mode: PricingMode{AdjustBy,SetFinal}`、`value: i64`。
+- `PricingEntry`（`:17-23`）：`item_id: String`、`subitem_id: Option<String>`、`mode: PricingMode{AdjustBy,SetFinal}`、`value: i64`。
 - `DiscountEntry`（`:31-39`）：`rule_id`、`kind: DiscountKind{Threshold,WholeOrder}`、`amount: i64`、`threshold: Option<i64>`、`ratio_ppm: Option<i64>`、`shares: i64`（`-1`=全部，`n≥1`=首 n 包）。
 - `GiftTier`（`:59-65`）：`tier_id`、`threshold: i64`、`gift_name: String`、`unit_price: i64`。
 - `ReduceAverageConfig`（`:67-70`）：`include_gift_price: bool`。
@@ -327,7 +327,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `SettlementResult.lines: Vec<LineSettlement>` | 逐行 unit_price_cents/total_cents/reduce_cents/final_total_cents/final_unit_cents |
 | `SettlementResult.{list_total_cents, paid_total_cents}` | C / B 透明化 |
 | `GiftTier{threshold, unit_price, claimed}` | claimed=排谷认购数；granted=min(claimed,P)，P=下单包数 |
-| `check_completeness(&OrderTable, &AllocationSnapshot) -> CompletenessReport` | 排包完成校验（每 (item,variant,is_gift) 数量一致） |
+| `check_completeness(&OrderTable, &AllocationSnapshot) -> CompletenessReport` | 排包完成校验（每 (item,subitem,is_gift) 数量一致） |
 | `expected_quantities` / `table_quantities` | 两侧数量统计 |
 | `POST /api/settlement/completeness` | 返回 CompletenessReport |
 | `POST /api/settlement/evaluate` | 带 allocation 时未完成排包 -> 400 拒绝计算 |
@@ -338,12 +338,12 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 ### 8.2 商品目录（src/settings.rs）
 
-> ✅ **2026-09-24 更新**：字段已改为现行口径（`kind`/`class`/变体 A/B），完整清单见 [§8.7](#87-2026-09-24-新增变更接口u1u9)。
+> ✅ **2026-09-24 更新**：字段已改为现行口径（`kind`/`class`/子项 A/B），完整清单见 [§8.7](#87-2026-09-24-新增变更接口u1u9)。
 
 | 字段/接口 | 说明 |
 |---|---|
-| `ItemConfig.{unit_price_cents, kind, class, aliases, max_quantity, variants}` | 原价（分）、**种类**（`拼团/单领/整盒/特典`）、类别（**自动推导**、可显式覆盖）、别名、单领上限、变体；配置模型已移除 `box_size` |
-| `VariantConfig.{unit_price_cents, adjust_cents, capacity, aliases}` | 变体原价 A、调价 B（最终价 **C=A+B**）、容量、别名；已移除 `pieces`，`adjust_cents` 已落库并进入 `to_unit_prices()` |
+| `ItemConfig.{unit_price_cents, kind, class, aliases, max_quantity, subitems}` | 原价（分）、**种类**（`拼团/单领/整盒/特典`）、类别（**自动推导**、可显式覆盖）、别名、单领上限、子项；配置模型已移除 `box_size` |
+| `SubitemConfig.{unit_price_cents, adjust_cents, capacity, aliases}` | 子项原价 A、调价 B（最终价 **C=A+B**）、容量、别名；已移除 `pieces`，`adjust_cents` 已落库并进入 `to_unit_prices()` |
 | `RoundSettings::to_unit_prices()` | 商品目录 -> 标价表（结算/planner 取价来源） |
 | `GatewayConfig.admin_commands_enabled` | 管理员命令落地执行开关（D-1） |
 
@@ -399,11 +399,11 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 | 接口/字段 | 说明 |
 |---|---|
-| `GET /api/rounds` | `{rounds:[{round_id,title,group_id,items,variants,active,updated_at}], active_round_id}`；按 mtime 降序 |
+| `GET /api/rounds` | `{rounds:[{round_id,title,group_id,items,subitems,active,updated_at}], active_round_id}`；按 mtime 降序 |
 | `POST /api/rounds` | body `{round_id, title?, copy_from?}`；`round_id` 非空、≤64、仅字母/数字/中文/`_`/`-`；`copy_from` 存在则复制其商品/阶段 |
 | `POST /api/rounds/:id/setup` | **开团前填写**（Phase 0 档案）：body = `RoundSettings` 形态（`title`/`group_id`/`priority_users`/`priority_window`/`phases`/`items`）**+ `dry_run?`**（默认 false，仅校验不落盘）。缺省字段保留既有值，列表字段提供即整体替换；body `round_id`（若提供）须与路径一致。写入 `data/rounds/<id>.json`；**若为激活轮次则同步热载运行配置**（锁定中拒绝，423）。返回 `{ok,dry_run,written,applied_to_active,revision?,issues,round?}`（`ok` = 无 error 级 issue）。模板见 [round-setup.template.json](./round-setup.template.json) |
 | `POST /api/rounds/:id/activate` | body `{mode?:"continue"\|"fresh"\|"replay"}`（**默认 continue**）；`continue` 仅切换激活（无既有状态时等价 `fresh`），`fresh` 重置流水线，`replay` 重置并用该轮消息重放；**切换与重放解耦**。返回 `{ok,active_round_id,mode,reset,replayed,version}` |
-| `POST /api/rounds/:id/check` | `{ok,issues:[{level,code,message,where}]}`；含 `duplicate_item_id`/`alias_conflict`/`name_conflict`/`category_variant_mismatch`/`class_derived_mismatch`（warn）等 |
+| `POST /api/rounds/:id/check` | `{ok,issues:[{level,code,message,where}]}`；含 `duplicate_item_id`/`alias_conflict`/`name_conflict`/`category_subitem_mismatch`/`class_derived_mismatch`（warn）等 |
 | `DELETE /api/rounds/:id` | `{ok,removed}`；激活中的轮次拒绝 |
 | `data/rounds/<round_id>.json` | 轮次文件（内容 = `RoundSettings`）；`PAIGU_ROUNDS_DIR` 可覆盖目录 |
 | `AppConfig.active_round_id` | `config/app.json` 当前激活轮次 id；启动/热载据此覆盖 `round`（`settings::rounds::resolve_active`） |
@@ -413,15 +413,15 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 | 接口/字段 | 说明 |
 |---|---|
-| `ItemCategory`（`settings`） | `Group/Single/Box/Gift`；`parse` 兼容中英与旧值；`requires_variants()` = 拼团/特典为真 |
-| `ItemConfig::{category,has_variants,derived_class}` | 种类解析、是否有变体、`class` 自动推导（有变体⇒A、无变体⇒B） |
+| `ItemCategory`（`settings`） | `Group/Single/Box/Gift`；`parse` 兼容中英与旧值；`requires_subitems()` = 拼团/特典为真 |
+| `ItemConfig::{category,has_subitems,derived_class}` | 种类解析、是否有子项、`class` 自动推导（有子项⇒A、无子项⇒B） |
 | `RoundSettings::item_class` | 显式合法 `class` 可覆盖推导；未配置商品按 `B` |
 | `MembersSettings.cn_overrides: Vec<CnOverride>` | `CnOverride{user_id, cn, aliases[]}`（U4；注意字段名是 `MembersSettings`） |
 | `settings::resolve_cn` | 展示人名回退 **CN → 归一化昵称（identity） → user_id** |
 | `GET /api/members` | 每项装饰 `cn`（覆盖值或 `null`）与 `resolved`（`resolve_cn` 结果） |
 | `ParseOverrideEvent`（`domain/event.rs`） | `{event_id,round_id,target_raw_message_id,corrected_parsed_message,admin_user_id,reason,occurred_at}`；事件类型 `parse_override`，重放消费（U7） |
 | `POST /api/items/suggest-aliases` | body `{items:[{item_id,name,aliases}], mode:"aliases"}` → `{suggestions:[{item_id,verdict?,aliases?}]}`；后端由 `src/api/item_routes.rs` / `src/services/aliases.rs` 实现，前端保留 404/405/501 降级 |
-| `VariantConfig.adjust_cents` | 变体调价 B（最终价 C = A+B）；`web/round.js` A±B=C 三格联动，Rust 字段支持落库，`RoundSettings::to_unit_prices()` 输出调后价 |
+| `SubitemConfig.adjust_cents` | 子项调价 B（最终价 C = A+B）；`web/round.js` A±B=C 三格联动，Rust 字段支持落库，`RoundSettings::to_unit_prices()` 输出调后价 |
 
 **页面（静态文件）**
 

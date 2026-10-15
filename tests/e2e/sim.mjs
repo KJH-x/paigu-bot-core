@@ -200,7 +200,7 @@ async function api(base, method, urlPath, body) {
 function firstSlotUser(board) {
   const allocations = board && Array.isArray(board.item_allocations) ? board.item_allocations : [];
   for (const alloc of allocations) {
-    if (alloc.item_id === 'pass_sp' && alloc.variant_id === 'v_jcl') {
+    if (alloc.item_id === 'pass_sp' && alloc.subitem_id === 'v_jcl') {
       const box = (alloc.boxes || [])[0];
       const slot = box && (box.slots || [])[0];
       return slot ? (slot.user_id ?? null) : null;
@@ -209,10 +209,10 @@ function firstSlotUser(board) {
   return null;
 }
 
-function variantFirstSlotUser(board, variantId) {
+function subitemFirstSlotUser(board, subitemId) {
   const allocations = board && Array.isArray(board.item_allocations) ? board.item_allocations : [];
   for (const alloc of allocations) {
-    if (alloc.item_id === 'pass_sp' && alloc.variant_id === variantId) {
+    if (alloc.item_id === 'pass_sp' && alloc.subitem_id === subitemId) {
       const box = (alloc.boxes || [])[0];
       const slot = box && (box.slots || [])[0];
       return slot ? (slot.user_id ?? null) : null;
@@ -381,7 +381,7 @@ function buildCases() {
         assertEq(bare.results[1].detail, 'missing_timestamp', '缺字段原因');
         assertEq(bare.results[2].detail, 'not_test_group', '非测试群原因');
 
-        // messages 包装：另一条合法（不同变体）。
+        // messages 包装：另一条合法（不同子项）。
         const wrapped = await injectMessages(ctx.base, {
           messages: [
             { id: BLOCKED_IDENTITY, nickname: BLOCKED_IDENTITY, text: '排 通行证 虎狼丸 1', timestamp: now },
@@ -389,7 +389,7 @@ function buildCases() {
         });
         assertEq(wrapped.count, 1, 'wrapped count');
         assertEq(wrapped.summary.applied, 1, 'wrapped applied');
-        assertEq(variantFirstSlotUser(wrapped.board, 'v_hlw'), BLOCKED_IDENTITY, 'wrapped 首格');
+        assertEq(subitemFirstSlotUser(wrapped.board, 'v_hlw'), BLOCKED_IDENTITY, 'wrapped 首格');
       },
     },
     {
@@ -418,7 +418,7 @@ function buildCases() {
         assertEq(summary.statuses.Applied, 2, 'sim-run 应用状态统计');
         const m1 = await waitForMessage(ctx.base, (m) => m.text === '排 通行证 结城理 1' && m.display === TARGET_IDENTITY, 10000);
         await waitForMessage(ctx.base, (m) => m.text === '排 通行证 岳羽由加莉 1' && m.display === BLOCKED_IDENTITY, 10000);
-        assertEq(variantFirstSlotUser(m1.board, 'v_jcl'), TARGET_IDENTITY, 'run 回放首格');
+        assertEq(subitemFirstSlotUser(m1.board, 'v_jcl'), TARGET_IDENTITY, 'run 回放首格');
       },
     },
     {
@@ -550,9 +550,9 @@ function buildCases() {
             kind: '拼团',
             aliases: ['通行证'],
             unit_price_cents: 5000,
-            variants: [
+            subitems: [
               {
-                variant_id: 'v_jcl',
+                subitem_id: 'v_jcl',
                 name: '结城理',
                 unit_price_cents: 5000,
                 adjust_cents: -500,
@@ -568,7 +568,7 @@ function buildCases() {
             unit_price_cents: 1800,
             max_quantity: 2,
             aliases: [],
-            variants: [],
+            subitems: [],
           },
         ];
 
@@ -630,22 +630,22 @@ function buildCases() {
         const original = await api(ctx.base, 'GET', '/api/config');
         try {
           await page.goto(`${ctx.base}/round.html?api=${encodeURIComponent(ctx.base)}`);
-          await page.waitForSelector('.variant-price-base');
+          await page.waitForSelector('.subitem-price-base');
           const rows = page.locator('.vtable tbody tr');
-          for (const adjust of await page.locator('.variant-price-adjust').all()) await adjust.fill('0.00');
-          await rows.nth(0).locator('.variant-price-base').fill('12.34');
-          await rows.nth(0).locator('.variant-price-adjust').fill('1.25');
-          await rows.nth(1).locator('.variant-price-adjust').fill('-1.25');
-          assertEq(await rows.nth(0).locator('.variant-price-final').inputValue(), '13.59', '元金额联动');
-          await rows.nth(0).locator('.variant-price-final').fill('13.84');
-          await rows.nth(1).locator('.variant-price-adjust').fill('-1.50');
-          assertEq(await rows.nth(0).locator('.variant-price-base').inputValue(), '12.34', '改最终价不能改原价');
-          assertEq(await rows.nth(0).locator('.variant-price-adjust').inputValue(), '+1.50', '反算调价');
+          for (const adjust of await page.locator('.subitem-price-adjust').all()) await adjust.fill('0.00');
+          await rows.nth(0).locator('.subitem-price-base').fill('12.34');
+          await rows.nth(0).locator('.subitem-price-adjust').fill('1.25');
+          await rows.nth(1).locator('.subitem-price-adjust').fill('-1.25');
+          assertEq(await rows.nth(0).locator('.subitem-price-final').inputValue(), '13.59', '元金额联动');
+          await rows.nth(0).locator('.subitem-price-final').fill('13.84');
+          await rows.nth(1).locator('.subitem-price-adjust').fill('-1.50');
+          assertEq(await rows.nth(0).locator('.subitem-price-base').inputValue(), '12.34', '改最终价不能改原价');
+          assertEq(await rows.nth(0).locator('.subitem-price-adjust').inputValue(), '+1.50', '反算调价');
           await page.click('#save');
           await page.waitForFunction(() => !document.querySelector('#save').disabled);
           const saved = await api(ctx.base, 'GET', '/api/config');
-          assertEq(saved.config.round.items[0].variants[0].unit_price_cents, 1234, '前端元应按分保存');
-          assertEq(saved.config.round.items[0].variants[0].adjust_cents, 150, '调价应按分保存');
+          assertEq(saved.config.round.items[0].subitems[0].unit_price_cents, 1234, '前端元应按分保存');
+          assertEq(saved.config.round.items[0].subitems[0].adjust_cents, 150, '调价应按分保存');
           await rows.nth(0).locator('.alias-input').fill('别名甲/别名乙');
           await rows.nth(0).locator('[data-act="split"]').click();
           assertEq(await rows.nth(0).locator('.alias-input').inputValue(), '别名甲, 别名乙', '切分按钮应生效');
@@ -750,7 +750,7 @@ async function main() {
       item_allocations: [
         {
           item_id: 'pass_sp',
-          variant_id: 'v_jcl',
+          subitem_id: 'v_jcl',
           boxes: [
             { box_index: 1, slots: [{ slot_index: 1, user_id: '远程用户', status: 'filled' }] },
           ],

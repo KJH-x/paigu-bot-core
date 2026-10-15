@@ -8,7 +8,7 @@
 |---|---|
 | `index.html` | 入口导航 + `/api/health` 检查 |
 | `display.html` / `display.js` | 展示页：排位表 + 消息流 + who-whats + 状态 |
-| `round.html` / `round.js` | 开团页：轮次库、阶段窗口、商品目录与变体调价 |
+| `round.html` / `round.js` | 开团页：轮次库、阶段窗口、商品目录与子项调价 |
 | `settings.html` / `settings.js` | 设置页：gateway / LLM / display / 成员 CN 等非流程配置 |
 | `admin.html` / `admin.js` | 兼容管理入口 |
 | `settlement.html` / `settlement.js` / `settlement.css` | 结算试算、排包与下单方案 |
@@ -23,7 +23,7 @@
 
 单领和等待名单的姓名标签同样遵循宽度模式，数量单独显示在姓名下方，完整姓名/数量保留在提示与无障碍说明。
 
-桌面验收画布为 **1920×1080、100%**。各页保持信息量，统一工具栏、标题层级、边框和内区滚动；开团页左侧轮次/阶段、右侧目录，结算页左侧规则、右侧下单表。金额展示/输入使用元，保存仍转换为整数分。变体名称列按约 10 个汉字宽度分配，其余空间留给别名。
+桌面验收画布为 **1920×1080、100%**。各页保持信息量，统一工具栏、标题层级、边框和内区滚动；开团页左侧轮次/阶段、右侧目录，结算页左侧规则、右侧下单表。金额展示/输入使用元，保存仍转换为整数分。子项名称列按约 10 个汉字宽度分配，其余空间留给别名。
 
 排表默认「三字宽」，姓名区按实际字体三个中文字测量，空位同宽，长姓名裁切并保留完整悬停提示。切换「全长」后，同一商品每盒按该盒各行最长姓名统一格宽，各盒列起点对齐，不同盒不互相撑宽；格间 2px、盒间 4px，超宽内容在商品内横滚。选择保存在 `localStorage["paigu.board-width"]`，跨页面/标签页共享。上沿 2px 盒色条，下沿 4px 锁定/预留/包尾/变化标记，不占姓名宽度；标记有形状区别和无障碍说明。复盘表格按全部载入步骤定宽，切步不跳列；列视图按各消息列最长姓名定宽。模拟器已被功能提交移除，不恢复。
 
@@ -55,7 +55,7 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 ## 展示页行为
 
 - 5s 增量轮询 `GET /api/display?since=<version>`；`changed=false` 且版本不变时跳过重渲染。
-- keyed diff：单元格以 `item|variant#box:slot` 为 key，只更新变化格并高亮（3s 后淡出）；消息、who-whats、状态同样按 key 复用 DOM 节点。
+- keyed diff：单元格以 `item|subitem#box:slot` 为 key，只更新变化格并高亮（3s 后淡出）；消息、who-whats、状态同样按 key 复用 DOM 节点。
 - smart-scroll：消息容器贴近底部（阈值 60px）时自动跟随；否则不动滚动，只显示「有新内容 N 条」按钮。
 - 不打断交互：不使用 `innerHTML` 重建容器，不移动无关节点；文字仅在变化时写入，尽量不破坏划词/点击。
 - 数据源：`local`（同源 API）/ `remote`（静态 JSON）。remote 依次尝试 `<base>/rounds/<round_id>/current`、`<base>/current`（无扩展名；`<base>` 本身以 `.json` 结尾则直接用）。
@@ -64,7 +64,7 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 
 - `GET /api/config` 载入 → 编辑 → `PUT /api/config`（带 `revision`）；HTTP 409 显示冲突提示，需「重新载入」后再编辑。
 - 「从磁盘重载」= `POST /api/config/reload`。
-- 商品编辑器：items / variants 增删改（`item_id/name/kind/aliases`，variant `variant_id/name/capacity/aliases`）。
+- 商品编辑器：items / subitems 增删改（`item_id/name/kind/aliases`，subitem `subitem_id/name/capacity/aliases`）。
 - 时段窗口：`datetime-local` ↔ `priority_window.start_ms/end_ms`（本地时区，end 独占）。
 - 「拉取群成员」= `POST /api/members/refresh`，再 `GET /api/members` 渲染；昵称按 POLICY §2 去括号备注展示。
 
@@ -79,7 +79,7 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 
 - **数据源**：默认 `GET /api/replay/view` 读取当前激活轮次的实际管线消息和事件步骤，默认停在最新一步；成员明细随当前步变化。轮次切换和新消息触发刷新，空数据/错误不回退到示例。手动「载入 JSON」仅用于查看外部复盘文件；点击“当前轮次 · 刷新”回到实际数据。旧服务未提供接口时仅显示当前快照，明确提示逐步历史需要更新服务。
 - **复用**：表格视图直接调用 `common.js` 的 `createBoardRenderer(host, { persistent: true })`（`persistent` 让高亮保持到下一步，而非 3s 淡出），并把 replay 的 `steps[].board`/`changed` 经 `normalizeBoard`/`normalizeChanged` 转成渲染器输入；差异高亮图标+颜色+边框沿用 `display.css`（`changed-new/release/fwd/tail/admin`）。`persistent` 仅在重放页启用，展示页行为不变。
-- **视图**：表格（累积排位 + 本步差异）、列视图（列=消息，行=商品/变体）、Mermaid（商品→变体→用户，当前步变更节点/边高亮）。
+- **视图**：表格（累积排位 + 本步差异）、列视图（列=消息，行=商品/子项）、Mermaid（商品→子项→用户，当前步变更节点/边高亮）。
 - **交互**：首/上/播放/下/末 + `←/→/空格/Home/End`；点单元格反查「最后一次修改该格」的步并聚焦；点消息/列头跳到该步；底部 who-whats 可折叠；存在 `expected` 时显示 PASS/FAIL 核对条。
 
 ## 降级约定

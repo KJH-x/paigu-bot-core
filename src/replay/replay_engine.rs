@@ -211,7 +211,7 @@ impl ReplayRuntimeState {
                         line_index: i as u32,
                         user_id: c.user_id.clone(),
                         item_id: l.item_id.clone(),
-                        variant_id: l.variant_id.clone(),
+                        subitem_id: l.subitem_id.clone(),
                         quantity: l.quantity,
                         claim_type: l.claim_type.clone(),
                         slot_policy: l.slot_policy.clone(),

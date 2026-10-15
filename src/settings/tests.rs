@@ -29,7 +29,7 @@ fn item_class_reads_config_and_defaults_to_b() {
 #[test]
 fn item_class_prefers_derivation_with_explicit_override() {
     let mut cfg = default_config();
-    // 清空显式 class：有变体的商品应推导为 A（阶段受限）。
+    // 清空显式 class：有子项的商品应推导为 A（阶段受限）。
     for it in &mut cfg.round.items {
         it.class = None;
     }
@@ -44,7 +44,7 @@ fn item_class_prefers_derivation_with_explicit_override() {
     }
     assert_eq!(cfg.round.item_class("pass_sp"), ItemClass::B);
 
-    // 无变体 ⇒ B。
+    // 无子项 ⇒ B。
     cfg.round.items.push(ItemConfig {
         item_id: "single_only".to_string(),
         name: "单领".to_string(),
@@ -53,16 +53,17 @@ fn item_class_prefers_derivation_with_explicit_override() {
         aliases: vec![],
         unit_price_cents: 100,
         max_quantity: Some(3),
-        variants: vec![],
+        box_item_id: None,
+        subitems: vec![],
     });
     assert_eq!(cfg.round.item_class("single_only"), ItemClass::B);
 }
 
 #[test]
-fn variant_final_price_is_base_plus_adjust() {
-    let mk = |unit_price_cents: i64, adjust_cents: i64| VariantConfig {
-        variant_id: "v".to_string(),
-        name: "变体".to_string(),
+fn subitem_final_price_is_base_plus_adjust() {
+    let mk = |unit_price_cents: i64, adjust_cents: i64| SubitemConfig {
+        subitem_id: "v".to_string(),
+        name: "子项".to_string(),
         unit_price_cents,
         adjust_cents,
         capacity: None,
@@ -90,15 +91,15 @@ fn item_category_parses_ui_canonical_kinds() {
 
 #[test]
 fn to_items_maps_whole_box_and_gift_kinds() {
-    let mk_variant = || VariantConfig {
-        variant_id: "v1".to_string(),
+    let mk_subitem = || SubitemConfig {
+        subitem_id: "v1".to_string(),
         name: "甲".to_string(),
         unit_price_cents: 100,
         adjust_cents: 0,
         capacity: None,
         aliases: vec![],
     };
-    let mk = |id: &str, kind: &str, with_variant: bool| ItemConfig {
+    let mk = |id: &str, kind: &str, with_subitem: bool| ItemConfig {
         item_id: id.to_string(),
         name: id.to_string(),
         kind: kind.to_string(),
@@ -106,8 +107,9 @@ fn to_items_maps_whole_box_and_gift_kinds() {
         aliases: vec![],
         unit_price_cents: 100,
         max_quantity: None,
-        variants: if with_variant {
-            vec![mk_variant()]
+        box_item_id: None,
+        subitems: if with_subitem {
+            vec![mk_subitem()]
         } else {
             vec![]
         },
@@ -217,7 +219,7 @@ fn priority_candidates_add_cn_and_aliases() {
 }
 
 #[test]
-fn item_category_and_derived_class_follow_variants() {
+fn item_category_and_derived_class_follow_subitems() {
     let cfg = default_config();
     let pass = cfg
         .round
@@ -227,7 +229,7 @@ fn item_category_and_derived_class_follow_variants() {
         .expect("pass_sp");
     assert_eq!(pass.category(), Some(ItemCategory::Group));
     assert_eq!(pass.derived_class(), ItemClass::A);
-    assert!(pass.category().unwrap().requires_variants());
+    assert!(pass.category().unwrap().requires_subitems());
 
     let single = ItemConfig {
         item_id: "s".to_string(),
@@ -237,7 +239,8 @@ fn item_category_and_derived_class_follow_variants() {
         aliases: vec![],
         unit_price_cents: 100,
         max_quantity: Some(3),
-        variants: vec![],
+        box_item_id: None,
+        subitems: vec![],
     };
     assert_eq!(single.category(), Some(ItemCategory::Single));
     assert_eq!(single.derived_class(), ItemClass::B);
@@ -247,7 +250,7 @@ fn item_category_and_derived_class_follow_variants() {
         ..single.clone()
     };
     assert_eq!(boxed.category(), Some(ItemCategory::Box));
-    assert!(!boxed.category().unwrap().requires_variants());
+    assert!(!boxed.category().unwrap().requires_subitems());
 }
 
 #[test]
@@ -293,4 +296,20 @@ async fn reload_bumps_revision() {
     assert_eq!(after, before + 1);
     assert_eq!(store.get().await.revision, before + 1);
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn legacy_variant_keys_deserialize_into_subitems() {
+    let json = r#"{
+        "item_id": "pass",
+        "name": "通行证",
+        "kind": "group",
+        "variants": [
+            {"variant_id": "v1", "name": "甲", "unit_price_cents": 5000}
+        ]
+    }"#;
+    let item: ItemConfig = serde_json::from_str(json).expect("legacy json");
+    assert_eq!(item.subitems.len(), 1);
+    assert_eq!(item.subitems[0].subitem_id, "v1");
+    assert_eq!(item.subitems[0].name, "甲");
 }

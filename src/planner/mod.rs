@@ -98,7 +98,7 @@ pub struct PlanResult {
 #[derive(Debug, Clone)]
 struct Atom {
     item_id: String,
-    variant_id: Option<String>,
+    subitem_id: Option<String>,
     is_gift: bool,
     qty: u32,
     unit_price_cents: i64,
@@ -323,16 +323,16 @@ impl<'a> Search<'a> {
                 for &ai in atom_ids {
                     let atom = &self.atoms[ai];
                     let entry = merged
-                        .entry((atom.item_id.clone(), atom.variant_id.clone(), atom.is_gift))
+                        .entry((atom.item_id.clone(), atom.subitem_id.clone(), atom.is_gift))
                         .or_insert((0, atom.unit_price_cents));
                     entry.0 = entry.0.saturating_add(atom.qty);
                 }
                 let lines: Vec<Line> = merged
                     .into_iter()
                     .map(
-                        |((item_id, variant_id, is_gift), (qty, unit_price_cents))| Line {
+                        |((item_id, subitem_id, is_gift), (qty, unit_price_cents))| Line {
                             item_id,
-                            variant_id,
+                            subitem_id,
                             qty,
                             unit_price_cents,
                             is_gift,
@@ -417,12 +417,12 @@ fn collect_atoms(req: &PlanRequest) -> Vec<Atom> {
     let mut atoms = Vec::new();
     for alloc in &req.allocation.item_allocations {
         let is_gift = alloc.kind == "gift";
-        let variant = alloc.variant_id.clone();
+        let subitem = alloc.subitem_id.clone();
         // 标价一律取商品目录（canonical）：同一商品不因购买人/单领自带价而拆成两种（A-3）
         let base = if is_gift {
             0
         } else {
-            lookup_price(&req.prices, &alloc.item_id.0, variant.as_deref())
+            lookup_price(&req.prices, &alloc.item_id.0, subitem.as_deref())
         };
 
         for mbox in &alloc.boxes {
@@ -430,7 +430,7 @@ fn collect_atoms(req: &PlanRequest) -> Vec<Atom> {
                 if slot.user_id.is_some() {
                     atoms.push(Atom {
                         item_id: alloc.item_id.0.clone(),
-                        variant_id: variant.clone(),
+                        subitem_id: subitem.clone(),
                         is_gift,
                         qty: 1,
                         unit_price_cents: base,
@@ -443,7 +443,7 @@ fn collect_atoms(req: &PlanRequest) -> Vec<Atom> {
             for _ in 0..single.quantity {
                 atoms.push(Atom {
                     item_id: alloc.item_id.0.clone(),
-                    variant_id: variant.clone(),
+                    subitem_id: subitem.clone(),
                     is_gift,
                     qty: 1,
                     unit_price_cents: base,
@@ -454,25 +454,25 @@ fn collect_atoms(req: &PlanRequest) -> Vec<Atom> {
     atoms.sort_by(|a, b| {
         a.item_id
             .cmp(&b.item_id)
-            .then(a.variant_id.cmp(&b.variant_id))
+            .then(a.subitem_id.cmp(&b.subitem_id))
             .then(a.is_gift.cmp(&b.is_gift))
             .then(a.unit_price_cents.cmp(&b.unit_price_cents))
     });
     atoms
 }
 
-fn lookup_price(prices: &[UnitPrice], item_id: &str, variant_id: Option<&str>) -> i64 {
-    if let Some(variant) = variant_id {
+fn lookup_price(prices: &[UnitPrice], item_id: &str, subitem_id: Option<&str>) -> i64 {
+    if let Some(subitem) = subitem_id {
         if let Some(found) = prices
             .iter()
-            .find(|p| p.item_id == item_id && p.variant_id.as_deref() == Some(variant))
+            .find(|p| p.item_id == item_id && p.subitem_id.as_deref() == Some(subitem))
         {
             return found.unit_price_cents;
         }
     }
     prices
         .iter()
-        .find(|p| p.item_id == item_id && p.variant_id.is_none())
+        .find(|p| p.item_id == item_id && p.subitem_id.is_none())
         .map(|p| p.unit_price_cents)
         .unwrap_or(0)
 }

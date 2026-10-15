@@ -101,7 +101,7 @@ fn board_cells(board: &Value) -> BTreeMap<String, String> {
 
     for item in items {
         let item_id = item.get("item_id").and_then(Value::as_str).unwrap_or("");
-        let variant = item.get("variant_id").and_then(Value::as_str).unwrap_or("");
+        let subitem = item.get("subitem_id").and_then(Value::as_str).unwrap_or("");
 
         if let Some(boxes) = item.get("boxes").and_then(Value::as_array) {
             for b in boxes {
@@ -113,7 +113,7 @@ fn board_cells(board: &Value) -> BTreeMap<String, String> {
                     let slot_index = slot.get("slot_index").and_then(Value::as_u64).unwrap_or(0);
                     let user_id = slot.get("user_id").and_then(Value::as_str).unwrap_or("");
                     let status = slot.get("status").and_then(Value::as_str).unwrap_or("");
-                    let key = format!("slot|{item_id}|{variant}|{box_index}|{slot_index}");
+                    let key = format!("slot|{item_id}|{subitem}|{box_index}|{slot_index}");
                     cells.insert(key, format!("{user_id}|{status}"));
                 }
             }
@@ -126,7 +126,7 @@ fn board_cells(board: &Value) -> BTreeMap<String, String> {
             for entry in list {
                 let user_id = entry.get("user_id").and_then(Value::as_str).unwrap_or("");
                 let quantity = entry.get("quantity").and_then(Value::as_u64).unwrap_or(0);
-                let key = format!("{kind}|{item_id}|{variant}|{user_id}");
+                let key = format!("{kind}|{item_id}|{subitem}|{user_id}");
                 cells.insert(key, quantity.to_string());
             }
         }
@@ -161,7 +161,7 @@ fn cell_change(key: &str, value: Option<&String>) -> Value {
         Some("slot") => json!({
             "kind": "slot",
             "item_id": parts.get(1).copied().unwrap_or(""),
-            "variant_id": parts.get(2).copied().unwrap_or(""),
+            "subitem_id": parts.get(2).copied().unwrap_or(""),
             "box_index": parts.get(3).and_then(|v| v.parse::<u64>().ok()),
             "slot_index": parts.get(4).and_then(|v| v.parse::<u64>().ok()),
             "value": value.map(String::as_str),
@@ -169,7 +169,7 @@ fn cell_change(key: &str, value: Option<&String>) -> Value {
         Some(kind) => json!({
             "kind": kind,
             "item_id": parts.get(1).copied().unwrap_or(""),
-            "variant_id": parts.get(2).copied().unwrap_or(""),
+            "subitem_id": parts.get(2).copied().unwrap_or(""),
             "user_id": parts.get(3).copied().unwrap_or(""),
             "value": value.map(String::as_str),
         }),
@@ -186,7 +186,7 @@ mod tests {
         json!({
             "item_allocations": [{
                 "item_id": "pass_sp",
-                "variant_id": "v_jcl",
+                "subitem_id": "v_jcl",
                 "boxes": [{
                     "box_index": 0,
                     "slots": [{
@@ -228,7 +228,7 @@ mod tests {
         let with_single = json!({
             "item_allocations": [{
                 "item_id": "gift_card",
-                "variant_id": "v_zt",
+                "subitem_id": "v_zt",
                 "boxes": [],
                 "singles": [{ "user_id": "u1", "quantity": 2 }],
                 "waiting": []
@@ -237,7 +237,7 @@ mod tests {
         let without_single = json!({
             "item_allocations": [{
                 "item_id": "gift_card",
-                "variant_id": "v_zt",
+                "subitem_id": "v_zt",
                 "boxes": [],
                 "singles": [],
                 "waiting": []

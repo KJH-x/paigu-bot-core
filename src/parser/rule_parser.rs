@@ -1,23 +1,23 @@
-use crate::domain::item::{Item, ItemKind, ItemVariant};
+use crate::domain::item::{Item, ItemKind, ItemSubitem};
 use crate::parser::parsed_event::{ParsedClaimItem, ParsedIntent, ParsedMessage};
 
 pub struct RuleParser;
 
 struct Mention {
     item_idx: usize,
-    variant_id: Option<String>,
+    subitem_id: Option<String>,
     start: usize,
     end: usize,
 }
 
 struct Segment<'a> {
     item_idx: usize,
-    variant_id: Option<String>,
+    subitem_id: Option<String>,
     text: &'a str,
 }
 
 fn same_target(a: &Mention, b: &Mention) -> bool {
-    a.item_idx == b.item_idx && a.variant_id == b.variant_id
+    a.item_idx == b.item_idx && a.subitem_id == b.subitem_id
 }
 
 impl RuleParser {
@@ -80,17 +80,17 @@ impl RuleParser {
 
         for seg in &segments {
             let item = &items[seg.item_idx];
-            let variant = seg
-                .variant_id
+            let subitem = seg
+                .subitem_id
                 .as_ref()
-                .and_then(|vid| item.find_variant_by_id(vid));
+                .and_then(|vid| item.find_subitem_by_id(vid));
             let policy = detect_policy(seg.text);
-            let quantity = parse_quantity(seg.text, item, variant, &policy);
+            let quantity = parse_quantity(seg.text, item, subitem, &policy);
             let claim_type = detect_claim_type(seg.text, item, &policy);
             let is_proxy = seg.text.contains("代牌");
 
             parsed_items.push(ParsedClaimItem {
-                name: variant
+                name: subitem
                     .map(|v| v.name.clone())
                     .unwrap_or_else(|| item.name.clone()),
                 category_hint: None,
@@ -100,7 +100,7 @@ impl RuleParser {
                 slot_policy: Some(policy),
                 notes: None,
                 resolved_item_id: Some(item.item_id.0.clone()),
-                resolved_variant_id: seg.variant_id.clone(),
+                resolved_subitem_id: seg.subitem_id.clone(),
                 resolved_round_id: Some(item.round_id.0.clone()),
             });
         }
@@ -165,7 +165,7 @@ fn collect_token_mentions(
     all: &mut Vec<Mention>,
     text: &str,
     item_idx: usize,
-    variant_id: Option<String>,
+    subitem_id: Option<String>,
     tok: &str,
 ) {
     if tok.is_empty() {
@@ -178,7 +178,7 @@ fn collect_token_mentions(
                 let abs = from + pos;
                 all.push(Mention {
                     item_idx,
-                    variant_id: variant_id.clone(),
+                    subitem_id: subitem_id.clone(),
                     start: abs,
                     end: abs + tok.len(),
                 });
@@ -194,7 +194,7 @@ fn collect_token_mentions(
 
 fn find_mentions(text: &str, items: &[Item]) -> Vec<Mention> {
     let mut item_mentions: Vec<Mention> = Vec::new();
-    let mut variant_mentions: Vec<(Mention, String)> = Vec::new();
+    let mut subitem_mentions: Vec<(Mention, String)> = Vec::new();
 
     for (idx, item) in items.iter().enumerate() {
         let mut tokens: Vec<String> = vec![normalize_text(&item.name)];
@@ -202,27 +202,27 @@ fn find_mentions(text: &str, items: &[Item]) -> Vec<Mention> {
         for tok in tokens {
             collect_token_mentions(&mut item_mentions, text, idx, None, &tok);
         }
-        for variant in &item.variants {
-            let vname = normalize_text(&variant.name);
+        for subitem in &item.subitems {
+            let vname = normalize_text(&subitem.name);
             let mut vtoks: Vec<String> = vec![vname.clone()];
-            vtoks.extend(variant.aliases.iter().map(|a| normalize_text(a)));
+            vtoks.extend(subitem.aliases.iter().map(|a| normalize_text(a)));
             for tok in vtoks {
                 let mut tmp: Vec<Mention> = Vec::new();
-                collect_token_mentions(&mut tmp, text, idx, Some(variant.variant_id.clone()), &tok);
+                collect_token_mentions(&mut tmp, text, idx, Some(subitem.subitem_id.clone()), &tok);
                 for m in tmp {
-                    variant_mentions.push((m, vname.clone()));
+                    subitem_mentions.push((m, vname.clone()));
                 }
             }
         }
     }
 
-    // Context resolution: bind each variant mention to the nearest item mention,
+    // Context resolution: bind each subitem mention to the nearest item mention,
     // so that e.g. "结城理通行证" resolves to 通行证's 结城理 (not another item's).
-    for (vm, vname) in variant_mentions.iter_mut() {
+    for (vm, vname) in subitem_mentions.iter_mut() {
         if item_mentions.is_empty() {
             continue;
         }
-        // Prefer an item name adjacent to the variant, since it usually qualifies it
+        // Prefer an item name adjacent to the subitem, since it usually qualifies it
         // ("结城理通行证" / "通行证结城理" / "特典 虎狼丸"); fall back to nearest by center.
         let mut chosen: Option<usize> = None;
         let mut best_gap = usize::MAX;
@@ -260,18 +260,18 @@ fn find_mentions(text: &str, items: &[Item]) -> Vec<Mention> {
         }
         if let Some(ti) = chosen {
             if let Some(tv) = items[ti]
-                .variants
+                .subitems
                 .iter()
                 .find(|v| normalize_text(&v.name) == *vname)
             {
                 vm.item_idx = ti;
-                vm.variant_id = Some(tv.variant_id.clone());
+                vm.subitem_id = Some(tv.subitem_id.clone());
             }
         }
     }
 
-    // Drop an item mention that merely qualifies an adjacent same-item variant
-    // (e.g. "特典卡组-校园凭证 虎狼丸" -> only the variant is claimed, not the base item).
+    // Drop an item mention that merely qualifies an adjacent same-item subitem
+    // (e.g. "特典卡组-校园凭证 虎狼丸" -> only the subitem is claimed, not the base item).
     let is_sep_gap = |a: &Mention, b: &Mention| -> bool {
         let (s, e) = if a.end <= b.start {
             (a.end, b.start)
@@ -286,7 +286,7 @@ fn find_mentions(text: &str, items: &[Item]) -> Vec<Mention> {
         gap.len() <= 24 && !gap.chars().any(|c| c.is_ascii_digit())
     };
     item_mentions.retain(|im| {
-        !variant_mentions
+        !subitem_mentions
             .iter()
             .any(|(vm, _)| vm.item_idx == im.item_idx && is_sep_gap(im, vm))
     });
@@ -295,13 +295,13 @@ fn find_mentions(text: &str, items: &[Item]) -> Vec<Mention> {
         for (i, m) in item_mentions.iter().enumerate() {
             eprintln!("ITEM[{}] item_idx={} {}..{}", i, m.item_idx, m.start, m.end);
         }
-        for (m, n) in variant_mentions.iter() {
+        for (m, n) in subitem_mentions.iter() {
             eprintln!("VAR {} item_idx={} {}..{}", n, m.item_idx, m.start, m.end);
         }
     }
 
     let mut all = item_mentions;
-    all.extend(variant_mentions.into_iter().map(|(m, _)| m));
+    all.extend(subitem_mentions.into_iter().map(|(m, _)| m));
 
     all.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
 
@@ -317,7 +317,7 @@ fn find_mentions(text: &str, items: &[Item]) -> Vec<Mention> {
                 } else if (m.end - m.start) > (last.end - last.start) {
                     *last = Mention {
                         item_idx: m.item_idx,
-                        variant_id: m.variant_id.clone(),
+                        subitem_id: m.subitem_id.clone(),
                         start: m.start,
                         end: m.end,
                     };
@@ -363,7 +363,7 @@ fn build_segments<'a>(text: &'a str, mentions: &[Mention]) -> Vec<Segment<'a>> {
         if start <= end && end <= text.len() {
             segs.push(Segment {
                 item_idx: mentions[i].item_idx,
-                variant_id: mentions[i].variant_id.clone(),
+                subitem_id: mentions[i].subitem_id.clone(),
                 text: &text[start..end],
             });
         }
@@ -408,8 +408,8 @@ fn detect_claim_type(text: &str, item: &Item, policy: &str) -> String {
     }
 }
 
-fn parse_quantity(text: &str, item: &Item, variant: Option<&ItemVariant>, policy: &str) -> u32 {
-    let cleaned = strip_item_tokens(text, item, variant);
+fn parse_quantity(text: &str, item: &Item, subitem: Option<&ItemSubitem>, policy: &str) -> u32 {
+    let cleaned = strip_item_tokens(text, item, subitem);
 
     if let Some(n) = find_plus_number(&cleaned) {
         return n;
@@ -418,7 +418,7 @@ fn parse_quantity(text: &str, item: &Item, variant: Option<&ItemVariant>, policy
         return n;
     }
     if policy == "FullBox" {
-        return variant
+        return subitem
             .and_then(|v| v.capacity)
             .or(item.box_size)
             .unwrap_or(1);
@@ -429,10 +429,10 @@ fn parse_quantity(text: &str, item: &Item, variant: Option<&ItemVariant>, policy
     1
 }
 
-fn strip_item_tokens(text: &str, item: &Item, variant: Option<&ItemVariant>) -> String {
+fn strip_item_tokens(text: &str, item: &Item, subitem: Option<&ItemSubitem>) -> String {
     let mut tokens: Vec<String> = vec![normalize_text(&item.name)];
     tokens.extend(item.aliases.iter().map(|a| normalize_text(a)));
-    if let Some(v) = variant {
+    if let Some(v) = subitem {
         tokens.push(normalize_text(&v.name));
     }
     tokens.retain(|t| !t.is_empty());
@@ -570,8 +570,8 @@ mod tests {
             aliases: vec!["通行证".to_string()],
             sort_order: 0,
             metadata: serde_json::Value::Null,
-            variants: vec![ItemVariant {
-                variant_id: "v_jcl".to_string(),
+            subitems: vec![ItemSubitem {
+                subitem_id: "v_jcl".to_string(),
                 name: "结城理".to_string(),
                 unit_price: MoneyCents(0),
                 capacity: None,

@@ -36,8 +36,8 @@ impl Package {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Line {
     pub item_id: String,
-    #[serde(default)]
-    pub variant_id: Option<String>,
+    #[serde(default, alias = "variant_id")]
+    pub subitem_id: Option<String>,
     pub qty: u32,
     pub unit_price_cents: i64,
     #[serde(default)]
@@ -49,7 +49,7 @@ impl Line {
     pub fn new(item_id: impl Into<String>, qty: u32, unit_price_cents: i64) -> Self {
         Self {
             item_id: item_id.into(),
-            variant_id: None,
+            subitem_id: None,
             qty,
             unit_price_cents,
             is_gift: false,
@@ -57,8 +57,8 @@ impl Line {
     }
 
     #[cfg(test)]
-    pub fn variant(mut self, variant_id: impl Into<String>) -> Self {
-        self.variant_id = Some(variant_id.into());
+    pub fn subitem(mut self, subitem_id: impl Into<String>) -> Self {
+        self.subitem_id = Some(subitem_id.into());
         self
     }
 
@@ -76,8 +76,8 @@ impl Line {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnitPrice {
     pub item_id: String,
-    #[serde(default)]
-    pub variant_id: Option<String>,
+    #[serde(default, alias = "variant_id")]
+    pub subitem_id: Option<String>,
     pub unit_price_cents: i64,
 }
 
@@ -101,13 +101,13 @@ pub struct SettlementResult {
     pub lines: Vec<LineSettlement>,
 }
 
-/// 单行（商品/变体）的减均明细。金额均为「分」，即 2 位小数。
+/// 单行（商品/子项）的减均明细。金额均为「分」，即 2 位小数。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineSettlement {
     pub package_id: String,
     pub item_id: String,
-    #[serde(default)]
-    pub variant_id: Option<String>,
+    #[serde(default, alias = "variant_id")]
+    pub subitem_id: Option<String>,
     pub qty: u32,
     /// 标价单价（原价）。
     pub unit_price_cents: i64,
@@ -151,8 +151,8 @@ pub fn order_table_from_allocation(
 
     for alloc in &snapshot.item_allocations {
         let is_gift = alloc.kind == "gift";
-        let variant = alloc.variant_id.clone();
-        let base_price = lookup_unit_price(prices, &alloc.item_id.0, variant.as_deref());
+        let subitem = alloc.subitem_id.clone();
+        let base_price = lookup_unit_price(prices, &alloc.item_id.0, subitem.as_deref());
 
         for mbox in &alloc.boxes {
             for slot in &mbox.slots {
@@ -169,7 +169,7 @@ pub fn order_table_from_allocation(
                     .entry(package_key(&user_id.0, &claim))
                     .or_default();
                 let line = entry
-                    .entry((alloc.item_id.0.clone(), variant.clone(), is_gift))
+                    .entry((alloc.item_id.0.clone(), subitem.clone(), is_gift))
                     .or_insert((0, base_price));
                 line.0 += 1;
             }
@@ -185,7 +185,7 @@ pub fn order_table_from_allocation(
                 base_price
             };
             let line = entry
-                .entry((alloc.item_id.0.clone(), variant.clone(), is_gift))
+                .entry((alloc.item_id.0.clone(), subitem.clone(), is_gift))
                 .or_insert((0, price));
             line.0 += single.quantity;
         }
@@ -198,9 +198,9 @@ pub fn order_table_from_allocation(
             lines: lines
                 .into_iter()
                 .map(
-                    |((item_id, variant_id, is_gift), (qty, unit_price_cents))| Line {
+                    |((item_id, subitem_id, is_gift), (qty, unit_price_cents))| Line {
                         item_id,
-                        variant_id,
+                        subitem_id,
                         qty,
                         unit_price_cents,
                         is_gift,
@@ -213,18 +213,18 @@ pub fn order_table_from_allocation(
     OrderTable { packages }
 }
 
-fn lookup_unit_price(prices: &[UnitPrice], item_id: &str, variant_id: Option<&str>) -> i64 {
-    if let Some(variant) = variant_id {
+fn lookup_unit_price(prices: &[UnitPrice], item_id: &str, subitem_id: Option<&str>) -> i64 {
+    if let Some(subitem) = subitem_id {
         if let Some(found) = prices
             .iter()
-            .find(|p| p.item_id == item_id && p.variant_id.as_deref() == Some(variant))
+            .find(|p| p.item_id == item_id && p.subitem_id.as_deref() == Some(subitem))
         {
             return found.unit_price_cents;
         }
     }
     prices
         .iter()
-        .find(|p| p.item_id == item_id && p.variant_id.is_none())
+        .find(|p| p.item_id == item_id && p.subitem_id.is_none())
         .map(|p| p.unit_price_cents)
         .unwrap_or(0)
 }
@@ -237,7 +237,7 @@ fn package_key(user_id: &str, claim_id: &str) -> String {
     }
 }
 
-/// 商品数量键：`(item_id, variant_id, is_gift)`。
+/// 商品数量键：`(item_id, subitem_id, is_gift)`。
 pub type QuantityKey = (String, Option<String>, bool);
 
 /// 某类商品的「数量对不上」明细（排包未完成 / 数量超出）。
@@ -245,7 +245,7 @@ pub type QuantityKey = (String, Option<String>, bool);
 pub struct QuantityGap {
     pub item_id: String,
     #[serde(default)]
-    pub variant_id: Option<String>,
+    pub subitem_id: Option<String>,
     pub is_gift: bool,
     pub expected: u32,
     pub actual: u32,
@@ -266,7 +266,7 @@ pub fn expected_quantities(snapshot: &AllocationSnapshot) -> BTreeMap<QuantityKe
     for alloc in &snapshot.item_allocations {
         let key = (
             alloc.item_id.0.clone(),
-            alloc.variant_id.clone(),
+            alloc.subitem_id.clone(),
             alloc.kind == "gift",
         );
         let mut qty = 0u32;
@@ -290,7 +290,7 @@ pub fn table_quantities(table: &OrderTable) -> BTreeMap<QuantityKey, u32> {
     let mut out: BTreeMap<QuantityKey, u32> = BTreeMap::new();
     for p in &table.packages {
         for l in &p.lines {
-            let key = (l.item_id.clone(), l.variant_id.clone(), l.is_gift);
+            let key = (l.item_id.clone(), l.subitem_id.clone(), l.is_gift);
             *out.entry(key).or_insert(0) += l.qty;
         }
     }
@@ -308,7 +308,7 @@ pub fn check_completeness(table: &OrderTable, snapshot: &AllocationSnapshot) -> 
         if act < *exp {
             missing.push(QuantityGap {
                 item_id: key.0.clone(),
-                variant_id: key.1.clone(),
+                subitem_id: key.1.clone(),
                 is_gift: key.2,
                 expected: *exp,
                 actual: act,
@@ -321,7 +321,7 @@ pub fn check_completeness(table: &OrderTable, snapshot: &AllocationSnapshot) -> 
         if *act > exp {
             extra.push(QuantityGap {
                 item_id: key.0.clone(),
-                variant_id: key.1.clone(),
+                subitem_id: key.1.clone(),
                 is_gift: key.2,
                 expected: exp,
                 actual: *act,

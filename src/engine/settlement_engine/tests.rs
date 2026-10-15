@@ -20,7 +20,7 @@ fn item(item_id: &str, kind: ItemKind, price: i64) -> Item {
         aliases: vec![],
         sort_order: 0,
         metadata: serde_json::Value::Null,
-        variants: vec![],
+        subitems: vec![],
     }
 }
 
@@ -47,7 +47,7 @@ fn allocation() -> AllocationSnapshot {
                 item_id: ItemId("a".to_string()),
                 item_name: "a".to_string(),
                 kind: "split".to_string(),
-                variant_id: None,
+                subitem_id: None,
                 boxes: vec![BoxAllocation {
                     box_index: 0,
                     slots: vec![slot("u1"), slot("u1")],
@@ -59,7 +59,7 @@ fn allocation() -> AllocationSnapshot {
                 item_id: ItemId("b".to_string()),
                 item_name: "b".to_string(),
                 kind: "single".to_string(),
-                variant_id: None,
+                subitem_id: None,
                 boxes: vec![],
                 singles: vec![SingleAllocation {
                     user_id: UserId("u1".to_string()),
@@ -121,32 +121,32 @@ fn settle_delegates_to_evaluate_and_maps_bills() {
 fn settle_resolves_and_reports_forced_tail_boxes() {
     use crate::domain::claim::{ClaimType, EffectiveClaimLine, SlotPolicy};
     use crate::domain::ids::ClaimId;
-    use crate::domain::item::ItemVariant;
+    use crate::domain::item::ItemSubitem;
     use crate::engine::allocation_engine::AllocationEngine;
 
     let mut it = item("box", ItemKind::Split, 1000);
-    it.variants = vec![
-        ItemVariant {
-            variant_id: "A".to_string(),
+    it.subitems = vec![
+        ItemSubitem {
+            subitem_id: "A".to_string(),
             name: "A".to_string(),
             unit_price: MoneyCents(1000),
             capacity: None,
             aliases: vec![],
         },
-        ItemVariant {
-            variant_id: "B".to_string(),
+        ItemSubitem {
+            subitem_id: "B".to_string(),
             name: "B".to_string(),
             unit_price: MoneyCents(1000),
             capacity: None,
             aliases: vec![],
         },
     ];
-    let mk = |user: &str, variant: &str, policy: SlotPolicy, seq: i64| EffectiveClaimLine {
+    let mk = |user: &str, subitem: &str, policy: SlotPolicy, seq: i64| EffectiveClaimLine {
         claim_id: ClaimId(format!("c-{user}-{seq}")),
         line_index: 0,
         user_id: UserId(user.to_string()),
         item_id: ItemId("box".to_string()),
-        variant_id: Some(variant.to_string()),
+        subitem_id: Some(subitem.to_string()),
         quantity: 1,
         claim_type: ClaimType::Split,
         slot_policy: policy,

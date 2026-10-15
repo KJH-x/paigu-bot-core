@@ -148,3 +148,10 @@ if claim_variant_is_none && item.kind==Group && let Some(box_id)=item.box_item_i
 - **§3 修正**：live `mod.rs:427` 现为 `clean_nickname`（**非** `resolve_cn`）；改为 `resolve_cn` 即行为变更，`who_whats`（`state.rs`/`services/display.rs:63-94`）随之统一。
 - **§11 修正**：用 `services::replay::recompute(state)`（带 revision 守卫）；`put_config` 入口先读 `old cfg` 再 diff。
 - **§9 注意**：`#sec-rounds .panel-body` 内已有 `.round-list{max-height:270px}` → 复用外层高度会产生嵌套滚动，需处理。
+
+## 15. 完成记录（2026-10-15）
+- §1 术语改名：60 个跟踪文件（Rust/web/docs/config 模板）完成 变体/variant→子项/subitem（含 JSON 键）；serde lias 兼容旧键（settings/domain/claim/parsed/settlement）。
+- §5 整盒路由：ItemConfig.box_item_id + settings::box_redirect_map + ValidateContext.box_map；live 配置 pass55→pass55_box。
+- §6/§7 前端拼音：vendored web/vendor/pinyin-pro.js（UMD, 全局 pinyinPro）；成员表加原始名称/可编辑清洗列/筛选；商品目录筛选。
+- §8 settings 栅格、§9 round（单滚动/sticky/head 合并+子项平均价/列宽）、§10 待确认→override 编辑器（POST /api/messages/:key/override）、§11 别名变更→config_signature 差异触发 ecompute。
+- §0 迁移：scripts/migrate-terminology.mjs（5 个 JSON 就地改键），停机+备份+重建 release+重启；所有门禁绿（cargo test 234 / clippy / e2e 17 / privacy）。

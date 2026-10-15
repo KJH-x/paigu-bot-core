@@ -89,7 +89,7 @@ pub struct ItemAllocation {
     pub item_name: String,
     pub kind: String,
     #[serde(default)]
-    pub variant_id: Option<String>,
+    pub subitem_id: Option<String>,
     pub boxes: Vec<BoxAllocation>,
     pub singles: Vec<SingleAllocation>,
     pub waiting: Vec<WaitingLine>,
@@ -158,15 +158,15 @@ pub const TAIL_FORCED_BOX: &str = "tail_forced_box";
 
 /// §U8 包尾盒解析：**强制成盒** + **自动滑入**（幂等、确定性）。
 ///
-/// 模型：「列」= 盒序号；同一 base item 的各变体在同一列至多占一个槽（共享列）。
+/// 模型：「列」= 盒序号；同一 base item 的各子项在同一列至多占一个槽（共享列）。
 ///
 /// 规则：
-/// - 包尾（`TailLocked`）的**锁定列** = 其申报变体集中各变体**普通认购**（`Normal`）的
-///   最大列序 + 1；若申报变体无普通认购则取 1。
-/// - 包尾人占锁定列中其申报变体的槽；该列其余变体槽保持空置（`LockedEmpty`），整列视为
+/// - 包尾（`TailLocked`）的**锁定列** = 其申报子项集中各子项**普通认购**（`Normal`）的
+///   最大列序 + 1；若申报子项无普通认购则取 1。
+/// - 包尾人占锁定列中其申报子项的槽；该列其余子项槽保持空置（`LockedEmpty`），整列视为
 ///   **强制成盒**（`lock_reason = tail_forced_box`）。
-/// - **自动滑入**：锁定列之前**未成盒**的列中，若某变体的普通认购**不在**申报变体集内
-///   （不冲突），则移入锁定列的对应变体槽；**冲突变体**（属于申报集）不滑入，也不分配给包尾人。
+/// - **自动滑入**：锁定列之前**未成盒**的列中，若某子项的普通认购**不在**申报子项集内
+///   （不冲突），则移入锁定列的对应子项槽；**冲突子项**（属于申报集）不滑入，也不分配给包尾人。
 ///
 /// 幂等性：锁定列只由 `Normal` 槽推导，重复调用结果一致；已滑入的普通槽不会被再次移动。
 pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
@@ -178,19 +178,19 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
     }
 
     for (item_id, indices) in &groups {
-        let variant_entries: Vec<(String, usize)> = indices
+        let subitem_entries: Vec<(String, usize)> = indices
             .iter()
-            .filter_map(|&i| out.item_allocations[i].variant_id.clone().map(|v| (v, i)))
+            .filter_map(|&i| out.item_allocations[i].subitem_id.clone().map(|v| (v, i)))
             .collect();
-        if variant_entries.is_empty() {
+        if subitem_entries.is_empty() {
             continue;
         }
 
-        let all_variants: BTreeSet<String> =
-            variant_entries.iter().map(|(v, _)| v.clone()).collect();
+        let all_subitems: BTreeSet<String> =
+            subitem_entries.iter().map(|(v, _)| v.clone()).collect();
 
         let mut tail_groups: BTreeMap<String, Vec<TailSlot>> = BTreeMap::new();
-        for (variant, idx) in &variant_entries {
+        for (subitem, idx) in &subitem_entries {
             let entry = &out.item_allocations[*idx];
             for b in &entry.boxes {
                 for s in &b.slots {
@@ -205,7 +205,7 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
                         .clone()
                         .unwrap_or_else(|| format!("user:{}", user_id.0));
                     tail_groups.entry(key).or_default().push(TailSlot {
-                        variant: variant.clone(),
+                        subitem: subitem.clone(),
                         entry_idx: *idx,
                         box_index: b.box_index,
                         slot_index: s.slot_index,
@@ -223,11 +223,11 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
         let mut used_tail_columns: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
 
         for slots in tail_groups.values() {
-            let declared: BTreeSet<String> = slots.iter().map(|s| s.variant.clone()).collect();
+            let declared: BTreeSet<String> = slots.iter().map(|s| s.subitem.clone()).collect();
 
             let mut locked = 1u32;
             for v in &declared {
-                let max_normal = max_normal_column(&out, &variant_entries, v);
+                let max_normal = max_normal_column(&out, &subitem_entries, v);
                 locked = locked.max(max_normal.saturating_add(1));
             }
             loop {
@@ -260,9 +260,9 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
                 set_slot(&mut out, s.entry_idx, locked, 1, target);
             }
 
-            // 自动滑入：锁定列之前未成盒的列中，非冲突变体的普通认购移入锁定列。
+            // 自动滑入：锁定列之前未成盒的列中，非冲突子项的普通认购移入锁定列。
             let mut columns: BTreeSet<u32> = BTreeSet::new();
-            for (_, idx) in &variant_entries {
+            for (_, idx) in &subitem_entries {
                 for b in &out.item_allocations[*idx].boxes {
                     if b.box_index < locked {
                         columns.insert(b.box_index);
@@ -270,11 +270,11 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
                 }
             }
             for c in columns {
-                if column_is_formed(&out, &variant_entries, &all_variants, c) {
+                if column_is_formed(&out, &subitem_entries, &all_subitems, c) {
                     continue;
                 }
-                for (variant, idx) in &variant_entries {
-                    if declared.contains(variant) {
+                for (subitem, idx) in &subitem_entries {
+                    if declared.contains(subitem) {
                         continue;
                     }
                     if locked_slot_filled(&out, *idx, locked) {
@@ -297,9 +297,9 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
                 }
             }
 
-            // 强制成盒：把锁定列其余变体槽标记为 LockedEmpty（不覆盖已滑入的普通槽）。
-            for (variant, idx) in &variant_entries {
-                if declared.contains(variant) {
+            // 强制成盒：把锁定列其余子项槽标记为 LockedEmpty（不覆盖已滑入的普通槽）。
+            for (subitem, idx) in &subitem_entries {
+                if declared.contains(subitem) {
                     continue;
                 }
                 if !locked_slot_filled(&out, *idx, locked) {
@@ -332,7 +332,7 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
             }
         }
 
-        for (_, idx) in &variant_entries {
+        for (_, idx) in &subitem_entries {
             out.item_allocations[*idx]
                 .boxes
                 .sort_by_key(|b| b.box_index);
@@ -343,7 +343,7 @@ pub fn resolve_tail_boxes(snapshot: &AllocationSnapshot) -> AllocationSnapshot {
 }
 
 struct TailSlot {
-    variant: String,
+    subitem: String,
     entry_idx: usize,
     box_index: u32,
     slot_index: u32,
@@ -358,12 +358,12 @@ fn tail_segment(s: &TailSlot) -> String {
 
 fn max_normal_column(
     snapshot: &AllocationSnapshot,
-    variant_entries: &[(String, usize)],
-    variant: &str,
+    subitem_entries: &[(String, usize)],
+    subitem: &str,
 ) -> u32 {
     let mut max = 0u32;
-    for (v, idx) in variant_entries {
-        if v != variant {
+    for (v, idx) in subitem_entries {
+        if v != subitem {
             continue;
         }
         for b in &snapshot.item_allocations[*idx].boxes {
@@ -381,12 +381,12 @@ fn max_normal_column(
 
 fn column_is_formed(
     snapshot: &AllocationSnapshot,
-    variant_entries: &[(String, usize)],
-    all_variants: &BTreeSet<String>,
+    subitem_entries: &[(String, usize)],
+    all_subitems: &BTreeSet<String>,
     column: u32,
 ) -> bool {
-    all_variants.iter().all(|v| {
-        variant_entries
+    all_subitems.iter().all(|v| {
+        subitem_entries
             .iter()
             .filter(|(ev, _)| ev == v)
             .any(|(_, idx)| box_has_filled(snapshot, *idx, column))

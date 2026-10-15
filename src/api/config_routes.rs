@@ -129,13 +129,62 @@ async fn put_config(
                 .unwrap_or("category_binding_invalid"),
         ));
     }
+    let previous = state.cfg.get().await;
+    let round_unchanged = previous.round.round_id == body.config.round.round_id;
+    let tokens_changed = config_signature(&previous.round) != config_signature(&body.config.round);
     match state.cfg.put(body.config, body.revision).await {
         Ok(revision) => {
+            // §11：同一轮次内商品名/别名/子项名变化 → 确定性重解析全部消息（实时/重放同源）。
+            if round_unchanged && tokens_changed {
+                if let Err(error) = crate::services::replay::recompute(&state).await {
+                    tracing::warn!("商品名/别名变更后重算失败: {error}");
+                }
+            }
             let config = state.cfg.get().await;
             Ok(Json(json!({ "config": config, "revision": revision })))
         }
         Err(error) => Err(config_error_response(&error)),
     }
+}
+
+/// §11：目录结构签名（含 item_id/种类/商品名/别名/子项名/整盒跳转），
+/// 任何影响解析的改动都会改变签名（含别名在商品间移动）。
+fn config_signature(round: &crate::settings::RoundSettings) -> Vec<String> {
+    let mut out: Vec<String> = round
+        .items
+        .iter()
+        .map(|item| {
+            let mut sig = format!(
+                "{}|{}|{}|{}",
+                item.item_id,
+                item.kind,
+                item.name,
+                item.box_item_id.clone().unwrap_or_default()
+            );
+            for alias in &item.aliases {
+                sig.push('\u{1}');
+                sig.push_str(alias);
+            }
+            let mut subitems: Vec<String> = item
+                .subitems
+                .iter()
+                .map(|subitem| {
+                    let mut s = format!("{}|{}", subitem.subitem_id, subitem.name);
+                    for alias in &subitem.aliases {
+                        s.push('\u{1}');
+                        s.push_str(alias);
+                    }
+                    s
+                })
+                .collect();
+            subitems.sort();
+            sig.push('\u{2}');
+            sig.push_str(&subitems.join("\u{3}"));
+            sig
+        })
+        .collect();
+    out.sort();
+    out
 }
 
 async fn reload_config(

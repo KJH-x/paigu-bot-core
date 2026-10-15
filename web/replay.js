@@ -34,8 +34,8 @@
 
   var tableEl, boardRenderer;
 
-  function boardKey(itemId, variantId) {
-    return itemId + '|' + (variantId == null ? '' : variantId);
+  function boardKey(itemId, subitemId) {
+    return itemId + '|' + (subitemId == null ? '' : subitemId);
   }
 
   function cellKey(key, slot) {
@@ -76,7 +76,7 @@
       }
       var changed = steps[i].changed || [];
       for (var c = 0; c < changed.length; c++) {
-        lastChange[cellKey(boardKey(changed[c].item_id, changed[c].variant_id), changed[c].slot)] = i;
+        lastChange[cellKey(boardKey(changed[c].item_id, changed[c].subitem_id), changed[c].slot)] = i;
       }
       boards.push(next);
       var rows = P.normalizeBoard({ board: next }, state.meta);
@@ -86,7 +86,7 @@
         steps[i].changed = Object.keys(map).map(function (key) {
           var parts = key.slice(0, key.lastIndexOf('#')).split('|');
           var position = key.slice(key.lastIndexOf('#') + 1).split(':');
-          return {item_id:parts[0], variant_id:parts.slice(1).join('|'), box_index:+position[0],
+          return {item_id:parts[0], subitem_id:parts.slice(1).join('|'), box_index:+position[0],
             slot:+position[1], before:map[key].before, after:map[key].after, reason:map[key].reason};
         });
       }
@@ -183,13 +183,13 @@
     });
 
     var changedItemIds = {};
-    var changedVariantKeys = {};
+    var changedSubitemKeys = {};
     var changedUserKeys = {};
     for (var i = 0; i < changes.length; i++) {
       var c = changes[i];
-      var ck = boardKey(c.item_id, c.variant_id);
+      var ck = boardKey(c.item_id, c.subitem_id);
       changedItemIds[c.item_id] = true;
-      changedVariantKeys[ck] = true;
+      changedSubitemKeys[ck] = true;
       if (c.before) changedUserKeys[ck + '||' + c.before] = true;
       if (c.after) changedUserKeys[ck + '||' + c.after] = true;
     }
@@ -200,7 +200,7 @@
     var seq = 0;
     function nextId() { return 'n' + (seq++); }
     var itemIds = {};
-    var variantIds = {};
+    var subitemIds = {};
     var userIds = {};
     var items = data.items || [];
 
@@ -211,14 +211,14 @@
       nodeLines.push(iid + '["' + mermaidLabel(item.name) + '"]');
       if (changedItemIds[item.item_id]) hlNodes[iid] = true;
 
-      var hasVariants = !!(item.variants && item.variants.length);
-      var variants = hasVariants
-        ? item.variants
-        : [{ variant_id: '', name: (item.kind === 'single' ? '单领' : '默认'), capacity: 0 }];
+      var hasSubitems = !!(item.subitems && item.subitems.length);
+      var subitems = hasSubitems
+        ? item.subitems
+        : [{ subitem_id: '', name: (item.kind === 'single' ? '单领' : '默认'), capacity: 0 }];
 
-      for (var v = 0; v < variants.length; v++) {
-        var variant = variants[v];
-        var key = boardKey(item.item_id, variant.variant_id);
+      for (var v = 0; v < subitems.length; v++) {
+        var subitem = subitems[v];
+        var key = boardKey(item.item_id, subitem.subitem_id);
         var slots = board[key] || [];
         var users = [];
         var seen = {};
@@ -227,12 +227,12 @@
           if (u && slots[s].status !== 'empty' && !seen[u]) { seen[u] = true; users.push(u); }
         }
 
-        if (hasVariants) {
-          var vid = variantIds[key];
-          if (!vid) { vid = nextId(); variantIds[key] = vid; }
-          nodeLines.push(vid + '{{"' + mermaidLabel(variant.name) + '"}}');
-          if (changedVariantKeys[key]) hlNodes[vid] = true;
-          edges.push({ from: iid, to: vid, changed: !!changedVariantKeys[key] });
+        if (hasSubitems) {
+          var vid = subitemIds[key];
+          if (!vid) { vid = nextId(); subitemIds[key] = vid; }
+          nodeLines.push(vid + '{{"' + mermaidLabel(subitem.name) + '"}}');
+          if (changedSubitemKeys[key]) hlNodes[vid] = true;
+          edges.push({ from: iid, to: vid, changed: !!changedSubitemKeys[key] });
           for (var uu = 0; uu < users.length; uu++) {
             var uk = key + '||' + users[uu];
             var uid = userIds[uk];
@@ -307,9 +307,9 @@
     var rows = [];
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
-      if (it.variants && it.variants.length) {
-        for (var v = 0; v < it.variants.length; v++) {
-          rows.push({ key: boardKey(it.item_id, it.variants[v].variant_id), label: it.name + ' / ' + it.variants[v].name });
+      if (it.subitems && it.subitems.length) {
+        for (var v = 0; v < it.subitems.length; v++) {
+          rows.push({ key: boardKey(it.item_id, it.subitems[v].subitem_id), label: it.name + ' / ' + it.subitems[v].name });
         }
       } else {
         rows.push({ key: boardKey(it.item_id, ''), label: it.name });
@@ -348,7 +348,7 @@
     var totalWidth = 220 + widths.reduce(function (sum, width) { return sum + width; }, 0);
     var html = '<div class="col-wrap"><table class="col-table" style="width:' + totalWidth + 'px"><colgroup><col style="width:220px">' +
       widths.map(function (width) { return '<col style="width:' + width + 'px">'; }).join('') + '</colgroup><thead><tr>' +
-      '<th class="rowhead">商品 / 变体</th>';
+      '<th class="rowhead">商品 / 子项</th>';
     for (var j2 = 0; j2 < steps.length; j2++) {
       var msg = msgBySeq(steps[j2].message_seq);
       var disp = msg ? (msg.display || msg.user) : ('#' + steps[j2].message_seq);
@@ -424,13 +424,13 @@
   function keyLabel(key) {
     var parts = key.split('|');
     var itemId = parts[0];
-    var variantId = parts.slice(1).join('|');
+    var subitemId = parts.slice(1).join('|');
     var name = itemId;
     var items = (state.data && state.data.items) || [];
     for (var i = 0; i < items.length; i++) {
       if (items[i].item_id === itemId) { name = items[i].name; break; }
     }
-    return variantId ? name + ' / ' + variantId : name + ' / 单领';
+    return subitemId ? name + ' / ' + subitemId : name + ' / 单领';
   }
 
   function renderCheck() {

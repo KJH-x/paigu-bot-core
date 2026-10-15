@@ -172,7 +172,7 @@ mod tests {
             slot_policy: Some(slot_policy.to_string()),
             notes: None,
             resolved_item_id: None,
-            resolved_variant_id: None,
+            resolved_subitem_id: None,
             resolved_round_id: None,
         }
     }

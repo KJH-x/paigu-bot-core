@@ -96,43 +96,43 @@
 
 ## 4. 商品目录（`round.items`，种子来自 `simulation-corpus/real-chat/月行水上`）
 
-> ✅ **已更新（2026-09-24，见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U6；源码 `src/settings/mod.rs`）**：**商品级只有原价**；**仅变体**有 `adjust_cents`；`class` **自动推导**；**种类**为 `拼团/单领/整盒/特典`。
+> ✅ **已更新（2026-09-24，见 [SPEC-UPDATE-2026-09-24.md](./SPEC-UPDATE-2026-09-24.md) §U6；源码 `src/settings/mod.rs`）**：**商品级只有原价**；**仅子项**有 `adjust_cents`；`class` **自动推导**；**种类**为 `拼团/单领/整盒/特典`。
 
-**现行字段表**（`ItemConfig` / `VariantConfig`）：
+**现行字段表**（`ItemConfig` / `SubitemConfig`）：
 
 | 层级 | 字段 | 类型 | 含义 |
 |---|---|---|---|
 | 商品 | `item_id` | String | 稳定 id（唯一） |
 | 商品 | `name` | String | 展示名 |
 | 商品 | `kind` | String | **种类**：`拼团`/`单领`/`整盒`/`特典`（兼容 `group/single/box/gift` 与旧 `split/single/gift`；UI 用「种类」） |
-| 商品 | `class` | Option<String> | `A`/`B`；**缺省自动推导**（有变体⇒A，无变体⇒B），显式合法值可覆盖 |
+| 商品 | `class` | Option<String> | `A`/`B`；**缺省自动推导**（有子项⇒A，无子项⇒B），显式合法值可覆盖 |
 | 商品 | `aliases` | String[] | 商品名别名（本地词组切分 + LLM 建议 + 跨商品冲突校验） |
 | 商品 | `unit_price_cents` | i64 | **原价**（分）；商品级**无**调价 |
 | 商品 | `max_quantity` | Option<u32> | **单领上限**（仅单领；不出现在拼团商品） |
-| 变体 | `variant_id` | String | **只读、自动生成**（不允许手填） |
-| 变体 | `name` | String | 变体名（**可改**） |
-| 变体 | `unit_price_cents` | i64 | **原价 A**（分） |
-| 变体 | `adjust_cents` | i64 | **调价 B**（分）；最终价 **C = A + B**；已落库并接入结算取价 |
-| 变体 | `capacity` | Option<u32> | 容量（可空） |
-| 变体 | `aliases` | String[] | 变体别名 |
+| 子项 | `subitem_id` | String | **只读、自动生成**（不允许手填） |
+| 子项 | `name` | String | 子项名（**可改**） |
+| 子项 | `unit_price_cents` | i64 | **原价 A**（分） |
+| 子项 | `adjust_cents` | i64 | **调价 B**（分）；最终价 **C = A + B**；已落库并接入结算取价 |
+| 子项 | `capacity` | Option<u32> | 容量（可空） |
+| 子项 | `aliases` | String[] | 子项别名 |
 
-> **实现状态（2026-09-25 核对）**：`box_size` 与 `variants[].pieces` 已从配置模型、转换逻辑和示例配置中清理；领域层 `Item.box_size` 仍是分配引擎运行时容量，不是商品配置字段。`VariantConfig.adjust_cents` 已在 Rust 声明、可往返落库，`to_unit_prices()` 与结算均读取调后价。
+> **实现状态（2026-09-25 核对）**：`box_size` 与 `subitems[].pieces` 已从配置模型、转换逻辑和示例配置中清理；领域层 `Item.box_size` 仍是分配引擎运行时容量，不是商品配置字段。`SubitemConfig.adjust_cents` 已在 Rust 声明、可往返落库，`to_unit_prices()` 与结算均读取调后价。
 
 ```jsonc
 { "item_id":"pass_sp", "name":"通行认证SP-月行水上", "kind":"拼团",
-  "class": null,                       // 自动推导：有变体 ⇒ A
+  "class": null,                       // 自动推导：有子项 ⇒ A
   "aliases":["通行证","通行认证SP","通行认证"],
-  "unit_price_cents": 0,               // 商品级原价（有变体时通常为 0，价格挂变体）
-  "variants":[
-    {"variant_id":"v_jcl","name":"结城理","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
-    {"variant_id":"v_yy","name":"岳羽由加莉","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
-    {"variant_id":"v_ajs","name":"埃癸斯","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
-    {"variant_id":"v_hlw","name":"虎狼丸","unit_price_cents":2500,"adjust_cents":0,"capacity":null,"aliases":[]}
+  "unit_price_cents": 0,               // 商品级原价（有子项时通常为 0，价格挂子项）
+  "subitems":[
+    {"subitem_id":"v_jcl","name":"结城理","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
+    {"subitem_id":"v_yy","name":"岳羽由加莉","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
+    {"subitem_id":"v_ajs","name":"埃癸斯","unit_price_cents":5000,"adjust_cents":0,"capacity":null,"aliases":[]},
+    {"subitem_id":"v_hlw","name":"虎狼丸","unit_price_cents":2500,"adjust_cents":0,"capacity":null,"aliases":[]}
   ] }
 ```
-另含：`hr_resume`(人事部简历SP-月行水上)、`fashion`(风尚速递SP-月行水上)、`gift_card`(特典卡组-校园凭证，变体含 `整套`，别名 `一套`)。
+另含：`hr_resume`(人事部简历SP-月行水上)、`fashion`(风尚速递SP-月行水上)、`gift_card`(特典卡组-校园凭证，子项含 `整套`，别名 `一套`)。
 
-**编辑器（`/round`，2026-09-24）**：4 种类选择；变体 A±B=C 三格联动；别名本地词切 + LLM 异步建议（状态：等待回复/已填入新方案/是最佳）+ 锁定（人工编辑后自动上锁）；跨商品冲突校验（失焦/切换面板时检查，后端 `POST /api/rounds/:id/check` 兜底）；末尾虚线卡 + 缝隙「+」插入；单领 1 tab 多行；整盒独立种类；消息日志编辑器为排谷界面**折叠面板**。
+**编辑器（`/round`，2026-09-24）**：4 种类选择；子项 A±B=C 三格联动；别名本地词切 + LLM 异步建议（状态：等待回复/已填入新方案/是最佳）+ 锁定（人工编辑后自动上锁）；跨商品冲突校验（失焦/切换面板时检查，后端 `POST /api/rounds/:id/check` 兜底）；末尾虚线卡 + 缝隙「+」插入；单领 1 tab 多行；整盒独立种类；消息日志编辑器为排谷界面**折叠面板**。
 
 ## 5. HTTP API（`127.0.0.1:21081`）
 

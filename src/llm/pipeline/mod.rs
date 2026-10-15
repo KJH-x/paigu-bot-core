@@ -32,7 +32,7 @@ mod state;
 mod tests;
 
 use admin::{cancel_for_modify, priority_eligibility};
-use llm_parse::BareVariantOutcome;
+use llm_parse::BareSubitemOutcome;
 use state::{MessageRecord, State};
 
 const RULE_CONFIDENCE: f32 = 0.9;
@@ -579,15 +579,15 @@ impl Pipeline {
         }];
         let now = DateTime::<Utc>::from_timestamp_millis(ev.timestamp_ms).unwrap_or_else(Utc::now);
 
-        // §U7 first-match：只报角色名/变体名时按目录顺序取第一个可拼团商品；
+        // §U7 first-match：只报角色名/子项名时按目录顺序取第一个可拼团商品；
         // 全部 fail → LLM 澄清（成功后写 ParseOverride 事件）。
         if parsed.intent == ParsedIntent::Claim {
             match self
-                .resolve_bare_variant_claims(&cfg, &ev, parsed, &round_contexts, now, seq)
+                .resolve_bare_subitem_claims(&cfg, &ev, parsed, &round_contexts, now, seq)
                 .await
             {
-                BareVariantOutcome::Resolved(p) => parsed = p,
-                BareVariantOutcome::FallbackIgnore => {
+                BareSubitemOutcome::Resolved(p) => parsed = p,
+                BareSubitemOutcome::FallbackIgnore => {
                     return self
                         .finish(
                             &ev,
@@ -599,7 +599,7 @@ impl Pipeline {
                         )
                         .await;
                 }
-                BareVariantOutcome::FallbackReject => {
+                BareSubitemOutcome::FallbackReject => {
                     return self
                         .finish(
                             &ev,
@@ -616,6 +616,7 @@ impl Pipeline {
 
         let user_id = UserId(ev.user_id.clone());
         let validator = EventValidator::new(CONFIDENCE_THRESHOLD);
+        let box_map = crate::settings::box_redirect_map(&cfg.round.items);
 
         let event = match validator
             .validate(
@@ -625,6 +626,7 @@ impl Pipeline {
                     group_id: &ev.group_id,
                     raw_message_id: Some(ev.message_id.clone()),
                     active_rounds: &round_contexts,
+                    box_map: &box_map,
                     now,
                     sequence: seq,
                 },
@@ -926,6 +928,7 @@ impl Pipeline {
                         crate::messages::next_seq(),
                         Utc::now(),
                         &parsed,
+                        "合并代表消息 LLM 澄清",
                     )
                     .await;
                 }

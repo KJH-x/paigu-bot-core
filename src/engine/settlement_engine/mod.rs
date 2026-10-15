@@ -206,7 +206,7 @@ fn allocation_to_order_table(
         let mut push = |user_id: &UserId, qty: u32| {
             let entry = by_user.entry(user_id.0.clone()).or_default();
             let line = entry
-                .entry((ia.item_id.0.clone(), ia.variant_id.clone()))
+                .entry((ia.item_id.0.clone(), ia.subitem_id.clone()))
                 .or_insert((0, price));
             line.0 = line.0.saturating_add(qty);
         };
@@ -229,9 +229,9 @@ fn allocation_to_order_table(
             package_id: user,
             lines: lines
                 .into_iter()
-                .map(|((item_id, variant_id), (qty, unit_price_cents))| Line {
+                .map(|((item_id, subitem_id), (qty, unit_price_cents))| Line {
                     item_id,
-                    variant_id,
+                    subitem_id,
                     qty,
                     unit_price_cents,
                     is_gift: false,

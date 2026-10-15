@@ -398,10 +398,42 @@ async fn find_record(
         .ok_or_else(|| ServiceError::NotFound(format!("message {record_id} not found")))
 }
 
+#[derive(Deserialize)]
+pub struct OverrideInput {
+    #[serde(default)]
+    pub reason: Option<String>,
+    pub parsed: crate::parser::parsed_event::ParsedMessage,
+}
+
+/// §10：人工确认「待确认」消息 → 写 `ParseOverride` 并重算。
+pub async fn override_message(
+    state: &ApiState,
+    key: &str,
+    body: OverrideInput,
+) -> Result<Value, ServiceError> {
+    if crate::services::settlement::is_locked(state).await? {
+        return Err(ServiceError::Locked("轮次已锁定，不能修改解析".to_string()));
+    }
+    let cfg = state.cfg.get().await;
+    let record_id = resolve_key(state, &cfg.round.round_id, key).await?;
+    let current = find_record(state, &cfg.round.round_id, &record_id).await?;
+    let reason = body.reason.unwrap_or_else(|| "人工确认".to_string());
+    state
+        .pipeline
+        .apply_parse_override(&current, &body.parsed, &reason)
+        .await;
+    let result = replay::recompute(state).await.map_err(ServiceError::from)?;
+    let message = find_record(state, &cfg.round.round_id, &record_id).await?;
+    Ok(json!({
+        "ok": true,
+        "message": message_view(&message),
+        "result": result,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn sample() -> MessageRecord {
         MessageRecord {
             record_id: "record-7".to_string(),

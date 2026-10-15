@@ -72,7 +72,7 @@
 .inline-fields > label { margin: 0; }
 .inline-fields input, .inline-fields select { max-width: 100%; }
 
-/* 变体表格 */
+/* 子项表格 */
 .vtable-scroll { max-width: 100%; overflow-x: auto; margin-top: 8px; }
 table.vtable { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 760px; }
 table.vtable th, table.vtable td {

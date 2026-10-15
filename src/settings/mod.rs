@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::domain::ids::{ItemId, RoundId};
-use crate::domain::item::{Item, ItemKind, ItemVariant};
+use crate::domain::item::{Item, ItemKind, ItemSubitem};
 use crate::domain::money::MoneyCents;
 use crate::round::{ItemClass, PhaseWindow, RoundCategory};
 
@@ -155,7 +155,7 @@ pub struct ItemConfig {
     /// 种类（U6；UI 用「种类」，字段沿用 `kind`）：`拼团`/`单领`/`整盒`/`特典`
     /// （兼容 `group`/`single`/`box`/`gift`，以及旧值 `split`/`single`/`gift`）。
     pub kind: String,
-    /// 商品类别：`"A"`（盲盒/变体，阶段受限）或 `"B"`（固定价单领）；缺省按 B 处理。
+    /// 商品类别：`"A"`（盲盒/子项，阶段受限）或 `"B"`（固定价单领）；缺省按 B 处理。
     #[serde(default)]
     pub class: Option<String>,
     #[serde(default)]
@@ -166,18 +166,39 @@ pub struct ItemConfig {
     /// 单领上限（`kind="single"`）。
     #[serde(default)]
     pub max_quantity: Option<u32>,
-    #[serde(default)]
-    pub variants: Vec<VariantConfig>,
+    /// 整盒路由（§5）：拼团项（`kind="group"`）在「子项为空」时重定向到的整盒商品 id。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_item_id: Option<String>,
+    #[serde(default, alias = "variants")]
+    pub subitems: Vec<SubitemConfig>,
+}
+
+/// §5 整盒路由：由目录构造「拼团项 → 整盒项」映射（仅当设置了 `box_item_id`）。
+pub fn box_redirect_map(
+    items: &[ItemConfig],
+) -> std::collections::HashMap<crate::domain::ids::ItemId, crate::domain::ids::ItemId> {
+    items
+        .iter()
+        .filter_map(|it| {
+            it.box_item_id.as_ref().map(|b| {
+                (
+                    crate::domain::ids::ItemId(it.item_id.clone()),
+                    crate::domain::ids::ItemId(b.clone()),
+                )
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VariantConfig {
-    pub variant_id: String,
+pub struct SubitemConfig {
+    #[serde(alias = "variant_id")]
+    pub subitem_id: String,
     pub name: String,
-    /// 变体原价 A（分）。
+    /// 子项原价 A（分）。
     #[serde(default)]
     pub unit_price_cents: i64,
-    /// 变体调价 B（分，可负）；最终价 C = A + B（§U6）。
+    /// 子项调价 B（分，可负）；最终价 C = A + B（§U6）。
     #[serde(default)]
     pub adjust_cents: i64,
     #[serde(default)]
@@ -186,7 +207,7 @@ pub struct VariantConfig {
     pub aliases: Vec<String>,
 }
 
-impl VariantConfig {
+impl SubitemConfig {
     /// 最终价 C = 原价 A + 调价 B（饱和运算）。
     #[allow(dead_code)] // UI/展示与测试派生；结算经 `pricing(AdjustBy)` 复用同一 B。
     pub fn final_price_cents(&self) -> i64 {
@@ -194,16 +215,16 @@ impl VariantConfig {
     }
 }
 
-/// 商品种类（U6）。`class` 由种类/变体自动推导（有变体 ⇒ A，无变体 ⇒ B）。
+/// 商品种类（U6）。`class` 由种类/子项自动推导（有子项 ⇒ A，无子项 ⇒ B）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemCategory {
-    /// 拼团（有变体）。
+    /// 拼团（有子项）。
     Group,
-    /// 单领（无变体）。
+    /// 单领（无子项）。
     Single,
-    /// 整盒（无变体；独立种类）。
+    /// 整盒（无子项；独立种类）。
     Box,
-    /// 特典（有变体）。
+    /// 特典（有子项）。
     Gift,
 }
 
@@ -228,8 +249,8 @@ impl ItemCategory {
         }
     }
 
-    /// 该种类是否必须带变体（U6：有变体 ⇒ 拼团/特典；无变体 ⇒ 单领/整盒）。
-    pub fn requires_variants(&self) -> bool {
+    /// 该种类是否必须带子项（U6：有子项 ⇒ 拼团/特典；无子项 ⇒ 单领/整盒）。
+    pub fn requires_subitems(&self) -> bool {
         matches!(self, ItemCategory::Group | ItemCategory::Gift)
     }
 }
@@ -240,13 +261,13 @@ impl ItemConfig {
         ItemCategory::parse(&self.kind)
     }
 
-    pub fn has_variants(&self) -> bool {
-        !self.variants.is_empty()
+    pub fn has_subitems(&self) -> bool {
+        !self.subitems.is_empty()
     }
 
-    /// `class` 自动推导（U6）：有变体 ⇒ A（阶段受限）；无变体 ⇒ B。
+    /// `class` 自动推导（U6）：有子项 ⇒ A（阶段受限）；无子项 ⇒ B。
     pub fn derived_class(&self) -> ItemClass {
-        if self.has_variants() {
+        if self.has_subitems() {
             ItemClass::A
         } else {
             ItemClass::B
@@ -255,7 +276,7 @@ impl ItemConfig {
 }
 
 impl RoundSettings {
-    /// 商品类别：**优先自动推导**（有变体 ⇒ A，无变体 ⇒ B；U6），
+    /// 商品类别：**优先自动推导**（有子项 ⇒ A，无子项 ⇒ B；U6），
     /// 显式 `class` 存在且合法时可覆盖推导；商品未配置时按 `B`（不限制）处理。
     pub fn item_class(&self, item_id: &str) -> ItemClass {
         match self.items.iter().find(|it| it.item_id == item_id) {
@@ -299,11 +320,11 @@ impl RoundSettings {
                 aliases: it.aliases.clone(),
                 sort_order: idx as i32,
                 metadata: serde_json::Value::Null,
-                variants: it
-                    .variants
+                subitems: it
+                    .subitems
                     .iter()
-                    .map(|v| ItemVariant {
-                        variant_id: v.variant_id.clone(),
+                    .map(|v| ItemSubitem {
+                        subitem_id: v.subitem_id.clone(),
                         name: v.name.clone(),
                         unit_price: MoneyCents(v.unit_price_cents),
                         capacity: v.capacity,
@@ -320,13 +341,13 @@ impl RoundSettings {
         for it in &self.items {
             out.push(crate::settlement::UnitPrice {
                 item_id: it.item_id.clone(),
-                variant_id: None,
+                subitem_id: None,
                 unit_price_cents: it.unit_price_cents,
             });
-            for v in &it.variants {
+            for v in &it.subitems {
                 out.push(crate::settlement::UnitPrice {
                     item_id: it.item_id.clone(),
-                    variant_id: Some(v.variant_id.clone()),
+                    subitem_id: Some(v.subitem_id.clone()),
                     unit_price_cents: v.unit_price_cents,
                 });
             }

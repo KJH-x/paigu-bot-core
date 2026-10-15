@@ -56,41 +56,41 @@ impl AllocationEngine {
         let item_map: HashMap<ItemId, &Item> =
             items.iter().map(|i| (i.item_id.clone(), i)).collect();
 
-        let mut needs_variantless: HashSet<ItemId> = HashSet::new();
+        let mut needs_subitemless: HashSet<ItemId> = HashSet::new();
         for line in &sorted_lines {
-            if line.variant_id.is_none() {
-                needs_variantless.insert(line.item_id.clone());
+            if line.subitem_id.is_none() {
+                needs_subitemless.insert(line.item_id.clone());
             }
         }
 
-        // §U8：含「变体包尾」的 base item 采用**共享列**模型——每个变体同一列至多占一个槽，
-        // 故把该变体的盒规设为 1（一条认购 = 一列）。其余情形维持原有盒规，保证既有回归不变。
-        let mut variant_tail_items: HashSet<ItemId> = HashSet::new();
+        // §U8：含「子项包尾」的 base item 采用**共享列**模型——每个子项同一列至多占一个槽，
+        // 故把该子项的盒规设为 1（一条认购 = 一列）。其余情形维持原有盒规，保证既有回归不变。
+        let mut subitem_tail_items: HashSet<ItemId> = HashSet::new();
         for line in &sorted_lines {
-            if line.slot_policy == SlotPolicy::TailLocked && line.variant_id.is_some() {
-                variant_tail_items.insert(line.item_id.clone());
+            if line.slot_policy == SlotPolicy::TailLocked && line.subitem_id.is_some() {
+                subitem_tail_items.insert(line.item_id.clone());
             }
         }
 
         for item in items {
-            if item.variants.is_empty() {
+            if item.subitems.is_empty() {
                 item_states.insert(
                     (item.item_id.clone(), None),
                     ItemWorkingState::new(item.box_size),
                 );
             } else {
-                for variant in &item.variants {
-                    let box_size = if variant_tail_items.contains(&item.item_id) {
+                for subitem in &item.subitems {
+                    let box_size = if subitem_tail_items.contains(&item.item_id) {
                         Some(1)
                     } else {
-                        variant.capacity.or(item.box_size)
+                        subitem.capacity.or(item.box_size)
                     };
                     item_states.insert(
-                        (item.item_id.clone(), Some(variant.variant_id.clone())),
+                        (item.item_id.clone(), Some(subitem.subitem_id.clone())),
                         ItemWorkingState::new(box_size),
                     );
                 }
-                if needs_variantless.contains(&item.item_id) {
+                if needs_subitemless.contains(&item.item_id) {
                     item_states.insert(
                         (item.item_id.clone(), None),
                         ItemWorkingState::new(item.box_size),
@@ -102,10 +102,10 @@ impl AllocationEngine {
         self.apply_admin_constraints(&mut item_states, events);
 
         for line in &sorted_lines {
-            let key = (line.item_id.clone(), line.variant_id.clone());
+            let key = (line.item_id.clone(), line.subitem_id.clone());
             if let Some(state) = item_states.get_mut(&key) {
-                // §U8：变体包尾延后到 `resolve_tail_boxes`（需要跨变体共享列）。
-                if line.slot_policy == SlotPolicy::TailLocked && line.variant_id.is_some() {
+                // §U8：子项包尾延后到 `resolve_tail_boxes`（需要跨子项共享列）。
+                if line.slot_policy == SlotPolicy::TailLocked && line.subitem_id.is_some() {
                     continue;
                 }
                 let item = item_map.get(&line.item_id);
@@ -129,12 +129,12 @@ impl AllocationEngine {
             }
         }
 
-        // §U8：为变体包尾放置临时槽（列序不确定，由 `resolve_tail_boxes` 统一锁定/滑入）。
+        // §U8：为子项包尾放置临时槽（列序不确定，由 `resolve_tail_boxes` 统一锁定/滑入）。
         for line in &sorted_lines {
-            if line.slot_policy != SlotPolicy::TailLocked || line.variant_id.is_none() {
+            if line.slot_policy != SlotPolicy::TailLocked || line.subitem_id.is_none() {
                 continue;
             }
-            let key = (line.item_id.clone(), line.variant_id.clone());
+            let key = (line.item_id.clone(), line.subitem_id.clone());
             if let Some(state) = item_states.get_mut(&key) {
                 let box_idx = state.next_box_index();
                 let segment = format!("tail:{}:{}", line.user_id.0, line.claim_id.0);
@@ -147,7 +147,7 @@ impl AllocationEngine {
         let mut user_summaries_map: HashMap<UserId, Vec<UserItemAllocation>> = HashMap::new();
         let warnings = Vec::new();
 
-        for ((item_id, variant_id), state) in &item_states {
+        for ((item_id, subitem_id), state) in &item_states {
             let item = item_map.get(item_id);
             let item_name = item.map(|i| i.name.clone()).unwrap_or_default();
             let kind = item
@@ -212,7 +212,7 @@ impl AllocationEngine {
                 item_id: item_id.clone(),
                 item_name,
                 kind,
-                variant_id: variant_id.clone(),
+                subitem_id: subitem_id.clone(),
                 boxes,
                 singles: state.singles.clone(),
                 waiting: state.waiting.clone(),
@@ -224,7 +224,7 @@ impl AllocationEngine {
             let sb = item_map.get(&b.item_id).map(|i| i.sort_order).unwrap_or(0);
             sa.cmp(&sb)
                 .then_with(|| a.item_id.0.cmp(&b.item_id.0))
-                .then_with(|| a.variant_id.cmp(&b.variant_id))
+                .then_with(|| a.subitem_id.cmp(&b.subitem_id))
         });
 
         let mut user_summaries: Vec<UserAllocationSummary> = user_summaries_map

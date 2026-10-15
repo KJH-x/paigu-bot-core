@@ -36,8 +36,8 @@ pub struct ParsedClaimItem {
     pub notes: Option<String>,
     #[serde(default)]
     pub resolved_item_id: Option<String>,
-    #[serde(default)]
-    pub resolved_variant_id: Option<String>,
+    #[serde(default, alias = "resolved_variant_id")]
+    pub resolved_subitem_id: Option<String>,
     #[serde(default)]
     pub resolved_round_id: Option<String>,
 }
@@ -69,7 +69,7 @@ pub enum ParsedAdminCommand {
 pub struct ResolveResult {
     pub round_id: Option<crate::domain::ids::RoundId>,
     pub item_id: Option<crate::domain::ids::ItemId>,
-    pub variant_id: Option<String>,
+    pub subitem_id: Option<String>,
     pub candidates: Vec<(crate::domain::ids::RoundId, crate::domain::ids::ItemId, i32)>,
     pub resolved: bool,
     pub ambiguity: Option<String>,
@@ -80,7 +80,7 @@ impl ResolveResult {
         Self {
             round_id: None,
             item_id: None,
-            variant_id: None,
+            subitem_id: None,
             candidates: vec![],
             resolved: false,
             ambiguity: None,
@@ -94,22 +94,22 @@ impl ResolveResult {
         Self {
             round_id: Some(round_id),
             item_id: Some(item_id),
-            variant_id: None,
+            subitem_id: None,
             candidates: vec![],
             resolved: true,
             ambiguity: None,
         }
     }
 
-    pub fn resolved_variant(
+    pub fn resolved_subitem(
         round_id: crate::domain::ids::RoundId,
         item_id: crate::domain::ids::ItemId,
-        variant_id: String,
+        subitem_id: String,
     ) -> Self {
         Self {
             round_id: Some(round_id),
             item_id: Some(item_id),
-            variant_id: Some(variant_id),
+            subitem_id: Some(subitem_id),
             candidates: vec![],
             resolved: true,
             ambiguity: None,
@@ -123,7 +123,7 @@ impl ResolveResult {
         Self {
             round_id: None,
             item_id: None,
-            variant_id: None,
+            subitem_id: None,
             candidates,
             resolved: false,
             ambiguity: Some(msg),
@@ -178,7 +178,7 @@ mod tests {
                 slot_policy: None,
                 notes: None,
                 resolved_item_id: Some(item_id.to_string()),
-                resolved_variant_id: Some("v_jcl".to_string()),
+                resolved_subitem_id: Some("v_jcl".to_string()),
                 resolved_round_id: Some("r1".to_string()),
             }],
             cancel_target_hint: None,

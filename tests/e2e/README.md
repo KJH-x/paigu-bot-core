@@ -61,7 +61,7 @@ pwsh tests/e2e/run.ps1
 2. **常规排谷（HTTP 注入）**：`成员01`（预存）→ `排 通行证 结城理 1` → `Applied`，`pass_sp/v_jcl` 首格为 `成员01`。
 3. **非排谷忽略**：`今天天气不错` → `Ignored`。
 4. **时段拒绝**：非预存 `成员02` + 时间落在优先窗口内 → `Rejected`，原因指向「优先时段/预存」。
-5. **预存优先**：非预存 `成员02` 先排同一变体，再预存 `成员01` 排同一变体 → 该变体首格变为 `成员01`。
+5. **预存优先**：非预存 `成员02` 先排同一子项，再预存 `成员01` 排同一子项 → 该子项首格变为 `成员01`。
 6. **批量注入 `/api/sim/messages`**：裸数组（1 合法 + 1 缺 `timestamp` + 1 非测试群）与 `{messages:[…]}` 包装；校验 `summary` 计数与逐条 `Dropped` 原因（`missing_timestamp` / `not_test_group`）。
 7. **`scripts/sim-run --speed 0` 回放**：JSONL 经 WS 发送 → 统计 `Applied=2`，排位首格正确。
 8. **录制→重放一致**：`sim-record --record`（stdin 操作序列）写 `record.jsonl`，`--replay --speed 0` 重放，两次 `/api/display`（去掉 `claim_id` 等易变字段）结果一致。

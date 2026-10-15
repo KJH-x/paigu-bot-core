@@ -20,10 +20,10 @@ fn table(packages: Vec<Package>) -> OrderTable {
     OrderTable::new(packages)
 }
 
-fn pricing(item: &str, variant: Option<&str>, mode: PricingMode, value: i64) -> PricingEntry {
+fn pricing(item: &str, subitem: Option<&str>, mode: PricingMode, value: i64) -> PricingEntry {
     PricingEntry {
         item_id: item.to_string(),
-        variant_id: variant.map(|v| v.to_string()),
+        subitem_id: subitem.map(|v| v.to_string()),
         mode,
         value,
     }
@@ -83,15 +83,15 @@ fn pricing_set_final_overrides_base() {
 }
 
 #[test]
-fn pricing_matches_specific_variant_only() {
+fn pricing_matches_specific_subitem_only() {
     let mut cfg = SettlementConfig::default();
     cfg.pricing
         .push(pricing("a", Some("v1"), PricingMode::SetFinal, 500));
     let t = table(vec![pkg(
         "p1",
         vec![
-            line("a", 1, 1000).variant("v1"),
-            line("a", 1, 1000).variant("v2"),
+            line("a", 1, 1000).subitem("v1"),
+            line("a", 1, 1000).subitem("v2"),
         ],
     )]);
 
@@ -383,7 +383,7 @@ fn order_table_from_allocation_aggregates_by_user_and_claim() {
                 item_id: ItemId("a".to_string()),
                 item_name: "A".to_string(),
                 kind: "split".to_string(),
-                variant_id: Some("v1".to_string()),
+                subitem_id: Some("v1".to_string()),
                 boxes: vec![BoxAllocation {
                     box_index: 0,
                     slots: vec![
@@ -416,7 +416,7 @@ fn order_table_from_allocation_aggregates_by_user_and_claim() {
                 item_id: ItemId("g".to_string()),
                 item_name: "G".to_string(),
                 kind: "gift".to_string(),
-                variant_id: None,
+                subitem_id: None,
                 boxes: vec![],
                 singles: vec![SingleAllocation {
                     user_id: UserId("u1".to_string()),
@@ -434,12 +434,12 @@ fn order_table_from_allocation_aggregates_by_user_and_claim() {
     let prices = vec![
         UnitPrice {
             item_id: "a".to_string(),
-            variant_id: Some("v1".to_string()),
+            subitem_id: Some("v1".to_string()),
             unit_price_cents: 1000,
         },
         UnitPrice {
             item_id: "g".to_string(),
-            variant_id: None,
+            subitem_id: None,
             unit_price_cents: 500,
         },
     ];
@@ -474,7 +474,7 @@ fn alloc_snapshot(item: &str, qty: u32) -> AllocationSnapshot {
             item_id: ItemId(item.to_string()),
             item_name: item.to_string(),
             kind: "split".to_string(),
-            variant_id: Some("v1".to_string()),
+            subitem_id: Some("v1".to_string()),
             boxes: vec![],
             singles: vec![SingleAllocation {
                 user_id: UserId("u1".to_string()),
@@ -497,21 +497,21 @@ fn completeness_detects_missing_and_extra() {
     let ok = table(vec![pkg(
         "p1",
         vec![
-            line("a", 2, 100).variant("v1"),
-            line("a", 1, 100).variant("v1"),
+            line("a", 2, 100).subitem("v1"),
+            line("a", 1, 100).subitem("v1"),
         ],
     )]);
     let report = check_completeness(&ok, &snapshot);
     assert!(report.complete, "{report:?}");
 
-    let short = table(vec![pkg("p1", vec![line("a", 1, 100).variant("v1")])]);
+    let short = table(vec![pkg("p1", vec![line("a", 1, 100).subitem("v1")])]);
     let report = check_completeness(&short, &snapshot);
     assert!(!report.complete);
     assert_eq!(report.missing.len(), 1);
     assert_eq!(report.missing[0].expected, 3);
     assert_eq!(report.missing[0].actual, 1);
 
-    let over = table(vec![pkg("p1", vec![line("a", 5, 100).variant("v1")])]);
+    let over = table(vec![pkg("p1", vec![line("a", 5, 100).subitem("v1")])]);
     let report = check_completeness(&over, &snapshot);
     assert!(!report.complete);
     assert_eq!(report.extra.len(), 1);

@@ -14,7 +14,8 @@
   <script>
     window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
   </script>
-  <script defer src="./common.js"></script>
+  <script defer src="./vendor/pinyin-pro.js"></script>
+<script defer src="./common.js"></script>
   <script defer src="shell.js"></script>
   <script defer src="./manage.js"></script>
   <script defer src="./round.js"></script>
@@ -130,6 +131,7 @@
         </div>
         <div class="panel-body">
           <div id="kind-tabs" class="kind-tabs" style="margin-top:8px"></div>
+          <input id="item-filter" type="search" placeholder="筛选商品 / 别名 / 子项 / 拼音（全拼或首字母）" style="width:100%;margin:6px 0" />
           <div id="items" class="cat-list"></div>
           <div id="item-add-end" class="dashed add-end" role="button" tabindex="0">＋ 添加商品（选择种类后添加）</div>
         </div>

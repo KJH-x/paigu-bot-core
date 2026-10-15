@@ -1,6 +1,6 @@
 use super::*;
 use crate::domain::ids::{ClaimId, ItemId, RoundId, UserId};
-use crate::domain::item::{Item, ItemKind, ItemVariant};
+use crate::domain::item::{Item, ItemKind, ItemSubitem};
 
 fn split_item(item_id: &str, name: &str, box_size: u32) -> Item {
     Item {
@@ -16,14 +16,14 @@ fn split_item(item_id: &str, name: &str, box_size: u32) -> Item {
         aliases: vec![],
         sort_order: 0,
         metadata: serde_json::json!({}),
-        variants: vec![],
+        subitems: vec![],
     }
 }
 
 fn line(
     user: &str,
     item: &str,
-    variant: Option<&str>,
+    subitem: Option<&str>,
     quantity: u32,
     policy: SlotPolicy,
     sequence: i64,
@@ -33,7 +33,7 @@ fn line(
         line_index: 0,
         user_id: UserId(user.to_string()),
         item_id: ItemId(item.to_string()),
-        variant_id: variant.map(|v| v.to_string()),
+        subitem_id: subitem.map(|v| v.to_string()),
         quantity,
         claim_type: ClaimType::Split,
         slot_policy: policy,
@@ -45,19 +45,19 @@ fn line(
 }
 
 #[test]
-fn variants_are_allocated_independently() {
+fn subitems_are_allocated_independently() {
     let mut item = split_item("badge", "徽章", 2);
-    item.variants = vec![
-        ItemVariant {
-            variant_id: "v_a".to_string(),
-            name: "变体甲".to_string(),
+    item.subitems = vec![
+        ItemSubitem {
+            subitem_id: "v_a".to_string(),
+            name: "子项甲".to_string(),
             unit_price: MoneyCents(100),
             capacity: Some(2),
             aliases: vec![],
         },
-        ItemVariant {
-            variant_id: "v_b".to_string(),
-            name: "变体乙".to_string(),
+        ItemSubitem {
+            subitem_id: "v_b".to_string(),
+            name: "子项乙".to_string(),
             unit_price: MoneyCents(100),
             capacity: Some(2),
             aliases: vec![],
@@ -79,11 +79,11 @@ fn variants_are_allocated_independently() {
     assert_eq!(rows.len(), 2);
     let a = rows
         .iter()
-        .find(|r| r.variant_id.as_deref() == Some("v_a"))
+        .find(|r| r.subitem_id.as_deref() == Some("v_a"))
         .unwrap();
     let b = rows
         .iter()
-        .find(|r| r.variant_id.as_deref() == Some("v_b"))
+        .find(|r| r.subitem_id.as_deref() == Some("v_b"))
         .unwrap();
     assert_eq!(a.boxes.len(), 1);
     assert_eq!(b.boxes.len(), 1);
@@ -135,12 +135,12 @@ fn tail_claim_is_clamped_to_box_size() {
         .all(|s| s.user_id_str() == Some("u1")));
 }
 
-fn variant_item(item_id: &str, variants: &[&str]) -> Item {
+fn subitem_item(item_id: &str, subitems: &[&str]) -> Item {
     let mut item = split_item(item_id, "拼团盒", 1);
-    item.variants = variants
+    item.subitems = subitems
         .iter()
-        .map(|v| ItemVariant {
-            variant_id: v.to_string(),
+        .map(|v| ItemSubitem {
+            subitem_id: v.to_string(),
             name: v.to_string(),
             unit_price: MoneyCents(100),
             capacity: None,
@@ -150,10 +150,10 @@ fn variant_item(item_id: &str, variants: &[&str]) -> Item {
     item
 }
 
-fn filled_user(snap: &AllocationSnapshot, item: &str, variant: &str, col: u32) -> Option<String> {
+fn filled_user(snap: &AllocationSnapshot, item: &str, subitem: &str, col: u32) -> Option<String> {
     snap.item_allocations
         .iter()
-        .find(|i| i.item_id.0 == item && i.variant_id.as_deref() == Some(variant))
+        .find(|i| i.item_id.0 == item && i.subitem_id.as_deref() == Some(subitem))
         .and_then(|e| e.boxes.iter().find(|b| b.box_index == col))
         .and_then(|b| {
             b.slots
@@ -165,12 +165,12 @@ fn filled_user(snap: &AllocationSnapshot, item: &str, variant: &str, col: u32) -
 fn slot_at(
     snap: &AllocationSnapshot,
     item: &str,
-    variant: &str,
+    subitem: &str,
     col: u32,
 ) -> Option<SlotAllocation> {
     snap.item_allocations
         .iter()
-        .find(|i| i.item_id.0 == item && i.variant_id.as_deref() == Some(variant))
+        .find(|i| i.item_id.0 == item && i.subitem_id.as_deref() == Some(subitem))
         .and_then(|e| e.boxes.iter().find(|b| b.box_index == col))
         .and_then(|b| b.slots.first().cloned())
 }
@@ -178,8 +178,8 @@ fn slot_at(
 /// §U8 用户原例：A/B/C 各排 1/3/2 个；包尾请求「B + 包尾」⇒ 锁定盒列 4；
 /// 结算时列 2 的 C 认购人滑入列 4 的 C 槽；A 无未成团槽故列 4 空置；B 冲突不滑入。
 #[test]
-fn tail_locks_column_after_max_variant_claim_and_slides_non_conflicting() {
-    let item = variant_item("box", &["A", "B", "C"]);
+fn tail_locks_column_after_max_subitem_claim_and_slides_non_conflicting() {
+    let item = subitem_item("box", &["A", "B", "C"]);
     let lines = vec![
         line("a1", "box", Some("A"), 1, SlotPolicy::Normal, 1),
         line("b1", "box", Some("B"), 1, SlotPolicy::Normal, 2),
@@ -194,7 +194,7 @@ fn tail_locks_column_after_max_variant_claim_and_slides_non_conflicting() {
         .allocate(&[item], &lines, &[])
         .unwrap();
 
-    // 包尾人占锁定列 4 的申报变体 B。
+    // 包尾人占锁定列 4 的申报子项 B。
     assert_eq!(filled_user(&snap, "box", "B", 4).as_deref(), Some("tail"));
     assert_eq!(
         slot_at(&snap, "box", "B", 4).map(|s| s.slot_policy),
@@ -209,7 +209,7 @@ fn tail_locks_column_after_max_variant_claim_and_slides_non_conflicting() {
         slot_at(&snap, "box", "A", 4).map(|s| s.status),
         Some(SlotStatus::LockedEmpty)
     );
-    // B 属于申报变体集（冲突）→ 列 2/3 的 B 不滑入。
+    // B 属于申报子项集（冲突）→ 列 2/3 的 B 不滑入。
     assert_eq!(filled_user(&snap, "box", "B", 2).as_deref(), Some("b2"));
     assert_eq!(filled_user(&snap, "box", "B", 3).as_deref(), Some("b3"));
     // 列 1 已成盒（A/B/C），A 不被移动。
@@ -217,7 +217,7 @@ fn tail_locks_column_after_max_variant_claim_and_slides_non_conflicting() {
 
     // 幂等：同输入重复分配结果一致。
     let again = AllocationEngine::new()
-        .allocate(&[variant_item("box", &["A", "B", "C"])], &lines, &[])
+        .allocate(&[subitem_item("box", &["A", "B", "C"])], &lines, &[])
         .unwrap();
     assert_eq!(
         serde_json::to_value(&snap.item_allocations).unwrap(),
@@ -225,10 +225,10 @@ fn tail_locks_column_after_max_variant_claim_and_slides_non_conflicting() {
     );
 }
 
-/// ＄U8 冲突用例：未成盒列中的认购变体属于包尾申报集 ⇒ 不滑入。
+/// ＄U8 冲突用例：未成盒列中的认购子项属于包尾申报集 ⇒ 不滑入。
 #[test]
-fn tail_conflicting_variant_does_not_slide_in() {
-    let item = variant_item("box2", &["A", "B"]);
+fn tail_conflicting_subitem_does_not_slide_in() {
+    let item = subitem_item("box2", &["A", "B"]);
     let lines = vec![
         line("a1", "box2", Some("A"), 1, SlotPolicy::Normal, 1),
         line("b1", "box2", Some("B"), 1, SlotPolicy::Normal, 2),

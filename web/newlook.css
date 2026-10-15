@@ -605,7 +605,7 @@ label.field:has(> input[type="radio"]) > input {
 #mb-pull,
 input[type="number"] {
   max-width: 14ch;
-  font-variant-numeric: tabular-nums;
+  font-subitem-numeric: tabular-nums;
 }
 
 /* Settings is one aligned form rail instead of several cramped side-by-side cards. */
@@ -930,7 +930,7 @@ body[data-page="round"] #form > .panel {
 .pcell {
   width: 92px;
   max-width: 92px;
-  font-variant-numeric: tabular-nums;
+  font-subitem-numeric: tabular-nums;
 }
 
 .derived {
@@ -1072,7 +1072,7 @@ tbody tr:hover {
 .kpi strong {
   color: var(--nl-ink);
   font-size: 26px;
-  font-variant-numeric: tabular-nums;
+  font-subitem-numeric: tabular-nums;
 }
 
 .nav-grid {
@@ -1149,7 +1149,7 @@ code,
 pre,
 .seq,
 .amount {
-  font-variant-numeric: tabular-nums;
+  font-subitem-numeric: tabular-nums;
 }
 
 pre,

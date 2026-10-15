@@ -128,7 +128,7 @@
       pricing: Array.isArray(c.pricing) ? c.pricing.map(function (p) {
         return {
           item_id: p.item_id || '',
-          variant_id: p.variant_id != null ? p.variant_id : null,
+          subitem_id: p.subitem_id != null ? p.subitem_id : null,
           mode: p.mode === 'SetFinal' ? 'SetFinal' : 'AdjustBy',
           value: intOf(p.value, 0)
         };
@@ -183,9 +183,9 @@
       row.appendChild(inputEl('text', entry.item_id, 'item_id', function (v) {
         entry.item_id = v.trim(); scheduleEval();
       }, 'item-ids'));
-      row.appendChild(inputEl('text', entry.variant_id || '', 'variant_id(可空)', function (v) {
-        entry.variant_id = v.trim() ? v.trim() : null; scheduleEval();
-      }, 'variant-ids'));
+      row.appendChild(inputEl('text', entry.subitem_id || '', 'subitem_id(可空)', function (v) {
+        entry.subitem_id = v.trim() ? v.trim() : null; scheduleEval();
+      }, 'subitem-ids'));
       row.appendChild(selectEl([['AdjustBy', '原价加减'], ['SetFinal', '直设调后价']], entry.mode, function (v) {
         entry.mode = v; scheduleEval();
       }));
@@ -336,7 +336,7 @@
 
       var addWrap = el('div', 'pkg-add-line');
       addWrap.appendChild(buttonEl('＋ 加行', 'small', function () {
-        pkg.lines.push({ item_id: '', variant_id: null, qty: 1, unit_price_cents: 0, is_gift: false });
+        pkg.lines.push({ item_id: '', subitem_id: null, qty: 1, unit_price_cents: 0, is_gift: false });
         renderOrderTable();
         scheduleDraftSave();
       }));
@@ -397,13 +397,13 @@
     var itemOptions = state.catalog.map(function (item) { return [item.item_id, item.name || item.item_id]; });
     if (!itemOptions.some(function (option) { return option[0] === line.item_id; })) itemOptions.unshift([line.item_id, line.item_id]);
     row.appendChild(labelField(selectEl(itemOptions, line.item_id, function (v) {
-      line.item_id = v; line.variant_id = null; renderOrderTable(); scheduleEval();
+      line.item_id = v; line.subitem_id = null; renderOrderTable(); scheduleEval();
     }), '商品'));
     var item = state.catalog.find(function (entry) { return entry.item_id === line.item_id; });
-    var variantOptions = [['', '单领 / 无款式']].concat(((item && item.variants) || []).map(function (variant) { return [variant.variant_id, variant.name || variant.variant_id]; }));
-    if (line.variant_id && !variantOptions.some(function (option) { return option[0] === line.variant_id; })) variantOptions.push([line.variant_id, line.variant_id]);
-    row.appendChild(labelField(selectEl(variantOptions, line.variant_id || '', function (v) {
-      line.variant_id = v || null; scheduleEval();
+    var subitemOptions = [['', '单领 / 无款式']].concat(((item && item.subitems) || []).map(function (subitem) { return [subitem.subitem_id, subitem.name || subitem.subitem_id]; }));
+    if (line.subitem_id && !subitemOptions.some(function (option) { return option[0] === line.subitem_id; })) subitemOptions.push([line.subitem_id, line.subitem_id]);
+    row.appendChild(labelField(selectEl(subitemOptions, line.subitem_id || '', function (v) {
+      line.subitem_id = v || null; scheduleEval();
     }), '款式'));
 
     var qty = inputEl('number', line.qty, '数量', function (v) {
@@ -452,7 +452,7 @@
     for (var k = 0; k < target.lines.length; k++) {
       var l = target.lines[k];
       if (l.item_id === line.item_id
-        && (l.variant_id || null) === (line.variant_id || null)
+        && (l.subitem_id || null) === (line.subitem_id || null)
         && !!l.is_gift === !!line.is_gift
         && l.unit_price_cents === line.unit_price_cents) { found = l; break; }
     }
@@ -682,12 +682,12 @@
     if (!lines.length) { host.appendChild(el('div', 'empty', '无逐行明细')); return; }
     var tbl = document.createElement('table');
     tbl.className = 'gift-list-table';
-    tbl.innerHTML = '<thead><tr><th>下单包</th><th>item_id</th><th>variant</th><th>数量</th><th>标价(元)</th><th>标价合计(元)</th><th>减均(元)</th><th>减均后合计(元)</th><th>减均后单价(元)</th></tr></thead>';
+    tbl.innerHTML = '<thead><tr><th>下单包</th><th>item_id</th><th>subitem</th><th>数量</th><th>标价(元)</th><th>标价合计(元)</th><th>减均(元)</th><th>减均后合计(元)</th><th>减均后单价(元)</th></tr></thead>';
     var tbody = document.createElement('tbody');
     lines.forEach(function (l) {
       var tr = document.createElement('tr');
       [
-        l.package_id, l.item_id, l.variant_id || '—', String(l.qty),
+        l.package_id, l.item_id, l.subitem_id || '—', String(l.qty),
         money(l.unit_price_cents), money(l.total_cents), money(l.reduce_cents),
         money(l.final_total_cents), money(l.final_unit_cents)
       ].forEach(function (v, idx) {
@@ -782,11 +782,11 @@
 
   function loadSample() {
     state.catalog = state.catalog.filter(function (item) { return item.item_id !== 'item_a' && item.item_id !== 'item_b'; }).concat([
-      {item_id:'item_a',name:'示例商品 A',variants:[{variant_id:'v1',name:'款式一'},{variant_id:'v2',name:'款式二'}]},
-      {item_id:'item_b',name:'示例商品 B',variants:[]}
+      {item_id:'item_a',name:'示例商品 A',subitems:[{subitem_id:'v1',name:'款式一'},{subitem_id:'v2',name:'款式二'}]},
+      {item_id:'item_b',name:'示例商品 B',subitems:[]}
     ]);
     state.config = normalizeConfig({
-      pricing: [{ item_id: 'item_a', variant_id: null, mode: 'AdjustBy', value: 1000 }],
+      pricing: [{ item_id: 'item_a', subitem_id: null, mode: 'AdjustBy', value: 1000 }],
       discounts: [{ rule_id: 'd_whole', kind: 'WholeOrder', amount: 0, threshold: null, ratio_ppm: 100000, shares: -1 }],
       scope_mode: 'ExcludeGift',
       gift_tiers: [
@@ -798,9 +798,9 @@
     });
     state.table = {
       packages: [
-        { package_id: '示例用户01#p1', lines: [{ item_id: 'item_a', variant_id: 'v1', qty: 1, unit_price_cents: 50100, is_gift: false }] },
-        { package_id: '示例用户02#p2', lines: [{ item_id: 'item_a', variant_id: 'v2', qty: 1, unit_price_cents: 30000, is_gift: false }] },
-        { package_id: '示例用户03#p3', lines: [{ item_id: 'item_b', variant_id: null, qty: 2, unit_price_cents: 15000, is_gift: false }] }
+        { package_id: '示例用户01#p1', lines: [{ item_id: 'item_a', subitem_id: 'v1', qty: 1, unit_price_cents: 50100, is_gift: false }] },
+        { package_id: '示例用户02#p2', lines: [{ item_id: 'item_a', subitem_id: 'v2', qty: 1, unit_price_cents: 30000, is_gift: false }] },
+        { package_id: '示例用户03#p3', lines: [{ item_id: 'item_b', subitem_id: null, qty: 2, unit_price_cents: 15000, is_gift: false }] }
       ]
     };
     renderConfig();
@@ -847,7 +847,7 @@
       var items = (cfg && cfg.round && cfg.round.items) || [];
       state.catalog = items;
       var itemList = $('item-ids');
-      var varList = $('variant-ids');
+      var varList = $('subitem-ids');
       itemList.innerHTML = '';
       varList.innerHTML = '';
       items.forEach(function (it) {
@@ -855,9 +855,9 @@
         o.value = it.item_id;
         if (it.name) o.label = it.name;
         itemList.appendChild(o);
-        (it.variants || []).forEach(function (v) {
+        (it.subitems || []).forEach(function (v) {
           var ov = document.createElement('option');
-          ov.value = v.variant_id;
+          ov.value = v.subitem_id;
           if (v.name) ov.label = v.name;
           varList.appendChild(ov);
         });
@@ -909,7 +909,7 @@
     $('lock-order').addEventListener('click', lockOrder);
     $('unlock-order').addEventListener('click', unlockOrder);
     $('price-add').addEventListener('click', function () {
-      state.config.pricing.push({ item_id: '', variant_id: null, mode: $('price-mode-global').value, value: 0 });
+      state.config.pricing.push({ item_id: '', subitem_id: null, mode: $('price-mode-global').value, value: 0 });
       renderConfig();
     });
     $('disc-add').addEventListener('click', function () {

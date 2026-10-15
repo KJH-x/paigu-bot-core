@@ -14,7 +14,7 @@ fn single_item(item_id: &str, user: &str, claim: &str, price: i64) -> ItemAlloca
         item_id: ItemId(item_id.to_string()),
         item_name: item_id.to_string(),
         kind: "single".to_string(),
-        variant_id: None,
+        subitem_id: None,
         boxes: vec![],
         singles: vec![SingleAllocation {
             user_id: UserId(user.to_string()),
@@ -30,7 +30,7 @@ fn single_item(item_id: &str, user: &str, claim: &str, price: i64) -> ItemAlloca
 fn price(item_id: &str, cents: i64) -> UnitPrice {
     UnitPrice {
         item_id: item_id.to_string(),
-        variant_id: None,
+        subitem_id: None,
         unit_price_cents: cents,
     }
 }
@@ -294,7 +294,7 @@ fn box_slots_use_price_table() {
         item_id: ItemId("box_item".to_string()),
         item_name: "盒货".to_string(),
         kind: "split".to_string(),
-        variant_id: Some("v1".to_string()),
+        subitem_id: Some("v1".to_string()),
         boxes: vec![BoxAllocation {
             box_index: 0,
             slots: vec![SlotAllocation {
@@ -318,7 +318,7 @@ fn box_slots_use_price_table() {
         limits: limits(2, 100_000),
         prices: vec![UnitPrice {
             item_id: "box_item".to_string(),
-            variant_id: Some("v1".to_string()),
+            subitem_id: Some("v1".to_string()),
             unit_price_cents: 50_000,
         }],
     };
