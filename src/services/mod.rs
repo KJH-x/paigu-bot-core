@@ -6,6 +6,7 @@
 pub mod aliases;
 pub mod display;
 pub mod members;
+pub mod message_actions;
 pub mod messages;
 pub mod replay;
 pub mod rounds;

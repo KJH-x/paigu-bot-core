@@ -438,3 +438,22 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 `GET /api/replay/view` 是只读接口，返回 `{round_id,title,revision,version,items,messages,steps,board,who_whats,source:"active_round",message_count}`。每个步骤含 `{index,message_seq,board,who_whats}`，`board` 为该消息之后的完整 `AllocationSnapshot`。步骤使用当前管线已接受的领域事件前缀计算，不重新解析消息、不调用 LLM、不改配置/日志/实时排位；消息列表不包含 Drop。读取时轮次或配置发生变化返回错误，前端不混用跨轮次数据。
 
 复盘默认显示最新一步，并在工作流的轮次、配置版本、排位版本或消息数量变化时刷新。当前步成员汇总与所选步同步。接口失败/空轮次不回退占位示例；旧服务缺少该接口时，只读显示当前排位并明确提示逐步历史尚不可用。手动导入文件后停止自动跟随，点击“当前轮次 · 刷新”恢复。
+
+## 8.9 消息动作人工修订（2026-10-16，分批实施）
+
+第三批单条合同已接线、隔离回归通过：`POST /api/messages/:record_id/actions` 必需 `{transaction_id,round_id,config_revision,record_revision,selection}`，selection 为 `automatic/replace/ignore/reject`（均含 note，解释独立于原文）。replace 的 actions 包含 `{action_id,operation:"claim|cancel|modify",items:[{line_id,item_id,subitem_id,quantity,claim_type,slot_policy,is_proxy_card,notes}],target_claim_id?,target_item_id?,quantity?}`；claim/modify 用 items，cancel 的目标模式互斥。枚举种类/策略使用现有 PascalCase。拒绝额外字段、任意事件/身份/时间、无效数量/目录与越权目标。先准备/重算、单条同步追加版本化 ParseOverride 选择、再发布；同键重试不重复，跨轮/配置/记录过期/同键异内容拒绝，自动组仍拒绝半改。恢复自动缺少匹配基线时阻止，不重解析。未知人工载荷版本不回退旧动作，而为 NeedConfirm。
+
+GET actions 新增 `editable_selection/selection/catalog/cancel_targets/editable/can_restore_automatic`、原自动与当前的人类可读动作摘要；无 JSON 编辑要求。新手工页面只 POST actions，旧 override 暂保留兼容，按日志顺序择一但尚未统一提交实现。新单条保存不改原消息日志；`GET /api/messages` 叠加当前运行投影，版本与管理解释取当前值。详情使用不触发旧文件 ID 迁移的只读读取。以上不等于完整检查点/撤回或全局原子提交已实现。
+
+MP-1 核心接线已通过隔离回归，尚非完整工作流：消息日志增加可选 `processing.results[]`，保存理解来源、原解析/候选、权限判定前的稳定事件、原处理结果与原回复、分组成员指纹及入站手动阶段。新记录重算优先复用对应组的已存结果；旧记录没有产物时标历史基线缺失，不伪造迁移。已有产物却损坏、版本未知或组指纹不匹配则 NeedConfirm，不隐式重问模型或按新别名重解释。锁期间的拒绝消息形成分组边界，不能吞并锁前认购；未知旧历史阶段不自动补造。
+
+已实现的只读 `GET /api/messages/:record_id/actions?round_id=...` 返回 `message/config_revision/original_automatic/current_automatic/effective_source/effective_parsed/manual_note/automatic_group/current_outcome` 与 `automatic_missing/automatic_matches/automatic_history_count`。原自动为初次结果，当前自动为匹配真实执行组的最近结果；人工仍沿用受守卫的 ParseOverride 优先。此接口不写日志、不重算、不调用模型；不接受 seq 回退。实时/复盘消息附 `original_automatic` 摘要和 `manual_note`。已带产物的原文/身份/时间修改为 400，物理删除为 422；旧无产物维护入口仍保留。
+
+`PUT /api/config` 在同一轮次的业务输入变化后确定性重算（含优先名单/时段/阶段、目录、白名单、CN、合并），返回 `recomputed`，模型调用为零；重算失败响应明确 `config_saved:true`。文件热载、`config/reload`、直接 round setup 等旁路尚未统一，不宣称所有配置入口已经原子发布。完整动作句 UI、多记录事务/撤回及跨文件原子性仍属后续批次。
+
+请求与代码草案见 [专项计划 §15](./PLAN-message-reprocess-2026-10-15.md#15-详细实现契约与代码草案)。目标合同如下，不将未接线端点当可用接口：
+
+- MP-0（第一批已实现/隔离回归）：实时消息携带 `record_id/record_revision/round_id/seq`，与落盘同源。旧 `POST /api/messages/:record_id/override` 必须提供 `round_id/record_revision/parsed`；seq 路径不回退（404），跨轮/过期保存为 409，原自动多记录组暂返回 `auto_group_requires_transaction`（409）。新人工 ParseOverride 增 `target_record_id/target_record_revision`；重放按记录覆盖优先，旧 message_id 事件仍可读。seq 仅排序，不是身份。尚无跨文件崩溃原子提交、统一旧维护入口或独立消息游标，不能将本批当作完整新工作流。
+- MP-1…4（未整体完成）：GET/POST 单条 actions 已接线，含完整单条选择与解释；补充关联多记录提交、`POST .../actions/suggest` 显式代填、`POST /api/messages/undo` 最近事务逆转均尚未实现。提交带幂等键与轮次/配置/记录版本；原文不改，空选择有效，保存/重算/撤回 0 LLM。
+- MP-5（未完成）：独立 epoch/view_revision 通知旧行变化，消息/看板同代发布；不靠改 seq 或只数领域事件通知内容变化。
+- 排、撤分别处理、分别原位；甲排 A、没有再次加排 A 就撤 A，撤掉原认购而不自动合并。明确目标与数量条件不暗中扩大为撤所有历史单。

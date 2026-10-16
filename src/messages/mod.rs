@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub mod processing;
+
 fn default_record_revision() -> u64 {
     1
 }
@@ -35,6 +37,12 @@ pub struct MessageRecord {
     pub sender_user_id: Option<String>,
     #[serde(default)]
     pub sender_nickname: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "processing::deserialize_history",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub processing: Option<processing::ProcessingHistory>,
 }
 
 pub const DEFAULT_MESSAGES_DIR: &str = "data/messages";
@@ -110,10 +118,15 @@ impl JsonlMessageStore {
 
     pub(crate) async fn read_all(&self) -> anyhow::Result<Vec<MessageRecord>> {
         let _guard = Self::lock();
-        self.read_all_locked()
+        self.read_all_locked(true)
     }
 
-    fn read_all_locked(&self) -> anyhow::Result<Vec<MessageRecord>> {
+    pub(crate) async fn read_only(&self) -> anyhow::Result<Vec<MessageRecord>> {
+        let _guard = Self::lock();
+        self.read_all_locked(false)
+    }
+
+    fn read_all_locked(&self, persist_migration: bool) -> anyhow::Result<Vec<MessageRecord>> {
         if !self.path.exists() {
             return Ok(Vec::new());
         }
@@ -158,7 +171,7 @@ impl JsonlMessageStore {
         if skipped > 0 {
             tracing::warn!(path = %self.path.display(), skipped, "消息日志存在无法解析的行，已跳过");
         }
-        if migrated {
+        if migrated && persist_migration {
             let backup = self.path.with_extension("jsonl.pre-record-id.bak");
             if !backup.exists() {
                 std::fs::copy(&self.path, &backup)?;
@@ -204,7 +217,7 @@ impl JsonlMessageStore {
         F: FnMut(&mut MessageRecord) + Send,
     {
         let _guard = Self::lock();
-        let mut recs = self.read_all_locked()?;
+        let mut recs = self.read_all_locked(true)?;
         let mut updated = None;
         for rec in recs.iter_mut() {
             if rec.record_id == record_id {
@@ -222,7 +235,7 @@ impl JsonlMessageStore {
     /// 删除单条（按不可变 `record_id`），返回是否命中。
     async fn delete(&self, record_id: &str) -> anyhow::Result<bool> {
         let _guard = Self::lock();
-        let recs = self.read_all_locked()?;
+        let recs = self.read_all_locked(true)?;
         let before = recs.len();
         let kept: Vec<MessageRecord> = recs
             .into_iter()
@@ -296,6 +309,10 @@ impl MessageLog {
         self.store_for(round_id).read_all().await
     }
 
+    pub async fn read_only(&self, round_id: &str) -> anyhow::Result<Vec<MessageRecord>> {
+        self.store_for(round_id).read_only().await
+    }
+
     pub async fn replace_all(&self, round_id: &str, recs: &[MessageRecord]) -> anyhow::Result<()> {
         self.store_for(round_id).replace_all(recs).await
     }
@@ -360,6 +377,44 @@ impl MessageLog {
             .append(true)
             .open(&path)?;
         writeln!(file, "{line}")?;
+        Ok(())
+    }
+
+    /// 管理选择在单条同步日志提交后发布；写失败恢复原长度，截断尾禁止追加。
+    pub async fn append_durable_event(
+        &self,
+        round_id: &str,
+        ev: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        let path = self.event_path_for(round_id);
+        let _guard = JsonlMessageStore::lock();
+        JsonlMessageStore::ensure_parent(&path)?;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(path)?;
+        let length = file.metadata()?.len();
+        if length > 0 {
+            file.seek(SeekFrom::End(-1))?;
+            let mut last = [0];
+            file.read_exact(&mut last)?;
+            anyhow::ensure!(
+                last[0] == b'\n',
+                "事件日志末尾不完整，未提交修订；请先检查本地存储"
+            );
+        }
+        let mut line = serde_json::to_vec(ev)?;
+        line.push(b'\n');
+        if let Err(error) = file.write_all(&line).and_then(|_| file.sync_data()) {
+            file.set_len(length)
+                .and_then(|_| file.sync_data())
+                .map_err(|rollback| {
+                    anyhow::anyhow!("提交失败且日志尾恢复失败：{error}；{rollback}")
+                })?;
+            return Err(error.into());
+        }
         Ok(())
     }
 

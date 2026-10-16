@@ -235,6 +235,7 @@ pub fn to_message_record(
     crate::messages::MessageRecord {
         record_id: crate::messages::new_record_id(),
         record_revision: 1,
+        processing: None,
         seq: crate::messages::next_seq(),
         group_id: group_id_string(ev).unwrap_or_default(),
         user_id: id.user_id,

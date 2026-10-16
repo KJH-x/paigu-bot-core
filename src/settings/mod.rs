@@ -477,11 +477,7 @@ fn load_member_name_map(path: &str) -> HashMap<String, String> {
             .get("nickname")
             .and_then(value_to_str)
             .unwrap_or_default();
-        let raw = if !card.trim().is_empty() {
-            card
-        } else {
-            nick
-        };
+        let raw = if !card.trim().is_empty() { card } else { nick };
         // 统一昵称来源=群名片；此处做同样清洗（截首个括号/空白 + NFKC + 尾标点）。
         let (name, _display) = crate::parser::normalize::clean_nickname(&raw);
         if !name.trim().is_empty() {
@@ -652,6 +648,11 @@ impl ConfigStore {
 
     pub async fn get(&self) -> AppConfig {
         self.inner.read().await.clone()
+    }
+
+    /// Hold a stable active round/config while committing a guarded manual message edit.
+    pub(crate) async fn read(&self) -> tokio::sync::RwLockReadGuard<'_, AppConfig> {
+        self.inner.read().await
     }
 
     pub async fn put(&self, mut cfg: AppConfig, expected: u64) -> Result<u64, ConfigError> {

@@ -40,6 +40,7 @@ fn record(seq: i64, user_id: &str, text: &str, ts: i64) -> MessageRecord {
     MessageRecord {
         record_id: format!("record-{seq}-{user_id}"),
         record_revision: 1,
+        processing: None,
         seq,
         group_id: "123456789".to_string(),
         user_id: user_id.to_string(),
@@ -64,6 +65,54 @@ fn slot_user(board: &AllocationSnapshot, box_index: u32, slot_index: u32) -> Opt
         .and_then(|ia| ia.boxes.iter().find(|b| b.box_index == box_index))
         .and_then(|b| b.slots.iter().find(|s| s.slot_index == slot_index))
         .and_then(|s| s.user_id.as_ref().map(|u| u.0.clone()))
+}
+
+/// H-8: a cancellation is its own operation, independent of adjacency/chatter.
+#[tokio::test]
+async fn claim_then_cancel_never_merge_and_keep_other_users_and_products() {
+    for merge_enabled in [false, true] {
+        for adjacent in [true, false] {
+            let mut cfg = test_config();
+            cfg.merge.enabled = merge_enabled;
+            cfg.merge.same_sender = true;
+            let mut stand = cfg.round.items[0].clone();
+            stand.item_id = "stand".to_string();
+            stand.name = "立牌".to_string();
+            stand.aliases = vec!["立牌".to_string()];
+            cfg.round.items.push(stand);
+            let mut records = vec![record(1, "u1", "排 徽章 甲 1", 1_000)];
+            if !adjacent {
+                records.extend([
+                    record(2, "u2", "排 徽章 甲 1", 2_000),
+                    record(3, "u1", "排 立牌 甲 1", 3_000),
+                    record(4, "u1", "谢谢", 4_000),
+                ]);
+            }
+            records.push(record(5, "u1", "撤 徽章", 900_000));
+            let result = replay_messages(&cfg, &records, ReplayOverrides::default())
+                .await
+                .unwrap();
+            assert!(result.outcomes.iter().all(|o| o.status != "Merged"));
+            assert_eq!(result.outcomes.last().unwrap().status, "Applied");
+            let quantities: Vec<_> = result
+                .board
+                .user_summaries
+                .iter()
+                .flat_map(|u| {
+                    u.items
+                        .iter()
+                        .map(move |i| (u.user_id.0.as_str(), i.item_id.0.as_str(), i.quantity))
+                })
+                .collect();
+            assert!(!quantities
+                .iter()
+                .any(|&(u, i, _)| u == "u1" && i == "badge"));
+            if !adjacent {
+                assert!(quantities.contains(&("u2", "badge", 1)));
+                assert!(quantities.contains(&("u1", "stand", 1)));
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -451,6 +500,7 @@ async fn realtime_and_replay_whitelist_decisions_match() {
         MessageRecord {
             record_id: "record-2-u2".to_string(),
             record_revision: 1,
+            processing: None,
             seq: 2,
             group_id: "123456789".to_string(),
             user_id: "u2".to_string(),

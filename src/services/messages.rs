@@ -45,6 +45,7 @@ pub fn message_view(rec: &MessageRecord) -> Value {
         "routed": rec.routed,
         "status": rec.status,
         "detail": rec.detail,
+        "original_automatic":crate::messages::processing::original_summary(rec),
     })
 }
 
@@ -64,7 +65,29 @@ pub async fn list_messages(
     let limit = limit.unwrap_or(500).clamp(1, 5000);
     let filtered: Vec<&MessageRecord> = records.iter().filter(|r| r.seq > since).collect();
     let total = filtered.len();
-    let page: Vec<Value> = filtered.into_iter().take(limit).map(message_view).collect();
+    let live = state.pipeline.messages_since(0).await;
+    let page: Vec<Value> = filtered
+        .into_iter()
+        .take(limit)
+        .map(|record| {
+            let mut view = message_view(record);
+            if let Some(current) = live
+                .iter()
+                .find(|m| m["record_id"] == record.record_id && m["round_id"] == cfg.round.round_id)
+            {
+                for key in [
+                    "record_revision",
+                    "status",
+                    "detail",
+                    "manual_note",
+                    "round_id",
+                ] {
+                    view[key] = current[key].clone();
+                }
+            }
+            view
+        })
+        .collect();
     let returned = page.len();
     let (version, _) = state.pipeline.board().await;
 
@@ -76,6 +99,10 @@ pub async fn list_messages(
         "since": since,
         "limit": limit,
     }))
+}
+
+pub async fn actions(state: &ApiState, key: &str, round_id: &str) -> Result<Value, ServiceError> {
+    super::message_actions::read(state, key, round_id).await
 }
 
 #[derive(Deserialize)]
@@ -120,6 +147,7 @@ pub async fn create_message(state: &ApiState, body: CreateInput) -> Result<Value
     let rec = MessageRecord {
         record_id: new_record_id(),
         record_revision: 1,
+        processing: None,
         seq: next_seq(),
         group_id: body
             .group_id
@@ -193,6 +221,14 @@ pub async fn update_message(
     let record_id = resolve_key(state, &cfg.round.round_id, key).await?;
 
     let mut updated: Option<MessageRecord> = None;
+    if crate::replay::session::load_parse_overrides(&state.messages, &cfg.round.round_id)
+        .await
+        .has_record(&record_id)
+    {
+        return Err(ServiceError::BadRequest(
+            "已人工修订的消息须保留原文、身份与时间，请编辑动作".into(),
+        ));
+    }
     let mut invalid: Option<String> = None;
     let mut conflict: Option<MessageRecord> = None;
     let stored = state
@@ -222,6 +258,14 @@ pub async fn update_message(
             }
             if let Some(v) = &body.group_id {
                 candidate.group_id = v.clone();
+            }
+            if target.processing.is_some()
+                && crate::messages::processing::ProcessingMember::from_record(target)
+                    != crate::messages::processing::ProcessingMember::from_record(&candidate)
+            {
+                invalid =
+                    Some("已自动处理的消息须保留原文、身份和时间；请使用动作修订".to_string());
+                return;
             }
             match validate_record(&candidate) {
                 Ok(()) => {
@@ -279,6 +323,15 @@ pub async fn delete_message(
     let cfg = state.cfg.get().await;
     let record_id = resolve_key(state, &cfg.round.round_id, key).await?;
     let current = find_record(state, &cfg.round.round_id, &record_id).await?;
+    if current.processing.is_some()
+        || crate::replay::session::load_parse_overrides(&state.messages, &cfg.round.round_id)
+            .await
+            .has_record(&record_id)
+    {
+        return Err(ServiceError::Unprocessable(
+            "已自动处理的消息不能删除；请使用人工忽略/拒绝保留原始记录".to_string(),
+        ));
+    }
     if let Some(expected) = record_revision {
         if expected != current.record_revision {
             return Err(ServiceError::Conflict(json!({
@@ -400,6 +453,8 @@ async fn find_record(
 
 #[derive(Deserialize)]
 pub struct OverrideInput {
+    pub round_id: String,
+    pub record_revision: u64,
     #[serde(default)]
     pub reason: Option<String>,
     pub parsed: crate::parser::parsed_event::ParsedMessage,
@@ -411,18 +466,93 @@ pub async fn override_message(
     key: &str,
     body: OverrideInput,
 ) -> Result<Value, ServiceError> {
-    if crate::services::settlement::is_locked(state).await? {
+    let _serial = state.pipeline.message_write_guard().await;
+    // Keep the active round/config fixed until this manual write has been recomputed.
+    let cfg = state.cfg.read().await;
+    if cfg.round.round_id != body.round_id {
+        return Err(ServiceError::Conflict(
+            json!({"error":"round_changed", "round_id":cfg.round.round_id}),
+        ));
+    }
+    if crate::services::settlement::round_locked(&cfg.round.round_id)?
+        || state.pipeline.is_locked().await
+    {
         return Err(ServiceError::Locked("轮次已锁定，不能修改解析".to_string()));
     }
-    let cfg = state.cfg.get().await;
-    let record_id = resolve_key(state, &cfg.round.round_id, key).await?;
-    let current = find_record(state, &cfg.round.round_id, &record_id).await?;
+    // No numeric/seq fallback for this administrative write.
+    let record_id = key.to_string();
+    let mut current = find_record(state, &cfg.round.round_id, &record_id).await?;
+    let raw = state
+        .messages
+        .read_raw_events(&cfg.round.round_id, 0)
+        .await
+        .map_err(ServiceError::from)?;
+    let events: Vec<crate::domain::event::EventEnvelope> = raw
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect();
+    let overrides = crate::parser::parsed_event::collect_parse_overrides(&events);
+    current.record_revision = overrides.record_revision(&record_id, current.record_revision);
+    if current.record_revision != body.record_revision {
+        return Err(ServiceError::Conflict(
+            json!({"error":"stale_record_revision", "message":message_view(&current)}),
+        ));
+    }
+    if matches!(
+        body.parsed.intent,
+        crate::parser::parsed_event::ParsedIntent::AdminCommand
+    ) || body.parsed.admin_command.is_some()
+        || body
+            .parsed
+            .items
+            .iter()
+            .any(|item| item.quantity == 0 || item.quantity > 99)
+    {
+        return Err(ServiceError::BadRequest(
+            "修订只能包含排谷动作，数量应为 1–99 的整数".to_string(),
+        ));
+    }
+    // Until MP-3 provides a multi-record transaction, never partially detach an automatic group.
+    if cfg.merge.enabled && cfg.merge.same_sender {
+        let mut records = state
+            .messages
+            .read_all(&cfg.round.round_id)
+            .await
+            .map_err(ServiceError::from)?;
+        records.sort_by_key(|r| (r.timestamp_ms, r.seq));
+        let candidates: Vec<_> = records
+            .iter()
+            .map(|r| crate::parser::coalesce::Candidate {
+                user_id: &r.user_id,
+                text: &r.text,
+                is_admin: r.is_admin,
+                force_boundary: !r.routed.eq_ignore_ascii_case("message")
+                    || overrides.has_record(&r.record_id),
+            })
+            .collect();
+        let groups = crate::parser::coalesce::group_candidates(&candidates, &cfg.round.to_items());
+        if groups
+            .iter()
+            .any(|g| g.len() > 1 && g.iter().any(|&i| records[i].record_id == record_id))
+        {
+            return Err(ServiceError::Conflict(
+                json!({"error":"auto_group_requires_transaction", "message":"此消息属于自动合并组；完整组修订尚未接线，未修改任何记录"}),
+            ));
+        }
+    }
     let reason = body.reason.unwrap_or_else(|| "人工确认".to_string());
     state
         .pipeline
-        .apply_parse_override(&current, &body.parsed, &reason)
-        .await;
-    let result = replay::recompute(state).await.map_err(ServiceError::from)?;
+        .apply_parse_override(&cfg, &current, &body.parsed, &reason)
+        .await
+        .map_err(ServiceError::from)?;
+    let computed = state
+        .pipeline
+        .recompute_locked(&cfg)
+        .await
+        .map_err(ServiceError::from)?;
+    replay::remember_replay(&computed);
+    let result = replay::replay_result_json(&computed);
     let message = find_record(state, &cfg.round.round_id, &record_id).await?;
     Ok(json!({
         "ok": true,
@@ -438,6 +568,7 @@ mod tests {
         MessageRecord {
             record_id: "record-7".to_string(),
             record_revision: 1,
+            processing: None,
             seq: 7,
             group_id: "123456789".to_string(),
             user_id: "u1".to_string(),

@@ -285,6 +285,7 @@ label.field input, label.field select { width: 100%; }
   border-color: var(--accent);
   color: #fff;
 }
+.new-content[hidden] { display: none; }
 
 .who-whats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .who-whats th, .who-whats td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }

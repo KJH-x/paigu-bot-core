@@ -131,29 +131,139 @@ impl ResolveResult {
     }
 }
 
-/// §U7：从事件流收集 `ParseOverride` → `target_raw_message_id → 修正后的解析`。
-/// 重放/校验时按 `message_id` 直接采用覆盖结果（存在性优先于重新解析）。
-pub fn collect_parse_overrides(events: &[EventEnvelope]) -> HashMap<String, ParsedMessage> {
-    let mut map = HashMap::new();
+#[derive(Clone, Default)]
+pub struct ParseOverrides {
+    messages: HashMap<String, ParsedMessage>,
+    records: HashMap<String, (ParsedMessage, u64, String)>,
+    selections: HashMap<String, (super::action_override::SavedSelection, u64)>,
+    invalid_selections: HashMap<String, u64>,
+}
+
+impl ParseOverrides {
+    pub fn record_revision(&self, record_id: &str, stored_revision: u64) -> u64 {
+        let revision = self
+            .records
+            .get(record_id)
+            .map_or(stored_revision, |(_, revision, _)| {
+                stored_revision.max(*revision)
+            });
+        let revision = self
+            .selections
+            .get(record_id)
+            .map_or(revision, |(_, v)| revision.max(*v));
+        self.invalid_selections
+            .get(record_id)
+            .map_or(revision, |v| revision.max(*v))
+    }
+
+    pub fn has_record(&self, record_id: &str) -> bool {
+        self.records.contains_key(record_id)
+            || self.selections.contains_key(record_id)
+            || self.invalid_selections.contains_key(record_id)
+    }
+
+    pub fn for_record(&self, record_id: &str) -> Option<&ParsedMessage> {
+        self.records.get(record_id).map(|(parsed, _, _)| parsed)
+    }
+
+    pub fn reason_for_record(&self, record_id: &str) -> Option<&str> {
+        if let Some((saved, _)) = self.selections.get(record_id) {
+            return Some(saved.selection.note());
+        }
+        self.records
+            .get(record_id)
+            .map(|(_, _, reason)| reason.as_str())
+    }
+
+    pub fn selection_for_record(
+        &self,
+        record_id: &str,
+    ) -> Option<&super::action_override::SavedSelection> {
+        self.selections.get(record_id).map(|(saved, _)| saved)
+    }
+
+    pub fn invalid_selection(&self, record_id: &str) -> bool {
+        self.invalid_selections.contains_key(record_id)
+    }
+
+    pub fn insert_selection(
+        &mut self,
+        record_id: String,
+        saved: super::action_override::SavedSelection,
+        revision: u64,
+    ) {
+        self.records.remove(&record_id);
+        self.invalid_selections.remove(&record_id);
+        self.selections.insert(record_id, (saved, revision));
+    }
+}
+
+/// Record-bound manual choices cannot leak onto duplicate upstream message ids.
+/// Legacy/automatic message-bound overrides remain readable without pretending to know their source.
+pub fn collect_parse_overrides(events: &[EventEnvelope]) -> ParseOverrides {
+    let mut map = ParseOverrides::default();
     for ev in events {
         if let DomainEvent::ParseOverride(over) = &ev.payload {
+            if let Some(record_id) = &over.target_record_id {
+                if let Ok(saved) = serde_json::from_value::<super::action_override::SavedSelection>(
+                    over.corrected_parsed_message.clone(),
+                ) {
+                    if saved.action_selection_version == 1 {
+                        map.insert_selection(
+                            record_id.clone(),
+                            saved,
+                            over.target_record_revision.unwrap_or(1),
+                        );
+                        continue;
+                    }
+                }
+                if over
+                    .corrected_parsed_message
+                    .get("action_selection_version")
+                    .is_some()
+                {
+                    map.records.remove(record_id);
+                    map.selections.remove(record_id);
+                    map.invalid_selections
+                        .insert(record_id.clone(), over.target_record_revision.unwrap_or(1));
+                    continue;
+                }
+            }
             if let Ok(corrected) =
                 serde_json::from_value::<ParsedMessage>(over.corrected_parsed_message.clone())
             {
-                map.insert(over.target_raw_message_id.clone(), corrected);
+                if let Some(record_id) = &over.target_record_id {
+                    map.selections.remove(record_id);
+                    map.invalid_selections.remove(record_id);
+                    map.records.insert(
+                        record_id.clone(),
+                        (
+                            corrected,
+                            over.target_record_revision.unwrap_or(1),
+                            over.reason.clone(),
+                        ),
+                    );
+                } else {
+                    map.messages
+                        .insert(over.target_raw_message_id.clone(), corrected);
+                }
             }
         }
     }
     map
 }
 
-/// 应用覆盖：命中 `message_id` 时直接返回覆盖结果，否则原样返回。
+/// 稳定记录覆盖优先；未命中时才读取旧 message_id 覆盖，空结果也不回退。
 pub fn apply_parse_override(
     parsed: ParsedMessage,
+    record_id: &str,
     raw_message_id: Option<&str>,
-    overrides: &HashMap<String, ParsedMessage>,
+    overrides: &ParseOverrides,
 ) -> ParsedMessage {
-    match raw_message_id.and_then(|id| overrides.get(id)) {
+    if let Some((corrected, _, _)) = overrides.records.get(record_id) {
+        return corrected.clone();
+    }
+    match raw_message_id.and_then(|id| overrides.messages.get(id)) {
         Some(corrected) => corrected.clone(),
         None => parsed,
     }
@@ -203,6 +313,8 @@ mod tests {
                 event_id: EventId("ov1".to_string()),
                 round_id: RoundId("r1".to_string()),
                 target_raw_message_id: message_id.to_string(),
+                target_record_id: None,
+                target_record_revision: None,
                 corrected_parsed_message: serde_json::to_value(corrected).unwrap(),
                 admin_user_id: UserId("u1".to_string()),
                 reason: "first-match".to_string(),
@@ -217,17 +329,21 @@ mod tests {
         let corrected = parsed_with("结城理", "pass_sp");
         let events = vec![override_event("m1", &corrected)];
         let overrides = collect_parse_overrides(&events);
-        assert!(overrides.contains_key("m1"));
+        assert!(overrides.messages.contains_key("m1"));
 
         let fallback = parsed_with("悠人", "hr_resume");
-        let applied = apply_parse_override(fallback, Some("m1"), &overrides);
+        let applied = apply_parse_override(fallback, "record-a", Some("m1"), &overrides);
         assert_eq!(
             applied.items[0].resolved_item_id.as_deref(),
             Some("pass_sp")
         );
 
-        let untouched =
-            apply_parse_override(parsed_with("悠人", "hr_resume"), Some("m2"), &overrides);
+        let untouched = apply_parse_override(
+            parsed_with("悠人", "hr_resume"),
+            "record-b",
+            Some("m2"),
+            &overrides,
+        );
         assert_eq!(
             untouched.items[0].resolved_item_id.as_deref(),
             Some("hr_resume")

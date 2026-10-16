@@ -3,7 +3,6 @@ use serde_json::Value;
 
 use crate::bus::{IncomingEvent, PipelineOutcome};
 use crate::domain::claim::{Eligibility, EligibilityScope};
-use crate::domain::event::{DomainEvent, EventEnvelope};
 use crate::domain::ids::{EligibilityId, RoundId, UserId};
 
 use super::state::MessageRecord;
@@ -13,6 +12,7 @@ impl Pipeline {
     /// 管理员斜杠命令**落地执行**（D-1，仅在 `gateway.admin_commands_enabled` 开启时调用）。
     pub(super) async fn run_admin_command(
         &self,
+        round_id: &str,
         ev: &IncomingEvent,
         display: &str,
         seq: i64,
@@ -63,17 +63,17 @@ impl Pipeline {
             ),
         };
 
-        self.persist(ev, status, &detail, "admin").await;
+        let record = match self
+            .persist(round_id, ev, seq, status, &detail, "admin")
+            .await
+        {
+            Ok(record) => record,
+            Err(error) => return self.persistence_failure(ev, false, error).await,
+        };
         let (version, snapshot_value) = {
             let mut st = self.state.lock().await;
-            st.messages.push(MessageRecord {
-                seq,
-                user_id: ev.user_id.clone(),
-                display: display.to_string(),
-                text: ev.text.clone(),
-                status: status.to_string(),
-                detail: detail.clone(),
-            });
+            st.messages
+                .push(MessageRecord::from_log(&record, round_id, display));
             (
                 st.version,
                 st.snapshot
@@ -90,34 +90,6 @@ impl Pipeline {
             version,
             snapshot: Some(snapshot_value),
         }
-    }
-}
-
-pub(super) fn cancel_for_modify(
-    round_id: &RoundId,
-    ev: &IncomingEvent,
-    seq: i64,
-    now: DateTime<Utc>,
-    item_id: crate::domain::ids::ItemId,
-) -> EventEnvelope {
-    EventEnvelope {
-        event_id: crate::domain::ids::EventId(uuid::Uuid::new_v4().to_string()),
-        round_id: round_id.clone(),
-        group_id: ev.group_id.clone(),
-        user_id: UserId(ev.user_id.clone()),
-        raw_message_id: Some(ev.message_id.clone()),
-        event_type: "claim_cancelled".to_string(),
-        effective_at: now,
-        sequence: seq,
-        payload: DomainEvent::ClaimCancelled(crate::domain::event::ClaimCancelled {
-            target_claim_id: None,
-            target_item_id: Some(item_id),
-            quantity: None,
-            reason: Some("改单".to_string()),
-            parse_trace: None,
-            validation_trace: vec![],
-        }),
-        status: crate::domain::event::EventStatus::Active,
     }
 }
 

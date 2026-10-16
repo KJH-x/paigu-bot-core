@@ -64,6 +64,55 @@ fn base_config() -> AppConfig {
 }
 
 #[tokio::test]
+async fn llm_actions_survive_recompute_without_reinterpreting_original_text() {
+    let mut cfg = base_config();
+    cfg.round.phases.clear();
+    let reply = r#"{"intent":"claim","items":[{"item":"通行证","subitem":"结城理","quantity":2,"claim_type":"split"}],"confidence":0.95,"ambiguous_parts":[]}"#;
+    let pipeline = test_pipeline(&cfg, MockClient::ok(reply));
+    let outcome = pipeline
+        .process(event("u1", "成员01", "帮我留两份", 1000))
+        .await;
+    assert_eq!(outcome.status, "Applied");
+    let records = pipeline
+        .messages
+        .read_all(&cfg.round.round_id)
+        .await
+        .unwrap();
+    let history = records[0]
+        .processing
+        .as_ref()
+        .expect("all automatic understanding must be persisted");
+    assert_eq!(
+        history.results[0].understanding.source,
+        crate::messages::processing::UnderstandingSource::Llm
+    );
+    assert_eq!(history.results[0].understanding.events.len(), 1);
+    let before = pipeline.board().await.1;
+    // Prove that replay is independent of the current parser/model.
+    let replay = pipeline.recompute().await.unwrap();
+    assert_eq!(
+        canonical_allocations(before),
+        canonical_allocations(serde_json::to_value(replay.board).unwrap())
+    );
+    let after = pipeline
+        .messages
+        .read_all(&cfg.round.round_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&records[0].processing).unwrap(),
+        serde_json::to_value(&after[0].processing).unwrap()
+    );
+}
+
+fn canonical_allocations(mut board: Value) -> Value {
+    if let Some(object) = board.as_object_mut() {
+        object.remove("generated_at");
+    }
+    board
+}
+
+#[tokio::test]
 async fn active_replay_view_uses_recorded_steps_without_mutating_live_state() {
     let mut cfg = base_config();
     cfg.llm.enabled = false;
@@ -125,6 +174,327 @@ fn test_pipeline_with_dir(cfg: &AppConfig, llm: Arc<dyn LlmClient>) -> (Arc<Pipe
 
 fn test_pipeline(cfg: &AppConfig, llm: Arc<dyn LlmClient>) -> Arc<Pipeline> {
     test_pipeline_with_dir(cfg, llm).0
+}
+
+fn api_state(pipeline: Arc<Pipeline>) -> crate::api::ApiState {
+    crate::api::ApiState {
+        cfg: pipeline.cfg.clone(),
+        gateway: crate::gateway::Gateway::new(pipeline.cfg.clone(), pipeline.clone()),
+        messages: pipeline.messages(),
+        pipeline,
+    }
+}
+
+fn override_body(
+    round_id: &str,
+    revision: u64,
+    quantity: u32,
+) -> crate::services::messages::OverrideInput {
+    serde_json::from_value(serde_json::json!({
+        "round_id": round_id, "record_revision": revision,
+        "parsed": {
+            "intent":"Claim", "round_hint":null,
+            "items":[{"name":"通行证 结城理", "quantity":quantity}],
+            "cancel_target_hint":null, "admin_command":null,
+            "confidence":1.0, "ambiguous_parts":[]
+        }
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn override_guards_round_revision_and_exact_record_identity() {
+    use crate::services::{messages::override_message, ServiceError};
+    let mut cfg = base_config();
+    cfg.llm.enabled = false;
+    cfg.round.phases.clear();
+    let pipeline = test_pipeline(&cfg, MockClient::script(vec![]));
+    pipeline
+        .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+        .await;
+    let state = api_state(pipeline);
+    let record = state
+        .messages
+        .read_all(&cfg.round.round_id)
+        .await
+        .unwrap()
+        .remove(0);
+    let audit_before = state
+        .messages
+        .read_raw_events(&cfg.round.round_id, 0)
+        .await
+        .unwrap()
+        .len();
+    assert!(matches!(
+        override_message(
+            &state,
+            &record.record_id,
+            override_body("other_round", 1, 2)
+        )
+        .await,
+        Err(ServiceError::Conflict(_))
+    ));
+    assert!(matches!(
+        override_message(
+            &state,
+            &record.record_id,
+            override_body(&cfg.round.round_id, 99, 2)
+        )
+        .await,
+        Err(ServiceError::Conflict(_))
+    ));
+    assert!(matches!(
+        override_message(
+            &state,
+            &record.seq.to_string(),
+            override_body(&cfg.round.round_id, 1, 2)
+        )
+        .await,
+        Err(ServiceError::NotFound(_))
+    ));
+    assert_eq!(
+        state
+            .messages
+            .read_raw_events(&cfg.round.round_id, 0)
+            .await
+            .unwrap()
+            .len(),
+        audit_before
+    );
+    // Two simultaneous editors of revision 1 cannot silently overwrite each other.
+    let (a, b) = tokio::join!(
+        override_message(
+            &state,
+            &record.record_id,
+            override_body(&cfg.round.round_id, 1, 2)
+        ),
+        override_message(
+            &state,
+            &record.record_id,
+            override_body(&cfg.round.round_id, 1, 3)
+        ),
+    );
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    assert!(
+        matches!(a, Err(ServiceError::Conflict(_))) || matches!(b, Err(ServiceError::Conflict(_)))
+    );
+    let current = state
+        .messages
+        .read_all(&cfg.round.round_id)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(current.record_revision, 2);
+    assert_eq!(current.record_id, record.record_id);
+    assert_eq!(current.seq, record.seq);
+    assert_eq!(current.timestamp_ms, record.timestamp_ms);
+    assert_eq!(current.text, record.text);
+    assert_eq!(
+        state.pipeline.messages_since(0).await[0]["record_revision"],
+        2
+    );
+}
+
+#[tokio::test]
+async fn record_bound_override_does_not_change_another_message_with_same_upstream_id() {
+    let mut cfg = base_config();
+    cfg.llm.enabled = false;
+    cfg.round.phases.clear();
+    let pipeline = test_pipeline(&cfg, MockClient::script(vec![]));
+    pipeline
+        .process(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+        .await;
+    let mut records = pipeline
+        .messages
+        .read_all(&cfg.round.round_id)
+        .await
+        .unwrap();
+    let original = records.remove(0);
+    let mut another = original.clone();
+    another.record_id = crate::messages::new_record_id();
+    // This independently inserted legacy row must not reuse another record's bound artifact.
+    another.processing = None;
+    another.seq = crate::messages::next_seq();
+    another.user_id = "u2".to_string();
+    another.nickname = "成员02".to_string();
+    another.timestamp_ms = 2_000;
+    pipeline
+        .messages
+        .append(&cfg.round.round_id, &another)
+        .await
+        .unwrap();
+    let state = api_state(pipeline);
+    let result = crate::services::messages::override_message(
+        &state,
+        &original.record_id,
+        override_body(&cfg.round.round_id, 1, 3),
+    )
+    .await
+    .unwrap();
+    let messages = result["result"]["messages"].as_array().unwrap();
+    assert_eq!(
+        messages
+            .iter()
+            .find(|m| m["record_id"] == another.record_id)
+            .unwrap()["record_revision"],
+        1
+    );
+    let board: crate::domain::snapshot::AllocationSnapshot =
+        serde_json::from_value(result["result"]["board"].clone()).unwrap();
+    let qty = |uid: &str| {
+        board
+            .user_summaries
+            .iter()
+            .filter(|u| u.user_id.0 == uid)
+            .flat_map(|u| &u.items)
+            .map(|i| i.quantity)
+            .sum::<u32>()
+    };
+    assert_eq!(qty("u1"), 3);
+    assert_eq!(qty("u2"), 1);
+}
+
+#[tokio::test]
+async fn original_position_override_still_executes_later_cancel() {
+    let mut cfg = base_config();
+    cfg.llm.enabled = false;
+    cfg.round.phases.clear();
+    let pipeline = test_pipeline(&cfg, MockClient::script(vec![]));
+    pipeline
+        .process(event("u1", "成员01", "排 通行证 结城理 2", 1_000))
+        .await;
+    pipeline
+        .process(event("u2", "成员02", "排 通行证 结城理 1", 2_000))
+        .await;
+    pipeline
+        .process(event("u1", "成员01", "撤 通行证 1", 90_000))
+        .await;
+    let records = pipeline
+        .messages
+        .read_all(&cfg.round.round_id)
+        .await
+        .unwrap();
+    let state = api_state(pipeline);
+    let result = crate::services::messages::override_message(
+        &state,
+        &records[0].record_id,
+        override_body(&cfg.round.round_id, 1, 1),
+    )
+    .await
+    .unwrap();
+    let board: crate::domain::snapshot::AllocationSnapshot =
+        serde_json::from_value(result["result"]["board"].clone()).unwrap();
+    assert!(board.user_summaries.iter().all(|u| u.user_id.0 != "u1"));
+    assert_eq!(board.user_summaries[0].user_id.0, "u2");
+    let after = state.messages.read_all(&cfg.round.round_id).await.unwrap();
+    for (before, after) in records.iter().zip(after) {
+        assert_eq!(before.record_id, after.record_id);
+        assert_eq!(before.text, after.text);
+        assert_eq!(before.timestamp_ms, after.timestamp_ms);
+        assert_eq!(before.seq, after.seq);
+    }
+}
+
+#[tokio::test]
+async fn override_of_partial_automatic_group_is_blocked_until_group_transactions_exist() {
+    let mut cfg = base_config();
+    cfg.llm.enabled = false;
+    cfg.merge.enabled = true;
+    cfg.merge.same_sender = true;
+    cfg.round.phases.clear();
+    let pipeline = test_pipeline(&cfg, MockClient::script(vec![]));
+    pipeline
+        .ingest(event("u1", "成员01", "排 通行证 结城理 1", 1_000))
+        .await;
+    pipeline
+        .ingest(event("u1", "成员01", "排 通行证 虎狼丸 1", 2_000))
+        .await;
+    let records = pipeline
+        .messages
+        .read_all(&cfg.round.round_id)
+        .await
+        .unwrap();
+    let state = api_state(pipeline);
+    let before = state.pipeline.board().await;
+    let result = crate::services::messages::override_message(
+        &state,
+        &records[1].record_id,
+        override_body(&cfg.round.round_id, 1, 2),
+    )
+    .await;
+    assert!(
+        matches!(result, Err(crate::services::ServiceError::Conflict(v)) if v["error"] == "auto_group_requires_transaction")
+    );
+    assert_eq!(before, state.pipeline.board().await);
+    assert!(state
+        .messages
+        .read_raw_events(&cfg.round.round_id, 0)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn failed_message_persistence_does_not_publish_or_consume_deduplication() {
+    let mut cfg = base_config();
+    cfg.llm.enabled = false;
+    cfg.round.phases.clear();
+    let dir = std::env::temp_dir().join(format!("paigu-write-failure-{}", uuid::Uuid::new_v4()));
+    std::fs::write(&dir, "not a directory").unwrap();
+    let pipeline =
+        Pipeline::new_with_client_dir(store(&cfg), MockClient::script(vec![]), dir.clone());
+    let ev = event("u1", "成员01", "排 通行证 结城理 1", 1_000);
+    assert_eq!(pipeline.process(ev.clone()).await.status, "Error");
+    assert!(pipeline.messages_since(0).await.is_empty());
+    assert_eq!(pipeline.board().await.0, 0);
+    std::fs::remove_file(&dir).unwrap();
+    assert_eq!(
+        pipeline.process(ev).await.status,
+        "Applied",
+        "a failed write must be retryable"
+    );
+}
+
+#[tokio::test]
+async fn live_message_identity_matches_persisted_record_before_and_after_recompute() {
+    let mut cfg = base_config();
+    cfg.llm.enabled = false;
+    cfg.gateway.admin_commands_enabled = true;
+    cfg.round.phases.clear();
+    let pipeline = test_pipeline(&cfg, MockClient::err("must not call LLM"));
+    // Other writers (including drops and audit events) can consume global sequence numbers.
+    crate::messages::next_seq();
+    let claim = event("u1", "成员01", "排 通行证 结城理 1", 1_000);
+    pipeline.process(claim.clone()).await;
+    crate::messages::next_seq();
+    pipeline.process(event("u2", "成员02", "闲聊", 2_000)).await;
+    pipeline.process(claim).await;
+    pipeline.process(admin_event("/状态", 3_000)).await;
+
+    let records = pipeline
+        .messages
+        .read_all(&cfg.round.round_id)
+        .await
+        .unwrap();
+    for view in [pipeline.messages_since(0).await, {
+        pipeline.recompute().await.unwrap();
+        pipeline.messages_since(0).await
+    }] {
+        assert_eq!(view.len(), records.len());
+        for message in view {
+            let rec = records
+                .iter()
+                .find(|r| message["record_id"] == r.record_id)
+                .expect("live and persisted records must have exactly the same stable identity");
+            assert_eq!(message["record_revision"], rec.record_revision);
+            assert_eq!(
+                message["seq"], rec.seq,
+                "do not allocate a separate UI sequence"
+            );
+            assert_eq!(message["round_id"], cfg.round.round_id);
+            assert_eq!(message["text"], rec.text);
+        }
+    }
 }
 
 fn set_class(cfg: &mut AppConfig, item_id: &str, class: &str) {

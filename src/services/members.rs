@@ -89,9 +89,8 @@ pub async fn suggest_cn(state: &ApiState) -> Result<Value, super::ServiceError> 
         .complete(&cfg.llm, system, &user)
         .await
         .map_err(super::ServiceError::Internal)?;
-    let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
-        super::ServiceError::Internal(anyhow::anyhow!("LLM 响应非 JSON: {e}"))
-    })?;
+    let parsed: Value = serde_json::from_str(&raw)
+        .map_err(|e| super::ServiceError::Internal(anyhow::anyhow!("LLM 响应非 JSON: {e}")))?;
     let items = parsed
         .get("items")
         .and_then(Value::as_array)

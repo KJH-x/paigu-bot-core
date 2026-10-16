@@ -166,6 +166,11 @@ pub struct ParseOverrideEvent {
     pub event_id: EventId,
     pub round_id: RoundId,
     pub target_raw_message_id: String,
+    /// New manual writes target the persisted record, not a possibly repeated upstream message id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_record_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_record_revision: Option<u64>,
     pub corrected_parsed_message: serde_json::Value,
     pub admin_user_id: UserId,
     pub reason: String,

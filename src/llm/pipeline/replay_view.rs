@@ -27,7 +27,9 @@ impl Pipeline {
                 .iter()
                 .filter(|m| m.status != "Dropped")
                 .map(|m| {
-                    json!({"seq": m.seq, "display": m.display, "text": m.text,
+                    json!({"record_id": m.record_id, "record_revision": m.record_revision,
+                    "original_automatic":m.original_automatic,"manual_note":m.manual_note,
+                    "round_id": m.round_id, "seq": m.seq, "display": m.display, "text": m.text,
                     "status": m.status, "detail": m.detail})
                 })
                 .collect();

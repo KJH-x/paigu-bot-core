@@ -15,14 +15,38 @@ fn groups(cands: &[Candidate<'_>]) -> Vec<Vec<usize>> {
 
 #[test]
 fn classify_keywords_and_chatter() {
-    assert_eq!(classify(&cand("u", "排 通行证 1"), &[]), Classification::Join(GroupIntent::Claim));
-    assert_eq!(classify(&cand("u", "我这个是代排"), &[]), Classification::Join(GroupIntent::Claim));
-    assert_eq!(classify(&cand("u", "通行证(代)"), &[]), Classification::Join(GroupIntent::Claim));
-    assert_eq!(classify(&cand("u", "撤 通行证"), &[]), Classification::Join(GroupIntent::Cancel));
-    assert_eq!(classify(&cand("u", "改 通行证 2"), &[]), Classification::Join(GroupIntent::Modify));
-    assert_eq!(classify(&cand("u", "取消 代排"), &[]), Classification::Join(GroupIntent::Cancel));
-    assert_eq!(classify(&cand("u", "今天天气不错"), &[]), Classification::Other);
-    assert_eq!(classify(&cand("u", "想要一个悠人"), &[]), Classification::Other);
+    assert_eq!(
+        classify(&cand("u", "排 通行证 1"), &[]),
+        Classification::Join(GroupIntent::Claim)
+    );
+    assert_eq!(
+        classify(&cand("u", "我这个是代排"), &[]),
+        Classification::Join(GroupIntent::Claim)
+    );
+    assert_eq!(
+        classify(&cand("u", "通行证(代)"), &[]),
+        Classification::Join(GroupIntent::Claim)
+    );
+    assert_eq!(
+        classify(&cand("u", "撤 通行证"), &[]),
+        Classification::Join(GroupIntent::Cancel)
+    );
+    assert_eq!(
+        classify(&cand("u", "改 通行证 2"), &[]),
+        Classification::Join(GroupIntent::Modify)
+    );
+    assert_eq!(
+        classify(&cand("u", "取消 代排"), &[]),
+        Classification::Join(GroupIntent::Cancel)
+    );
+    assert_eq!(
+        classify(&cand("u", "今天天气不错"), &[]),
+        Classification::Other
+    );
+    assert_eq!(
+        classify(&cand("u", "想要一个悠人"), &[]),
+        Classification::Other
+    );
     assert_eq!(classify(&cand("u", "   "), &[]), Classification::Boundary);
     assert_eq!(classify(&cand("u", "/锁位"), &[]), Classification::Boundary);
 }

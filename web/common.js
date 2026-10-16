@@ -772,15 +772,22 @@
       var m = src[i] || {};
       var seq = m.seq != null ? m.seq : (m.sequence != null ? m.sequence : null);
       var id = m.message_id != null ? m.message_id : (m.id != null ? m.id : seq);
-      var key = seq != null ? 's' + seq : ('m' + (id != null ? id : i));
+      // Stable record identity is shared by live, log and replay views. Legacy keys are read-only.
+      var recordId = typeof m.record_id === 'string' ? m.record_id : '';
+      var key = recordId ? 'r:' + recordId : (seq != null ? 's' + seq : ('m' + (id != null ? id : i)));
       out.push({
         key: key,
+        record_id: recordId,
+        record_revision: m.record_revision != null ? m.record_revision : null,
+        round_id: m.round_id || (payload && payload.round_id) || '',
         seq: seq,
         user: m.user || m.user_id || m.identity || '',
         display: m.display || m.display_name || m.nickname || m.user || m.user_id || '',
         text: m.text || m.raw_message || m.message || '',
         status: m.status || m.outcome || '',
         detail: m.detail || m.reason || '',
+        manual_note: m.manual_note || '',
+        original_automatic: m.original_automatic || null,
         ts: m.timestamp_ms != null ? m.timestamp_ms : (m.ts != null ? m.ts : null)
       });
     }

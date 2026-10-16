@@ -7,6 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { verifyBoardLayout } from './board-layout.mjs';
+import { verifyMessageIdentity } from './message-identity.mjs';
+import { verifyAutomaticBaseline } from './automatic-baseline.mjs';
+import { verifyMessageActions } from './message-actions.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -507,6 +510,18 @@ function buildCases() {
         assert(typeof res.gateway === 'object' && res.gateway !== null, '应含 gateway 快照');
         assertEq(res.reply_enabled, false, 'reply_enabled 默认 false');
       },
+    },
+    {
+      name: '消息稳定身份、原位确认与并发守卫',
+      fn: verifyMessageIdentity,
+    },
+    {
+      name: '原自动结果保留、优先名单真实保存与零模型重算',
+      fn: verifyAutomaticBaseline,
+    },
+    {
+      name: '完整动作手工编辑、忽略拒绝恢复与草稿冲突',
+      fn: verifyMessageActions,
     },
     {
       name: '当前轮次复盘只读与真实步骤',

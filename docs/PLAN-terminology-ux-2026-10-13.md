@@ -1,6 +1,7 @@
 # PLAN · 术语改名（含 JSON 键）+ 昵称/清洗/路由 + 前端 UX（2026-10-13）
 
-> 决策：备份并**强制迁移**术语键、核心停机重启；接受新字段；成员 CN 落库=清洗后与用户自定义；「待确认」用自定义编辑器。
+> 历史批次记录：以下停机/迁移/并发流程已经结束，不是本轮执行授权。当前消息修订以 [专项计划](./PLAN-message-reprocess-2026-10-15.md) 为准；冲突提案移至本文末节。
+> 当时决策：备份并强制迁移术语键；成员 CN 落库；「待确认」自定义编辑器。
 > 执行：详细计划 → 子代理审查/修正 → 写入本文件 → 子代理并发执行 + 验证改进 loop → 完成。
 
 ## 0. 备份与迁移流程
@@ -22,19 +23,7 @@
 | `ItemVariant` | `ItemSubitem` |
 | `find_variant_by_id` / `variant_name_matches` / `is_bare_variant_name` | `find_subitem_by_id` / `subitem_name_matches` / `is_bare_subitem_name` |
 
-serde（读旧兼容 + 写新）：
-```rust
-#[derive(Serialize, Deserialize)]
-pub struct VariantConfig {           // → SubitemConfig
-    #[serde(rename = "subitem_id", alias = "variant_id")]
-    pub variant_id: String,          // → subitem_id
-    ...
-}
-pub struct ItemConfig {
-    #[serde(rename = "subitems", alias = "variants", default)]
-    pub variants: Vec<VariantConfig>,  // → subitems
-}
-```
+当前不保留旧键 serde alias（5519878 已移除）；原兼容代码提案见文末已舍弃节。
 - 读写点：`settings/mod.rs`、`domain/item.rs`、`parser/{alias_match,rule_parser,parsed_event}`、`llm/pipeline/{llm_parse,mod}`、`llm/prompt.rs`、`services/{rounds,settlement,aliases}.rs`、`engine/allocation_engine`、`simulation/verifier.rs`、`web/{common,round,settlement,replay,display}.js`、`web/replay_view.json`、`docs/**`、`config.example.json`、`docs/round-setup.template.json`、所有测试。
 - 保留的**语义枚举值**不动：`KINDS[].v`（group/single/box/gift）、`claim_type`（Split/Single/GiftClaim）、`slot_policy`。
 - 迁移脚本对 `data/**`、`config/app.json` 就地重写键；`replay_view.json` 同改。
@@ -114,17 +103,17 @@ if claim_variant_is_none && item.kind==Group && let Some(box_id)=item.box_item_i
 ## 9. round 页
 - **单滚动（复用高度）**：把 `#sec-items .panel-body` 的 `max-height: calc(100vh - var(--shell-height) - 92px)`（`workbench.css:99`）**同样加到 `#sec-rounds > .panel-body`**；两列等高且都在视口内结束 → 无外层滚动。
 - **sticky**：`#kind-tabs{position:sticky;top:0;z-index:3;background:opaque}`；`.cat-item-head{position:sticky;top:<kind-tabs高>;z-index:2;background:opaque}`（被下一 `.cat-item` 顶走）。
-- **自定义模态**：新建轮次 / 当前激活轮次设置 / 阶段管理 → 模态（遮罩暗化 + 斜向宽排线底纹，`repeating-linear-gradient`）。迁移 DOM/JS。
+- 编辑容器按 IA 专项安排；原“一律模态”提案移至文末，不按旧计划补做。
 - **cat-item-head 合并**：商品名移入 head；拼团项显示 `子项平均价(元)`（`avg = mean(unit+adjust)`）。
 - **列宽**：`table.vtable th:last-child,td:last-child{width:44px}`；`商品别名` hint 补 `margin-inline`（对齐 `.cat-grid`/`.alias-wrap`）。
 
-## 10. 「待确认」→ override 编辑器
-- 消息流 `NeedConfirm` 行可点击 → 打开自定义模态：展示候选/原文，人工确认 → 写 `ParseOverride`（复用 `emit_parse_override`，需 `pub(crate)`）→ `recompute`。
-- 新增 API：`POST /api/messages/:record_id/override {parsed|choice}`（或复用现有 first-match 澄清机制）。
+## 10. 旧待确认入口（存量实现，待替换）
 
-## 11. 别名变更 → 刷新解析
-- `put_config` 保存后：若 `round_id` 未变且商品名/别名/子项名 token 有变 → `state.pipeline.recompute()`（已确定性重解析全部消息）。
-- 对已有 `ParseOverride` 的消息：异步重跑 LLM → 写新 `ParseOverride`（last-wins）。新增 `Pipeline::reparse_messages(records)`（包装 `emit_parse_override`）。
+原窄流程已移至文末。当前消息专项先修稳定记录身份、版本和轮次守卫；最终改为全状态详情与动作句编辑，原自动结果和人工结果分层。旧确认接口仅是分批迁移入口，不代表新交互已完成。
+
+## 11. 当前消息修订入口
+
+以 [专项计划](./PLAN-message-reprocess-2026-10-15.md) 为准：原自动结果保留、直接动作编辑、名单重算 0 LLM。当前 config_signature 触发确定性 recompute 是旧代码事实，不等于自动动作完整持久化；原异步批量 LLM 刷新提案移至文末。
 
 ## 12. 执行顺序 / 并发 / 验证
 1. 备份 + 迁移脚本（§1）。
@@ -141,17 +130,27 @@ if claim_variant_is_none && item.kind==Group && let Some(box_id)=item.box_item_i
 - round 单滚动：确认 `#sec-rounds .panel-body` 复用高度后 `section-nav`/锚点仍可用（sticky 顶栏保留在 document）。
 
 ## 14. 子代理审查修正（2026-10-13）
-- **§1 术语（NO-GO→修正）**：①`resolved_variant_id`→`resolved_subitem_id`（加 alias）；②**非 serde 读取点**必须**同时接受新旧键**或迁移：`simulation/verifier.rs:198-208`（语料**只读**，须兼容旧键）、`services/display.rs:104`、所有 `web/*.js`、`GET /api/rounds {variants}`（`services/rounds.rs:429`，消费于 `web/round.js:870`）、`data/settlement/*.json`（`SettlementDraft` 反序列化）；③补入清单文件：`domain/{claim,allocation}.rs`、`settlement/model.rs`、`planner/mod.rs`、`services/display.rs`、`parser/{normalize.rs:154,validation.rs:282}` 测试字面量；④LLM prompt 里 `variant` 键属**行为变更**。
+- **§1 术语历史审查**：原“加 alias、读写同时兼容新旧键”的建议已被舍弃，移至文末；当前按新键读写。只读语料仍不得改，旧 verifier 的独立支持范围另行核对，不重新增加运行配置兼容层。
 - **§5 整盒路由（NO-GO→修正）**：重定向应在 **`parser/validation.rs:79-175`**（两分支产出 `Vec<(ItemId, Option<String>)>`），需给 `ValidateContext` 增 `box_map: HashMap<ItemId,ItemId>`（从 `mod.rs:621-632` 与 `replay/session/mod.rs:498-508` 传入）；设 `claim_type=Single`（WholeBox 走单领队列 `allocation_engine:112-113`）。原列的两处测试**实际不受影响**。let-chain 需改写（edition 2021）。
 - **§7 拼音（NO-GO）**：`pinyin` crate 离线不可得 → **vendored 前端拼音库**；`#kind-tabs` 每次 `innerHTML` 重绘（`round.js:278-288`），搜索框须放 HTML 或重绘后追加。
-- **§10 待确认编辑器（PARTIAL）**：消息流无 `record_id` → 需给 `state::MessageRecord`+`messages_since` 加 `record_id`（或改按 `seq`）；`emit_parse_override` 提升 `pub(crate)`。
+- **§10 待确认编辑器（PARTIAL）**：消息流须贯穿稳定 `record_id`；原“或改按 seq”的备选已舍弃，见文末。
 - **§3 修正**：live `mod.rs:427` 现为 `clean_nickname`（**非** `resolve_cn`）；改为 `resolve_cn` 即行为变更，`who_whats`（`state.rs`/`services/display.rs:63-94`）随之统一。
-- **§11 修正**：用 `services::replay::recompute(state)`（带 revision 守卫）；`put_config` 入口先读 `old cfg` 再 diff。
+- **§11 历史接线建议已作废**：原批量 LLM 刷新流程不再实施，保存不调用 LLM。
 - **§9 注意**：`#sec-rounds .panel-body` 内已有 `.round-list{max-height:270px}` → 复用外层高度会产生嵌套滚动，需处理。
 
 ## 15. 完成记录（2026-10-15）
-- §1 术语改名：60 个跟踪文件（Rust/web/docs/config 模板）完成 变体/variant→子项/subitem（含 JSON 键）；serde lias 兼容旧键（settings/domain/claim/parsed/settlement）。
+- §1 术语改名：60 个跟踪文件完成新术语与 JSON 键；当时曾保留 serde alias，5519878 已按用户要求全部移除，不再承诺运行配置旧键兼容。
 - §5 整盒路由：ItemConfig.box_item_id + settings::box_redirect_map + ValidateContext.box_map；live 配置 pass55→pass55_box。
 - §6/§7 前端拼音：vendored web/vendor/pinyin-pro.js（UMD, 全局 pinyinPro）；成员表加原始名称/可编辑清洗列/筛选；商品目录筛选。
 - §8 settings 栅格、§9 round（单滚动/sticky/head 合并+子项平均价/列宽）、§10 待确认→override 编辑器（POST /api/messages/:key/override）、§11 别名变更→config_signature 差异触发 ecompute。
 - §0 迁移：scripts/migrate-terminology.mjs（5 个 JSON 就地改键），停机+备份+重建 release+重启；所有门禁绿（cargo test 234 / clippy / e2e 17 / privacy）。
+
+## 16. 已舍弃的功能或思路（2026-10-16）
+
+以下从原章节移出，不再按旧提案实施：
+
+- 原 §1 的 `#[serde(rename = "subitem_id", alias = "variant_id")]` / `#[serde(rename = "subitems", alias = "variants", default)]` 读旧兼容：用户已接受舍弃旧键，5519878 已移除，不重新加兼容层；只读语料仍不得修改。
+- 原 §9“新建轮次 / 当前激活轮次设置 / 阶段管理全部迁移自定义模态”：不再统一套模态；长编辑与短任务按 IA 专项分别安排，未默认授权整页重构。
+- 原 §11“对已有 ParseOverride 异步重跑 LLM，写新覆盖 last-wins；新增 Pipeline::reparse_messages”，以及 §14 对其的接线修正：由直接完整动作、可选显式代填同一草稿取代，保存/名单重算 0 LLM，自动产物不得覆盖人工选择。
+- 原 §14“实时无 record_id 可改按 seq”备选：记录身份须贯穿落盘/实时/写入，带轮次和版本守卫，显示序号不能作写入键。
+- 原 §10 仅 NeedConfirm 可编辑、只填写一种 Claim：代码暂留但仅是迁移旧入口，不是最终交互；新目标为所有状态可查、完整动作句编辑与只读原自动结果对照。

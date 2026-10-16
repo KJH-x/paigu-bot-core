@@ -6,21 +6,20 @@ use serde::{Deserialize, Serialize};
 use crate::domain::claim::{Eligibility, EligibilityScope};
 use crate::domain::event::{ClaimCancelled, DomainEvent, EventEnvelope, EventStatus};
 use crate::domain::ids::{ClaimId, EligibilityId, EventId, ItemId, RoundId, UserId};
-use crate::domain::item::{Item, RoundContext};
 use crate::domain::snapshot::AllocationSnapshot;
-use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
+use crate::engine::replay::rebuild_allocation_snapshot;
 use crate::messages::{MessageLog, MessageRecord};
-use crate::parser::parsed_event::{
-    apply_parse_override, collect_parse_overrides, ParsedIntent, ParsedMessage,
-};
 use crate::parser::coalesce::{self, Candidate};
+use crate::parser::parsed_event::{apply_parse_override, collect_parse_overrides, ParseOverrides};
 use crate::parser::policy;
 use crate::parser::rule_parser::RuleParser;
-use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
 use crate::replay::state_diff::StateDiff;
 use crate::round::{PhaseWindow, RoundPhase};
 use crate::settings::{AppConfig, ItemConfig};
 use crate::settlement::SettlementConfig;
+
+mod understanding;
+pub(crate) use understanding::{evaluate_understanding, prepare_understanding, Evaluation};
 
 /// 重放离线解析使用的规则置信度阈值（与实时校验层一致）。
 const REPLAY_CONFIDENCE_THRESHOLD: f32 = 0.65;
@@ -71,6 +70,8 @@ pub fn apply_overrides(base: &AppConfig, overrides: &ReplayOverrides) -> AppConf
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplayMessageView {
     pub record_id: String,
+    #[serde(default = "default_record_revision")]
+    pub record_revision: u64,
     pub seq: i64,
     pub group_id: String,
     pub user_id: String,
@@ -80,6 +81,14 @@ pub struct ReplayMessageView {
     pub is_admin: bool,
     pub status: String,
     pub detail: String,
+    #[serde(default)]
+    pub original_automatic: Option<crate::messages::processing::AutomaticSummary>,
+    #[serde(default)]
+    pub manual_note: Option<String>,
+}
+
+fn default_record_revision() -> u64 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,7 +149,7 @@ pub struct ReplayResult {
 }
 
 /// 从事件日志折叠手动阶段覆盖（`RoundPhaseSet`，按 `(effective_at, sequence)` last-wins）。
-async fn load_manual_phase(store: &MessageLog, round_id: &str) -> Option<RoundPhase> {
+pub(crate) async fn load_manual_phase(store: &MessageLog, round_id: &str) -> Option<RoundPhase> {
     let raw = match store.read_raw_events(round_id, 0).await {
         Ok(raw) => raw,
         Err(_) => return None,
@@ -159,7 +168,7 @@ async fn load_manual_phase(store: &MessageLog, round_id: &str) -> Option<RoundPh
         })
 }
 
-/// 从持久化消息日志重放（C2）：复用与实时同一条规则解析器 + 校验层 + 分配引擎。
+/// 重放已存自动/人工动作并重验政策；无自动产物的旧记录单独兼容解析。
 pub async fn replay(
     store: &MessageLog,
     base: &AppConfig,
@@ -177,17 +186,14 @@ pub async fn replay_messages(
     records: &[MessageRecord],
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
-    replay_messages_with_parse(base, records, overrides, &HashMap::new(), None).await
+    replay_messages_with_parse(base, records, overrides, &ParseOverrides::default(), None).await
 }
 
 /// §U7：读取轮次事件日志中的 `ParseOverride`，建立 `message_id → 修正解析` 映射。
-async fn load_parse_overrides(
-    store: &MessageLog,
-    round_id: &str,
-) -> HashMap<String, ParsedMessage> {
+pub(crate) async fn load_parse_overrides(store: &MessageLog, round_id: &str) -> ParseOverrides {
     let raw = match store.read_raw_events(round_id, 0).await {
         Ok(raw) => raw,
-        Err(_) => return HashMap::new(),
+        Err(_) => return ParseOverrides::default(),
     };
     let events: Vec<EventEnvelope> = raw
         .into_iter()
@@ -197,11 +203,11 @@ async fn load_parse_overrides(
 }
 
 /// 从内存消息列表重放，并消费给定的 `ParseOverride` 映射。
-async fn replay_messages_with_parse(
+pub(crate) async fn replay_messages_with_parse(
     base: &AppConfig,
     records: &[MessageRecord],
     overrides: ReplayOverrides,
-    parse_overrides: &HashMap<String, ParsedMessage>,
+    parse_overrides: &ParseOverrides,
     manual_phase: Option<RoundPhase>,
 ) -> anyhow::Result<ReplayResult> {
     let replay_cfg = apply_overrides(base, &overrides);
@@ -247,18 +253,11 @@ struct Computation {
 async fn compute(
     cfg: &AppConfig,
     records: &[MessageRecord],
-    parse_overrides: &HashMap<String, ParsedMessage>,
+    parse_overrides: &ParseOverrides,
     manual_phase: Option<RoundPhase>,
 ) -> Computation {
     let items = cfg.round.to_items();
     let round_id = RoundId(cfg.round.round_id.clone());
-    let round_contexts = vec![RoundContext {
-        round_id: round_id.clone(),
-        title: cfg.round.title.clone(),
-        items: items.clone(),
-    }];
-    let validator = EventValidator::new(REPLAY_CONFIDENCE_THRESHOLD);
-    let box_map = crate::settings::box_redirect_map(&cfg.round.items);
 
     // U4：CN → 归一化昵称 → user_id，供分配展示名与消息人名输出。
     let mut display_names: HashMap<UserId, String> = HashMap::new();
@@ -274,22 +273,7 @@ async fn compute(
     let mut ordered: Vec<&MessageRecord> = records.iter().collect();
     ordered.sort_by_key(|r| (r.timestamp_ms, r.seq));
 
-    // 合并分组（R1–R4）：`routed=="message"` 按相邻同人同意图分组；其余各自单例。
-    // 未启用合并时每条各自单例（保持旧行为）。
-    let groups: Vec<Vec<usize>> = if cfg.merge.enabled && cfg.merge.same_sender {
-        let cands: Vec<Candidate> = ordered
-            .iter()
-            .map(|r| Candidate {
-                user_id: &r.user_id,
-                text: &r.text,
-                is_admin: r.is_admin,
-                force_boundary: !r.routed.eq_ignore_ascii_case("message"),
-            })
-            .collect();
-        coalesce::group_candidates(&cands, &items)
-    } else {
-        (0..ordered.len()).map(|i| vec![i]).collect()
-    };
+    let groups = message_groups(cfg, &ordered, parse_overrides);
 
     let mut events: Vec<EventEnvelope> = Vec::new();
     let mut eligibilities: Vec<Eligibility> = Vec::new();
@@ -312,40 +296,27 @@ async fn compute(
                 .unwrap_or(0),
         );
 
-        let processed = if group.len() == 1 {
-            process_one(
-                cfg,
-                ordered[group[0]],
-                &items,
-                &round_contexts,
-                &box_map,
-                &validator,
-                parse_overrides,
-                &display_names,
-                manual_phase,
-            )
-            .await
-        } else {
-            let joined = group
+        let members: Vec<_> = group.iter().map(|&index| ordered[index]).collect();
+        let automatic = ordered[rep_pos]
+            .processing
+            .as_ref()
+            .and_then(|history| history.latest_for(&members));
+        let mut representative = (*ordered[rep_pos]).clone();
+        if group.len() > 1 {
+            representative.text = members
                 .iter()
-                .map(|&i| ordered[i].text.trim())
+                .map(|record| record.text.trim())
                 .collect::<Vec<_>>()
                 .join("\n");
-            let mut synthetic: MessageRecord = (*ordered[rep_pos]).clone();
-            synthetic.text = joined;
-            process_one(
-                cfg,
-                &synthetic,
-                &items,
-                &round_contexts,
-                &box_map,
-                &validator,
-                parse_overrides,
-                &display_names,
-                manual_phase,
-            )
-            .await
-        };
+        }
+        let processed = process_one(
+            cfg,
+            &representative,
+            parse_overrides,
+            manual_phase,
+            automatic,
+        )
+        .await;
 
         let rep_uid = ordered[rep_pos].user_id.clone();
         if !processed.events.is_empty() {
@@ -359,12 +330,24 @@ async fn compute(
             let rec = ordered[i];
             let is_rep = i == rep_pos;
             let (status, detail) = if is_rep {
-                (processed.status.clone(), processed.detail.clone())
+                (
+                    processed.outcome.status.clone(),
+                    processed.outcome.detail.clone(),
+                )
             } else {
-                ("Merged".to_string(), format!("并入 #{}", ordered[rep_pos].seq))
+                (
+                    "Merged".to_string(),
+                    format!("并入 #{}", ordered[rep_pos].seq),
+                )
             };
             messages.push(ReplayMessageView {
+                original_automatic: crate::messages::processing::original_summary(rec),
+                manual_note: parse_overrides
+                    .reason_for_record(&rec.record_id)
+                    .map(str::to_string),
                 record_id: rec.record_id.clone(),
+                record_revision: parse_overrides
+                    .record_revision(&rec.record_id, rec.record_revision),
                 seq: rec.seq,
                 group_id: rec.group_id.clone(),
                 user_id: rec.user_id.clone(),
@@ -409,173 +392,157 @@ async fn compute(
     }
 }
 
-#[derive(Clone)]
-struct Processed {
-    status: String,
-    detail: String,
-    events: Vec<EventEnvelope>,
-    priority_claim: bool,
-}
-fn skipped(status: &str, detail: impl Into<String>) -> Processed {
-    Processed {
-        status: status.to_string(),
-        detail: detail.into(),
-        events: Vec::new(),
-        priority_claim: false,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
 async fn process_one(
     cfg: &AppConfig,
     rec: &MessageRecord,
-    items: &[Item],
-    round_contexts: &[RoundContext],
-    box_map: &std::collections::HashMap<crate::domain::ids::ItemId, crate::domain::ids::ItemId>,
-    validator: &EventValidator,
-    parse_overrides: &HashMap<String, ParsedMessage>,
-    display_names: &HashMap<UserId, String>,
+    parse_overrides: &ParseOverrides,
     manual_phase: Option<RoundPhase>,
-) -> Processed {
-    let display = if rec.nickname.trim().is_empty() {
-        rec.user_id.clone()
-    } else {
-        rec.nickname.clone()
-    };
-    let (identity, _) = crate::parser::normalize::clean_nickname(&rec.nickname);
-    // U4：人名优先 CN（已由 `compute` 解析），回退昵称。
-    let cn = display_names.get(&UserId(rec.user_id.clone()));
-
-    if rec.routed.eq_ignore_ascii_case("drop")
-        || rec.routed.to_ascii_lowercase().starts_with("drop:")
-    {
-        return skipped("Dropped", "非白名单/Drop");
+    automatic: Option<&crate::messages::processing::AutomaticResult>,
+) -> Evaluation {
+    use crate::messages::processing::{Understanding, UnderstandingSource};
+    if parse_overrides.invalid_selection(&rec.record_id) {
+        return Evaluation::skipped(
+            "NeedConfirm",
+            "人工修订格式损坏或版本未知，未回退执行旧动作；请核对",
+        );
     }
-
-    let sender_uid = rec.sender_user_id.as_deref().unwrap_or(rec.user_id.as_str());
-    let sender_nick = rec.sender_nickname.as_deref().unwrap_or(rec.nickname.as_str());
-    if !policy::member_allowed(
-        &cfg.gateway.whitelist_members,
-        &[
-            rec.user_id.as_str(),
-            rec.nickname.as_str(),
-            sender_uid,
-            sender_nick,
-            identity.as_str(),
-            display.as_str(),
-            cn.map(String::as_str).unwrap_or(""),
-        ],
-    ) {
-        return skipped("Dropped", "成员不在白名单");
-    }
-
-    let text = rec.text.trim();
-    if text.is_empty() {
-        return skipped("Ignored", "空消息");
-    }
-
-    if text.starts_with('/') {
-        return if rec.is_admin {
-            skipped("Applied", "管理员命令已记录")
-        } else {
-            skipped("Rejected", "非管理员斜杠命令")
-        };
-    }
-
-    let mut rule = RuleParser::parse(text, items, rec.is_admin);
-    // §U7：重放消费该消息的 `ParseOverride`（first-match LLM 澄清修复），使实时 == 重放。
-    rule = apply_parse_override(rule, Some(&rec.message_id), parse_overrides);
-    // 改单（D-2）：与实时管线一致，按新数量重排，应用时先撤销本人该商品的既有认购。
-    let is_modify = rule.intent == ParsedIntent::Modify;
-    if is_modify {
-        rule.intent = ParsedIntent::Claim;
-    }
-    if rule.intent == ParsedIntent::Claim
-        && rule.items.is_empty()
-        && rule.ambiguous_parts.is_empty()
-    {
-        return skipped("Ignored", "未解析出商品");
-    }
-
-    let now = DateTime::<Utc>::from_timestamp_millis(rec.timestamp_ms).unwrap_or_else(Utc::now);
-    let user_id = UserId(rec.user_id.clone());
-    let event = match validator
-        .validate(
-            rule,
-            ValidateContext {
-                user_id: &user_id,
-                group_id: &rec.group_id,
-                raw_message_id: Some(rec.message_id.clone()),
-                active_rounds: round_contexts,
-                box_map,
-                now,
-                sequence: rec.seq,
-            },
-        )
-        .await
-    {
-        Ok(ValidationOutcome::Ok(mut event)) => {
-            stabilize_event(&mut event, rec.seq);
-            *event
+    if let Some(saved) = parse_overrides.selection_for_record(&rec.record_id) {
+        use crate::parser::action_override::ActionSelection;
+        if matches!(saved.selection, ActionSelection::Automatic { .. }) {
+            return automatic.map_or_else(
+                || {
+                    Evaluation::skipped(
+                        "NeedConfirm",
+                        "已选恢复自动，但原自动基线缺失或不匹配，需核对",
+                    )
+                },
+                |auto| {
+                    evaluate_understanding(
+                        cfg,
+                        rec,
+                        &auto.understanding,
+                        auto.manual_phase_at_ingest,
+                    )
+                },
+            );
         }
-        Ok(ValidationOutcome::NeedConfirm(reply)) => {
-            let detail = reply
-                .text_content()
-                .map(str::to_string)
-                .unwrap_or_else(|| "需要确认".to_string());
-            return skipped("NeedConfirm", detail);
-        }
-        Ok(ValidationOutcome::Reject(reply)) => {
-            let detail = reply
-                .text_content()
-                .map(str::to_string)
-                .unwrap_or_else(|| "校验拒绝".to_string());
-            return skipped("Rejected", detail);
-        }
-        Ok(ValidationOutcome::Ignore) => {
-            return skipped("Ignored", "无法识别为排谷/撤销意图");
-        }
-        Err(e) => return skipped("Error", format!("处理失败: {e}")),
-    };
-
-    // U4：优先用户候选含 CN/别名；匿名代排按**发送者**判定（R8）。
-    let is_priority = policy::is_priority(cfg, sender_uid, sender_nick);
-    if policy::in_priority_at(cfg, rec.timestamp_ms) && !is_priority {
-        return skipped("Rejected", "优先时段仅限预存(购物金)用户");
-    }
-
-    if let Some(phase) =
-        manual_phase.or_else(|| policy::phase_at(&cfg.round.phases, rec.timestamp_ms))
-    {
-        if let Some(detail) = policy::phase_rejection(cfg, &event, phase, is_priority) {
-            return skipped("Rejected", detail);
-        }
-    }
-
-    let mut detail = describe_event(&event);
-    if is_modify {
-        detail = format!("改单：{detail}");
-    }
-    let priority_claim = is_priority && matches!(event.payload, DomainEvent::ClaimCreated(_));
-    let round_id = RoundId(cfg.round.round_id.clone());
-    let mut events: Vec<EventEnvelope> = Vec::new();
-    if is_modify {
-        if let DomainEvent::ClaimCreated(created) = &event.payload {
-            let targets: Vec<ItemId> = created.items.iter().map(|l| l.item_id.clone()).collect();
-            for (index, item_id) in targets.into_iter().enumerate() {
-                let mut cancel = cancel_for_modify(&round_id, rec, rec.seq, now, item_id);
-                cancel.event_id = EventId(format!("evt-{}-cancel-{index}", rec.seq));
-                events.push(cancel);
+        let mut understood =
+            Understanding::terminal(UnderstandingSource::Control, "Ignored", "人工忽略", None);
+        understood.events = saved.events.clone();
+        understood.validation = match &saved.selection {
+            ActionSelection::Reject { .. } => {
+                crate::messages::processing::ProcessingOutcome::new("Rejected", "人工拒绝", None)
             }
-        }
+            ActionSelection::Replace { .. } if !saved.events.is_empty() => {
+                crate::messages::processing::ProcessingOutcome::new(
+                    "Applied",
+                    saved
+                        .events
+                        .iter()
+                        .map(|e| crate::parser::action_override::describe_event(e, cfg))
+                        .collect::<Vec<_>>()
+                        .join("；"),
+                    None,
+                )
+            }
+            ActionSelection::Replace { .. } => crate::messages::processing::ProcessingOutcome::new(
+                "Ignored",
+                "人工修订：无动作",
+                None,
+            ),
+            _ => understood.validation,
+        };
+        return evaluate_understanding(
+            cfg,
+            rec,
+            &understood,
+            automatic.map_or(manual_phase, |auto| auto.manual_phase_at_ingest),
+        );
     }
-    events.push(event);
-    Processed {
-        status: "Applied".to_string(),
-        detail,
-        events,
-        priority_claim,
+    if let Some(parsed) = parse_overrides.for_record(&rec.record_id) {
+        let prepared =
+            prepare_understanding(cfg, rec, parsed.clone(), UnderstandingSource::Control).await;
+        return evaluate_understanding(
+            cfg,
+            rec,
+            &prepared,
+            automatic.map_or(manual_phase, |saved| saved.manual_phase_at_ingest),
+        );
     }
+    if let Some(saved) = automatic {
+        return evaluate_understanding(
+            cfg,
+            rec,
+            &saved.understanding,
+            saved.manual_phase_at_ingest,
+        );
+    }
+    if rec.processing.is_some() {
+        return Evaluation::skipped(
+            "NeedConfirm",
+            "已存自动理解与当前消息/分组不匹配，需人工核对；未重新解析",
+        );
+    }
+    // Historical logs without an automatic artifact remain a visibly separate compatibility path.
+    let text = rec.text.trim();
+    let understood = if text.is_empty() || text.starts_with('/') {
+        Understanding::terminal(
+            UnderstandingSource::Control,
+            if text.is_empty() {
+                "Ignored"
+            } else if rec.is_admin {
+                "Applied"
+            } else {
+                "Rejected"
+            },
+            if text.is_empty() {
+                "空消息"
+            } else if rec.is_admin {
+                "管理员命令已记录"
+            } else {
+                "非管理员斜杠命令"
+            },
+            None,
+        )
+    } else {
+        let rule = RuleParser::parse(text, &cfg.round.to_items(), rec.is_admin);
+        let parsed =
+            apply_parse_override(rule, &rec.record_id, Some(&rec.message_id), parse_overrides);
+        prepare_understanding(cfg, rec, parsed, UnderstandingSource::Rules).await
+    };
+    evaluate_understanding(cfg, rec, &understood, manual_phase)
+}
+
+pub(crate) fn message_groups(
+    cfg: &AppConfig,
+    ordered: &[&MessageRecord],
+    overrides: &ParseOverrides,
+) -> Vec<Vec<usize>> {
+    if !(cfg.merge.enabled && cfg.merge.same_sender) {
+        return (0..ordered.len()).map(|i| vec![i]).collect();
+    }
+    let candidates: Vec<_> = ordered
+        .iter()
+        .map(|record| Candidate {
+            user_id: &record.user_id,
+            text: &record.text,
+            is_admin: record.is_admin,
+            force_boundary: !record.routed.eq_ignore_ascii_case("message")
+                || overrides.has_record(&record.record_id)
+                || record.processing.as_ref().is_some_and(|p| {
+                    p.results.first().is_some_and(|r| {
+                        matches!(
+                            r.understanding.source,
+                            crate::messages::processing::UnderstandingSource::Duplicate
+                        ) || matches!(
+                            r.manual_phase_at_ingest,
+                            Some(RoundPhase::Settling | RoundPhase::Locked)
+                        )
+                    })
+                }),
+        })
+        .collect();
+    coalesce::group_candidates(&candidates, &cfg.round.to_items())
 }
 
 /// 改单撤销事件（与实时 `Pipeline` 的 `cancel_for_modify` 语义一致）。

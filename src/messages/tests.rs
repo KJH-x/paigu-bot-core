@@ -8,6 +8,7 @@ fn record(seq: i64, text: &str) -> MessageRecord {
     MessageRecord {
         record_id: format!("record-{seq}"),
         record_revision: 1,
+        processing: None,
         seq,
         group_id: "123456789".to_string(),
         user_id: "10001".to_string(),
@@ -35,6 +36,25 @@ fn messages_dir_from_defaults_and_overrides() {
         messages_dir_from(Some("tmp/msgs".to_string())),
         PathBuf::from("tmp/msgs")
     );
+}
+
+#[tokio::test]
+async fn read_only_context_does_not_migrate_or_rewrite_a_legacy_message_file() {
+    let dir = temp_dir();
+    let store = JsonlMessageStore::new(&dir, "readonly");
+    let mut old = record(7, "历史消息");
+    old.record_id.clear();
+    store.append(&old).await.unwrap();
+    let before = std::fs::read(store.path()).unwrap();
+    let first = store.read_only().await.unwrap();
+    let second = store.read_only().await.unwrap();
+    assert!(first[0].record_id.starts_with("legacy-"));
+    assert_eq!(first[0].record_id, second[0].record_id);
+    assert_eq!(std::fs::read(store.path()).unwrap(), before);
+    assert!(!store
+        .path()
+        .with_extension("jsonl.pre-record-id.bak")
+        .exists());
 }
 
 #[test]

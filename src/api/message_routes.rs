@@ -20,6 +20,37 @@ pub fn routes() -> Router<Arc<ApiState>> {
         )
         .route("/api/messages/:key/reroute", post(reroute_message))
         .route("/api/messages/:key/override", post(override_message))
+        .route(
+            "/api/messages/:key/actions",
+            get(actions).post(save_actions),
+        )
+}
+
+async fn save_actions(
+    State(state): State<Arc<ApiState>>,
+    Path(key): Path<String>,
+    Json(body): Json<crate::services::message_actions::SaveActions>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::message_actions::save(&state, &key, body)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
+}
+
+#[derive(Deserialize)]
+struct ActionsQuery {
+    round_id: String,
+}
+
+async fn actions(
+    State(state): State<Arc<ApiState>>,
+    Path(key): Path<String>,
+    Query(query): Query<ActionsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    messages::actions(&state, &key, &query.round_id)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
 }
 
 #[derive(Deserialize)]

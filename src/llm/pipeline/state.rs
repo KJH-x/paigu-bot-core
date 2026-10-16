@@ -26,6 +26,11 @@ pub(super) struct State {
 }
 
 pub(super) struct MessageRecord {
+    pub(super) original_automatic: Option<crate::messages::processing::AutomaticSummary>,
+    pub(super) manual_note: Option<String>,
+    pub(super) record_id: String,
+    pub(super) record_revision: u64,
+    pub(super) round_id: String,
     pub(super) seq: i64,
     pub(super) user_id: String,
     pub(super) display: String,
@@ -34,11 +39,28 @@ pub(super) struct MessageRecord {
     pub(super) detail: String,
 }
 
+impl MessageRecord {
+    pub(super) fn from_log(record: &LogMessageRecord, round_id: &str, display: &str) -> Self {
+        Self {
+            original_automatic: crate::messages::processing::original_summary(record),
+            manual_note: None,
+            record_id: record.record_id.clone(),
+            record_revision: record.record_revision,
+            round_id: round_id.to_string(),
+            seq: record.seq,
+            user_id: record.user_id.clone(),
+            display: display.to_string(),
+            text: record.text.clone(),
+            status: record.status.clone(),
+            detail: record.detail.clone(),
+        }
+    }
+}
+
 impl Pipeline {
     pub async fn reset(&self) {
         let mut state = self.state.lock().await;
         *state = State::default();
-        *self.merge_open.lock().await = None;
     }
 
     pub async fn board(&self) -> (i64, Value) {
@@ -80,7 +102,11 @@ impl Pipeline {
             status: crate::domain::event::EventStatus::Active,
         };
         if let Ok(value) = serde_json::to_value(&event) {
-            if let Err(e) = self.messages.append_raw_event(&cfg.round.round_id, &value).await {
+            if let Err(e) = self
+                .messages
+                .append_raw_event(&cfg.round.round_id, &value)
+                .await
+            {
                 tracing::warn!("RoundPhaseSet 事件写入失败: {e}");
             }
         }
@@ -107,6 +133,11 @@ impl Pipeline {
             .messages
             .iter()
             .map(|message| MessageRecord {
+                original_automatic: message.original_automatic.clone(),
+                manual_note: message.manual_note.clone(),
+                record_id: message.record_id.clone(),
+                record_revision: message.record_revision,
+                round_id: result.round_id.clone(),
                 seq: message.seq,
                 user_id: message.user_id.clone(),
                 display: message.nickname.clone(),
@@ -138,6 +169,11 @@ impl Pipeline {
             .filter(|m| m.seq > since && m.status != "Dropped")
             .map(|m| {
                 json!({
+                    "original_automatic":m.original_automatic,
+                    "manual_note":m.manual_note,
+                    "record_id": m.record_id,
+                    "record_revision": m.record_revision,
+                    "round_id": m.round_id,
                     "seq": m.seq,
                     "user_id": m.user_id,
                     "display": m.display,

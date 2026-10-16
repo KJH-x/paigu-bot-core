@@ -31,7 +31,7 @@ impl Pipeline {
 /// §U7 first-match 澄清结果。
 pub(super) enum BareSubitemOutcome {
     /// 全部解析成功（含经 LLM 澄清修复）。
-    Resolved(ParsedMessage),
+    Resolved(Box<ParsedMessage>, bool),
     /// 澄清失败/超时且 `fallback_to_rules`：按非排谷忽略。
     FallbackIgnore,
     /// 澄清失败/超时且未启用回退：按“没识别成功”拒绝。
@@ -54,7 +54,7 @@ impl Pipeline {
         absorb_ambiguous_bare_subitems(&mut parsed, active_rounds);
         // 仍有真歧义（如大类匹配到多个商品）时保留 NeedConfirm，不做 first-match 澄清。
         if !parsed.ambiguous_parts.is_empty() {
-            return BareSubitemOutcome::Resolved(parsed);
+            return BareSubitemOutcome::Resolved(Box::new(parsed), false);
         }
         let mut unresolved: Vec<String> = Vec::new();
         for pi in &mut parsed.items {
@@ -71,7 +71,7 @@ impl Pipeline {
             }
         }
         if parsed.items.is_empty() || unresolved.is_empty() {
-            return BareSubitemOutcome::Resolved(parsed);
+            return BareSubitemOutcome::Resolved(Box::new(parsed), false);
         }
         if !cfg.llm.enabled {
             return fallback(cfg.llm.fallback_to_rules);
@@ -81,9 +81,14 @@ impl Pipeline {
             .await
         {
             Ok(Some(corrected)) => {
-                self.emit_parse_override(cfg, ev, seq, now, &corrected, "first-match LLM 澄清")
-                    .await;
-                BareSubitemOutcome::Resolved(corrected)
+                if let Err(error) = self
+                    .emit_parse_override(cfg, ev, seq, now, &corrected, "first-match LLM 澄清")
+                    .await
+                {
+                    warn!("ParseOverride 事件写入失败: {error}");
+                    return fallback(cfg.llm.fallback_to_rules);
+                }
+                BareSubitemOutcome::Resolved(Box::new(corrected), true)
             }
             Ok(None) | Err(_) => fallback(cfg.llm.fallback_to_rules),
         }
@@ -136,7 +141,7 @@ impl Pipeline {
         now: DateTime<Utc>,
         corrected: &ParsedMessage,
         reason: &str,
-    ) {
+    ) -> anyhow::Result<()> {
         let round_id = RoundId(cfg.round.round_id.clone());
         let event = EventEnvelope {
             event_id: EventId(uuid::Uuid::new_v4().to_string()),
@@ -151,6 +156,8 @@ impl Pipeline {
                 event_id: EventId(uuid::Uuid::new_v4().to_string()),
                 round_id,
                 target_raw_message_id: ev.message_id.clone(),
+                target_record_id: None,
+                target_record_revision: None,
                 corrected_parsed_message: serde_json::to_value(corrected).unwrap_or(Value::Null),
                 admin_user_id: UserId(ev.user_id.clone()),
                 reason: reason.to_string(),
@@ -158,45 +165,48 @@ impl Pipeline {
             }),
             status: EventStatus::Active,
         };
-        let value = serde_json::to_value(&event).unwrap_or(Value::Null);
-        if let Err(e) = self
-            .messages
+        let value = serde_json::to_value(&event)?;
+        self.messages
             .append_raw_event(&cfg.round.round_id, &value)
             .await
-        {
-            warn!("ParseOverride 事件写入失败: {e}");
-        }
     }
 
     /// §10：人工确认「待确认」消息 → 写 `ParseOverride` 事件（调用方随后 `recompute`）。
     pub async fn apply_parse_override(
         &self,
+        cfg: &AppConfig,
         rec: &crate::messages::MessageRecord,
         corrected: &ParsedMessage,
         reason: &str,
-    ) {
-        let cfg = self.cfg.get().await;
-        let ev = IncomingEvent {
+    ) -> anyhow::Result<()> {
+        let now = Utc::now();
+        let event_id = EventId(uuid::Uuid::new_v4().to_string());
+        let event = EventEnvelope {
+            event_id: event_id.clone(),
+            round_id: RoundId(cfg.round.round_id.clone()),
             group_id: rec.group_id.clone(),
-            user_id: "admin".to_string(),
-            nickname: rec.nickname.clone(),
-            message_id: rec.message_id.clone(),
-            text: rec.text.clone(),
-            timestamp_ms: rec.timestamp_ms,
-            is_admin: true,
-            sender_user_id: None,
-            sender_nickname: None,
-            raw: None,
+            user_id: UserId("admin".to_string()),
+            raw_message_id: Some(rec.message_id.clone()),
+            event_type: "parse_override".to_string(),
+            effective_at: now,
+            sequence: crate::messages::next_seq(),
+            payload: DomainEvent::ParseOverride(ParseOverrideEvent {
+                event_id,
+                round_id: RoundId(cfg.round.round_id.clone()),
+                target_raw_message_id: rec.message_id.clone(),
+                target_record_id: Some(rec.record_id.clone()),
+                target_record_revision: Some(rec.record_revision.saturating_add(1)),
+                corrected_parsed_message: serde_json::to_value(corrected)?,
+                admin_user_id: UserId("admin".to_string()),
+                reason: reason.to_string(),
+                occurred_at: now,
+            }),
+            status: EventStatus::Active,
         };
-        self.emit_parse_override(
-            &cfg,
-            &ev,
-            crate::messages::next_seq(),
-            Utc::now(),
-            corrected,
-            reason,
-        )
-        .await;
+        self.messages
+            .append_raw_event(&cfg.round.round_id, &serde_json::to_value(event)?)
+            .await?;
+        Ok(())
     }
 }
 

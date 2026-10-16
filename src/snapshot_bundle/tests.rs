@@ -82,6 +82,7 @@ async fn imported_bundle_replays_to_same_board() {
     let record = MessageRecord {
         record_id: "record-1".to_string(),
         record_revision: 1,
+        processing: None,
         seq: 1,
         group_id: "123456789".to_string(),
         user_id: "u1".to_string(),

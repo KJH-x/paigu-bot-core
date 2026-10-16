@@ -1,22 +1,17 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::TimeZone;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::bus::{EventSink, IncomingEvent, PipelineOutcome};
-use crate::domain::event::DomainEvent;
 use crate::domain::ids::{RoundId, UserId};
-use crate::domain::item::RoundContext;
-use crate::engine::replay::{describe_event, rebuild_allocation_snapshot};
+use crate::engine::replay::rebuild_allocation_snapshot;
 use crate::messages::{MessageLog, MessageRecord as LogMessageRecord};
+use crate::parser::coalesce::Classification;
 use crate::parser::parsed_event::ParsedIntent;
-use crate::parser::policy;
-use crate::parser::coalesce::{Classification, GroupIntent};
-use crate::parser::rule_parser::RuleParser;
-use crate::parser::validation::{EventValidator, ValidateContext, ValidationOutcome};
 use crate::replay::session::{ReplayOverrides, ReplayResult};
 use crate::settings::{AppConfig, ConfigStore};
 
@@ -27,16 +22,19 @@ mod export;
 mod llm_parse;
 mod replay_view;
 mod state;
+mod understanding;
 
+#[cfg(test)]
+mod action_tests;
+#[cfg(test)]
+mod automatic_tests;
 #[cfg(test)]
 mod tests;
 
-use admin::{cancel_for_modify, priority_eligibility};
-use llm_parse::BareSubitemOutcome;
+use admin::priority_eligibility;
 use state::{MessageRecord, State};
 
 const RULE_CONFIDENCE: f32 = 0.9;
-const CONFIDENCE_THRESHOLD: f32 = 0.65;
 
 /// 测试用：识别“伪造来源”双层 JSON 封装。NC 的完整文本本身为
 /// `{"id":"<qq>","text":"<内容>"}`（可选 `nickname` / `is_admin`）；命中则把来源改为内层
@@ -287,19 +285,8 @@ pub struct Pipeline {
     llm: Arc<dyn LlmClient>,
     state: Mutex<State>,
     messages: Arc<MessageLog>,
-    /// 当前"打开"的合并组（同发送者、相邻、同意图）。
-    merge_open: Mutex<Option<OpenGroup>>,
     /// 串行化合并摄取（避免并发 `recompute` 的读改写竞态）。
     ingest_lock: Mutex<()>,
-}
-
-/// 合并组状态（实验特性 2026-10-13）。
-struct OpenGroup {
-    round_id: String,
-    revision: u64,
-    user_id: String,
-    intent: GroupIntent,
-    events: Vec<IncomingEvent>,
 }
 
 impl Pipeline {
@@ -344,7 +331,6 @@ impl Pipeline {
             llm,
             state: Mutex::new(State::default()),
             messages: messages.unwrap_or_else(MessageLog::from_env),
-            merge_open: Mutex::new(None),
             ingest_lock: Mutex::new(()),
         })
     }
@@ -392,7 +378,7 @@ impl Pipeline {
                     }
                 }
             }
-            let outcome = Box::pin(self.process(seg)).await;
+            let outcome = Box::pin(self.process_inner(seg)).await;
             statuses.push(outcome.status.clone());
             if !outcome.detail.is_empty() {
                 details.push(format!("{} [{}]", outcome.detail, outcome.status));
@@ -420,374 +406,161 @@ impl Pipeline {
     }
 
     pub async fn process(&self, ev: IncomingEvent) -> PipelineOutcome {
+        let _serial = self.message_write_guard().await;
+        self.process_inner(ev).await
+    }
+
+    async fn process_inner(&self, ev: IncomingEvent) -> PipelineOutcome {
         let cfg = self.cfg.get().await;
-        // C-3：保留成员原始事件（WS 路径由 Gateway 落盘；此处覆盖 API/脚本注入路径）
         if let Some(raw) = &ev.raw {
-            let round_id = cfg.round.round_id.clone();
-            if let Err(e) = self.messages.append_raw_event(&round_id, raw).await {
-                warn!("原始事件写入失败: {e}");
+            if let Err(error) = self
+                .messages
+                .append_raw_event(&cfg.round.round_id, raw)
+                .await
+            {
+                warn!("原始事件写入失败: {error}");
             }
         }
-        // 代排：`代<名称>排: …` → 按段归属（发信人段 + 被代理人段），逐段复用本流程。
         if let Some(segments) = proxy_segments(&ev.text) {
             return self.process_proxy_segments(&ev, segments).await;
         }
-        let (identity, _display_raw) = crate::parser::normalize::clean_nickname(&ev.nickname);
-        // 消息流展示名与排位表同源（CN → 归一化昵称 → 成员反查 → user_id）。
+        let (identity, _) = crate::parser::normalize::clean_nickname(&ev.nickname);
         let display = crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname)
             .unwrap_or_else(|| ev.user_id.clone());
-
-        let seq = {
-            let mut state = self.state.lock().await;
-            let key = format!("{}::{}", ev.group_id, ev.message_id);
-            if !state.seen.insert(key) {
-                let detail = "重复 message_id，已按幂等忽略";
-                // Duplicate inputs do not mutate the board, but they are still
-                // distinct inbound messages and need a unique UI/log sequence.
-                state.seq += 1;
-                let seq = state.seq;
-                state.messages.push(MessageRecord {
-                    seq,
-                    user_id: ev.user_id.clone(),
-                    display: display.clone(),
-                    text: ev.text.clone(),
-                    status: "Duplicate".to_string(),
-                    detail: detail.to_string(),
-                });
-                let version = state.version;
-                let snapshot = state
-                    .snapshot
-                    .as_ref()
-                    .and_then(|s| serde_json::to_value(s).ok());
-                drop(state);
-                self.persist(&ev, "Duplicate", detail, "message").await;
-                return PipelineOutcome {
-                    status: "Duplicate".to_string(),
-                    detail: detail.to_string(),
-                    reply: None,
-                    version,
-                    snapshot,
-                };
-            }
-            state.seq += 1;
-            state.display.insert(ev.user_id.clone(), display.clone());
-            state.identity.insert(ev.user_id.clone(), identity.clone());
-            state.seq
-        };
-
-        let text = ev.text.trim().to_string();
-
-        if text.is_empty() {
-            return self
-                .finish(&ev, &display, seq, "Ignored", "空消息", None)
-                .await;
-        }
-
-        if text.starts_with('/') {
-            if !ev.is_admin {
-                return self
-                    .finish(
-                        &ev,
-                        &display,
-                        seq,
-                        "Rejected",
-                        "非管理员斜杠命令",
-                        Some("此命令仅管理员可用。".to_string()),
-                    )
-                    .await;
-            }
-            let cmd = text.trim_start_matches('/').trim().to_string();
-            if !cfg.gateway.admin_commands_enabled {
-                return self
-                    .finish(
-                        &ev,
-                        &display,
-                        seq,
-                        "Applied",
-                        "管理员命令已记录（执行开关关闭）",
-                        Some("管理员命令已记录（执行开关关闭）".to_string()),
-                    )
-                    .await;
-            }
-            return self.run_admin_command(&ev, &display, seq, &cmd).await;
-        }
-
-        let items = cfg.round.to_items();
-        let rule = RuleParser::parse(&text, &items, ev.is_admin);
-
-        let parsed = if cfg.llm.enabled && cfg.llm.segment_claims && looks_like_order(&text, &rule)
+        let mut context = self.processing_context(&cfg, &ev).await;
+        let seq = context.record.seq;
         {
-            // 切分改由 LLM 自动完成（关键词提取）；失败/超时回退规则解析器。
-            match self.llm_parse(&cfg, &ev).await {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    warn!("LLM 切分失败，回退规则：{e}");
-                    rule
-                }
+            let mut state = self.state.lock().await;
+            state.seq = seq;
+            if !state
+                .seen
+                .insert(format!("{}::{}", ev.group_id, ev.message_id))
+            {
+                drop(state);
+                context.understanding = crate::messages::processing::Understanding::terminal(
+                    crate::messages::processing::UnderstandingSource::Duplicate,
+                    "Duplicate",
+                    "重复 message_id，已按幂等忽略",
+                    None,
+                );
+                return self
+                    .finish(
+                        &cfg.round.round_id,
+                        &context,
+                        &ev,
+                        &display,
+                        context.understanding.validation.clone(),
+                    )
+                    .await;
             }
-        } else if rule.confidence >= RULE_CONFIDENCE && rule.intent != ParsedIntent::Unknown {
-            rule
-        } else if cfg.llm.enabled {
-            match self.llm_parse(&cfg, &ev).await {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    if cfg.llm.fallback_to_rules {
-                        warn!("LLM 解析失败，回退规则解析器: {e}");
-                        rule
-                    } else {
-                        return self
-                            .finish(
-                                &ev,
-                                &display,
-                                seq,
-                                "Rejected",
-                                "没识别成功",
-                                Some("没识别成功".to_string()),
-                            )
-                            .await;
-                    }
-                }
+            state.display.insert(ev.user_id.clone(), display.clone());
+            state.identity.insert(ev.user_id.clone(), identity);
+        }
+        let text = ev.text.trim();
+        if text.is_empty() || text.starts_with('/') {
+            if text.starts_with('/') && ev.is_admin && cfg.gateway.admin_commands_enabled {
+                return self
+                    .run_admin_command(
+                        &cfg.round.round_id,
+                        &ev,
+                        &display,
+                        seq,
+                        text.trim_start_matches('/').trim(),
+                    )
+                    .await;
             }
-        } else if cfg.llm.fallback_to_rules {
-            rule
-        } else {
+            let (status, detail) = if text.is_empty() {
+                ("Ignored", "空消息")
+            } else if !ev.is_admin {
+                ("Rejected", "非管理员斜杠命令")
+            } else {
+                ("Applied", "管理员命令已记录（执行开关关闭）")
+            };
+            context.understanding = crate::messages::processing::Understanding::terminal(
+                crate::messages::processing::UnderstandingSource::Control,
+                status,
+                detail,
+                text.starts_with('/').then(|| detail.to_string()),
+            );
             return self
                 .finish(
+                    &cfg.round.round_id,
+                    &context,
                     &ev,
                     &display,
-                    seq,
-                    "Rejected",
-                    "LLM 未启用",
-                    Some("没识别成功".to_string()),
+                    context.understanding.validation.clone(),
                 )
                 .await;
-        };
-
-        let is_modify = parsed.intent == ParsedIntent::Modify;
-        let mut parsed = parsed;
-        if is_modify {
-            // 改单（D-2）：按新数量重排；应用时先撤销本人该商品的既有认购
-            parsed.intent = ParsedIntent::Claim;
         }
-
-        if parsed.intent == ParsedIntent::Claim
-            && parsed.items.is_empty()
-            && parsed.ambiguous_parts.is_empty()
-        {
+        context.understanding = self.understand(&cfg, &ev, &context, false).await;
+        let evaluated = crate::replay::session::evaluate_understanding(
+            &cfg,
+            &context.record,
+            &context.understanding,
+            context.manual_phase,
+        );
+        if evaluated.events.is_empty() {
             return self
-                .finish(&ev, &display, seq, "Ignored", "未解析出商品", None)
+                .finish(
+                    &cfg.round.round_id,
+                    &context,
+                    &ev,
+                    &display,
+                    evaluated.outcome,
+                )
                 .await;
         }
-
-        let round_id = RoundId(cfg.round.round_id.clone());
-        let round_contexts = vec![RoundContext {
-            round_id: round_id.clone(),
-            title: cfg.round.title.clone(),
-            items: items.clone(),
-        }];
-        let now = DateTime::<Utc>::from_timestamp_millis(ev.timestamp_ms).unwrap_or_else(Utc::now);
-
-        // §U7 first-match：只报角色名/子项名时按目录顺序取第一个可拼团商品；
-        // 全部 fail → LLM 澄清（成功后写 ParseOverride 事件）。
-        if parsed.intent == ParsedIntent::Claim {
-            match self
-                .resolve_bare_subitem_claims(&cfg, &ev, parsed, &round_contexts, now, seq)
-                .await
+        let (events, eligibilities, snapshot) = {
+            let state = self.state.lock().await;
+            let mut events = state.events.clone();
+            events.extend(evaluated.events);
+            let mut eligibilities = state.eligibilities.clone();
+            if evaluated.priority_claim && !eligibilities.iter().any(|e| e.user_id.0 == ev.user_id)
             {
-                BareSubitemOutcome::Resolved(p) => parsed = p,
-                BareSubitemOutcome::FallbackIgnore => {
-                    return self
-                        .finish(
-                            &ev,
-                            &display,
-                            seq,
-                            "Ignored",
-                            "商品未能 first-match，未记录",
-                            None,
-                        )
-                        .await;
-                }
-                BareSubitemOutcome::FallbackReject => {
-                    return self
-                        .finish(
-                            &ev,
-                            &display,
-                            seq,
-                            "Rejected",
-                            "没识别成功",
-                            Some("没识别成功".to_string()),
-                        )
-                        .await;
-                }
+                eligibilities.push(priority_eligibility(
+                    &RoundId(cfg.round.round_id.clone()),
+                    &ev.user_id,
+                ));
             }
-        }
-
-        let user_id = UserId(ev.user_id.clone());
-        let validator = EventValidator::new(CONFIDENCE_THRESHOLD);
-        let box_map = crate::settings::box_redirect_map(&cfg.round.items);
-
-        let event = match validator
-            .validate(
-                parsed,
-                ValidateContext {
-                    user_id: &user_id,
-                    group_id: &ev.group_id,
-                    raw_message_id: Some(ev.message_id.clone()),
-                    active_rounds: &round_contexts,
-                    box_map: &box_map,
-                    now,
-                    sequence: seq,
-                },
-            )
+            let names = state
+                .display
+                .iter()
+                .filter_map(|(uid, raw)| {
+                    crate::settings::resolve_cn(&cfg, uid, raw)
+                        .map(|name| (UserId(uid.clone()), name))
+                })
+                .collect();
+            let snapshot =
+                rebuild_allocation_snapshot(&cfg.round.to_items(), &events, &eligibilities, &names);
+            (events, eligibilities, snapshot)
+        };
+        let version = snapshot.version;
+        let mut outcome = evaluated.outcome;
+        outcome.reply = Some(format!("已记录，当前版本 #{version}"));
+        let record = match self
+            .persist_understanding(&cfg.round.round_id, &context, outcome.clone())
             .await
         {
-            Ok(ValidationOutcome::Ok(event)) => *event,
-            Ok(ValidationOutcome::NeedConfirm(reply)) => {
-                let reply = reply.text_content().map(str::to_string);
-                return self
-                    .finish(&ev, &display, seq, "NeedConfirm", "需要确认", reply)
-                    .await;
-            }
-            Ok(ValidationOutcome::Reject(reply)) => {
-                let reply = reply.text_content().map(str::to_string);
-                return self
-                    .finish(&ev, &display, seq, "Rejected", "校验拒绝", reply)
-                    .await;
-            }
-            Ok(ValidationOutcome::Ignore) => {
-                return self
-                    .finish(
-                        &ev,
-                        &display,
-                        seq,
-                        "Ignored",
-                        "无法识别为排谷/撤销意图",
-                        None,
-                    )
-                    .await;
-            }
-            Err(e) => {
-                return self
-                    .finish(&ev, &display, seq, "Error", &format!("处理失败: {e}"), None)
-                    .await;
-            }
+            Ok(record) => record,
+            Err(error) => return self.persistence_failure(&ev, false, error).await,
         };
-
-        // U4：优先用户候选含 CN/别名；匿名代排按**发送者**判定（R8）。
-        let perm_uid = ev.sender_user_id.as_deref().unwrap_or(&ev.user_id);
-        let perm_nick = ev.sender_nickname.as_deref().unwrap_or(&ev.nickname);
-        let is_priority = policy::is_priority(&cfg, perm_uid, perm_nick);
-        if policy::in_priority_at(&cfg, ev.timestamp_ms) && !is_priority {
-            return self
-                .finish(
-                    &ev,
-                    &display,
-                    seq,
-                    "Rejected",
-                    "优先时段仅限预存(购物金)用户",
-                    Some("优先时段仅限预存(购物金)用户，请求已拒绝".to_string()),
-                )
-                .await;
-        }
-
-        if !cfg.round.phases.is_empty() {
-            if let Some(phase) = policy::phase_at(&cfg.round.phases, ev.timestamp_ms) {
-                if let Some(detail) = policy::phase_rejection(&cfg, &event, phase, is_priority) {
-                    let reply = detail.clone();
-                    return self
-                        .finish(&ev, &display, seq, "Rejected", &detail, Some(reply))
-                        .await;
-                }
-            }
-        }
-
-        {
-            let st = self.state.lock().await;
-            if st.locked {
-                drop(st);
-                return self
-                    .finish(
-                        &ev,
-                        &display,
-                        seq,
-                        "Rejected",
-                        "已锁定，不再接受排/撤/改",
-                        Some("已锁定，不再接受排/撤/改".to_string()),
-                    )
-                    .await;
-            }
-        }
-
-        let mut detail = describe_event(&event);
-        if is_modify {
-            detail = format!("改单：{detail}");
-        }
-        let (version, snapshot_value, reply) = {
-            let mut state = self.state.lock().await;
-            if is_priority
-                && !state
-                    .eligibilities
-                    .iter()
-                    .any(|e| e.user_id.0 == ev.user_id)
-            {
-                state
-                    .eligibilities
-                    .push(priority_eligibility(&round_id, &ev.user_id));
-            }
-            if is_modify {
-                if let DomainEvent::ClaimCreated(created) = &event.payload {
-                    let targets: Vec<_> = created.items.iter().map(|l| l.item_id.clone()).collect();
-                    for item_id in targets {
-                        state
-                            .events
-                            .push(cancel_for_modify(&round_id, &ev, seq, now, item_id));
-                    }
-                }
-            }
-            state.events.push(event);
-            // U4：为分配展示名解析 CN（回退归一化昵称 → user_id）。
-            let display_names: std::collections::HashMap<crate::domain::ids::UserId, String> =
-                state
-                    .display
-                    .iter()
-                    .filter_map(|(uid, raw)| {
-                        crate::settings::resolve_cn(&cfg, uid, raw)
-                            .map(|name| (crate::domain::ids::UserId(uid.clone()), name))
-                    })
-                    .collect();
-            let snapshot = rebuild_allocation_snapshot(
-                &items,
-                &state.events,
-                &state.eligibilities,
-                &display_names,
-            );
-            let version = snapshot.version;
-            let snapshot_value = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
-            state.version = version;
-            state.snapshot = Some(snapshot);
-            state.messages.push(MessageRecord {
-                seq,
-                user_id: ev.user_id.clone(),
-                display: display.clone(),
-                text: ev.text.clone(),
-                status: "Applied".to_string(),
-                detail: detail.clone(),
-            });
-            (
-                version,
-                snapshot_value,
-                format!("已记录，当前版本 #{}", version),
-            )
-        };
-
-        self.persist(&ev, "Applied", &detail, "message").await;
-
+        let value = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
+        let mut state = self.state.lock().await;
+        state.events = events;
+        state.eligibilities = eligibilities;
+        state.version = version;
+        state.snapshot = Some(snapshot);
+        state.messages.push(MessageRecord::from_log(
+            &record,
+            &cfg.round.round_id,
+            &display,
+        ));
         PipelineOutcome {
-            status: "Applied".to_string(),
-            detail,
-            reply: Some(reply),
+            status: outcome.status,
+            detail: outcome.detail,
+            reply: outcome.reply,
             version,
-            snapshot: Some(snapshot_value),
+            snapshot: Some(value),
         }
     }
 
@@ -812,8 +585,19 @@ impl Pipeline {
     async fn ingest_one(&self, cfg: &AppConfig, mut ev: IncomingEvent) -> PipelineOutcome {
         // 非群消息（私聊/临时会话无群号）一律 Dropped，不进入处理（防御性；网关已先拦）。
         if ev.group_id.trim().is_empty() {
-            self.persist(&ev, "Dropped", "非群消息", "drop:not_group_message")
-                .await;
+            if let Err(error) = self
+                .persist(
+                    &cfg.round.round_id,
+                    &ev,
+                    crate::messages::next_seq(),
+                    "Dropped",
+                    "非群消息",
+                    "drop:not_group_message",
+                )
+                .await
+            {
+                return self.persistence_failure(&ev, true, error).await;
+            }
             let (version, snapshot) = self.board().await;
             return PipelineOutcome {
                 status: "Dropped".to_string(),
@@ -841,157 +625,204 @@ impl Pipeline {
     }
 
     /// 合并摄取（急切 + 更新，R5）：以日志为准 `recompute`，保证 测试==实际、追加==新消息。
-    async fn ingest_merged(&self, cfg: AppConfig, ev: IncomingEvent) -> PipelineOutcome {
-        let _serial = self.ingest_lock.lock().await; // 串行化（C8）
-        // 锁定：仍按旧路径拒绝，不触发 recompute。
-        if self.state.lock().await.locked {
-            return self.process(ev).await;
+    async fn ingest_merged(&self, _cfg: AppConfig, ev: IncomingEvent) -> PipelineOutcome {
+        let _serial = self.message_write_guard().await;
+        let cfg = self.cfg.get().await;
+        let already_seen = self
+            .state
+            .lock()
+            .await
+            .seen
+            .contains(&format!("{}::{}", ev.group_id, ev.message_id));
+        if already_seen || self.is_locked().await || proxy_segments(&ev.text).is_some() {
+            return self.process_inner(ev).await;
         }
-        let items = cfg.round.to_items();
-        let kind = {
-            let cand = crate::parser::coalesce::Candidate {
-                user_id: &ev.user_id,
-                text: &ev.text,
-                is_admin: ev.is_admin,
-                force_boundary: false,
-            };
-            crate::parser::coalesce::classify(&cand, &items)
+        let candidate = crate::parser::coalesce::Candidate {
+            user_id: &ev.user_id,
+            text: &ev.text,
+            is_admin: ev.is_admin,
+            force_boundary: false,
         };
-
-        let Classification::Join(intent) = kind else {
-            // 边界 / 闲聊：断开当前组，走旧路径。
-            *self.merge_open.lock().await = None;
-            return self.process(ev).await;
-        };
-
-        // 追加或新建当前组；代表 = 组内 `timestamp` 最大者（并列取较晚到达）。
-        let (joined, rep_message_id, rep_ts, rep_nick) = {
-            let mut open = self.merge_open.lock().await;
-            let stale = open
-                .as_ref()
-                .map(|g| {
-                    g.round_id != cfg.round.round_id
-                        || g.revision != cfg.revision
-                        || g.user_id != ev.user_id
-                        || g.intent != intent
-                })
-                .unwrap_or(true);
-            if stale {
-                *open = Some(OpenGroup {
-                    round_id: cfg.round.round_id.clone(),
-                    revision: cfg.revision,
-                    user_id: ev.user_id.clone(),
-                    intent,
-                    events: Vec::new(),
-                });
+        if !matches!(
+            crate::parser::coalesce::classify(&candidate, &cfg.round.to_items()),
+            Classification::Join(_)
+        ) {
+            return self.process_inner(ev).await;
+        }
+        if let Some(raw) = &ev.raw {
+            if let Err(error) = self
+                .messages
+                .append_raw_event(&cfg.round.round_id, raw)
+                .await
+            {
+                return self.persistence_failure(&ev, false, error).await;
             }
-            let g = open.as_mut().unwrap();
-            g.events.push(ev.clone());
-            let rep_idx = g
-                .events
+        }
+        let mut context = self.processing_context(&cfg, &ev).await;
+        let new_record_id = context.record.record_id.clone();
+        if let Err(error) = self
+            .messages
+            .append(&cfg.round.round_id, &context.record)
+            .await
+        {
+            return self.persistence_failure(&ev, false, error).await;
+        }
+        let result = async {
+            let records = self.messages.read_all(&cfg.round.round_id).await?;
+            let mut ordered: Vec<_> = records.iter().collect();
+            ordered.sort_by_key(|record| (record.timestamp_ms, record.seq));
+            let overrides =
+                crate::replay::session::load_parse_overrides(&self.messages, &cfg.round.round_id)
+                    .await;
+            let groups = crate::replay::session::message_groups(&cfg, &ordered, &overrides);
+            let group = groups
                 .iter()
-                .enumerate()
-                .max_by_key(|(i, e)| (e.timestamp_ms, *i))
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            let rep = g.events[rep_idx].clone();
-            let cands: Vec<crate::parser::coalesce::Candidate> = g
-                .events
+                .find(|group| {
+                    group
+                        .iter()
+                        .any(|&index| ordered[index].record_id == new_record_id)
+                })
+                .ok_or_else(|| anyhow::anyhow!("新消息缺少理解单元"))?;
+            let members: Vec<_> = group.iter().map(|&index| ordered[index]).collect();
+            let representative = members
                 .iter()
-                .map(|e| crate::parser::coalesce::Candidate {
-                    user_id: &e.user_id,
-                    text: &e.text,
-                    is_admin: e.is_admin,
+                .max_by_key(|record| (record.timestamp_ms, record.seq))
+                .ok_or_else(|| anyhow::anyhow!("空理解单元"))?;
+            context.record = (*representative).clone();
+            context.members = crate::messages::processing::processing_members(&members);
+            let mut synthetic = ev.clone();
+            synthetic.message_id = representative.message_id.clone();
+            synthetic.nickname = representative.nickname.clone();
+            synthetic.timestamp_ms = representative.timestamp_ms;
+            let candidates: Vec<_> = members
+                .iter()
+                .map(|record| crate::parser::coalesce::Candidate {
+                    user_id: &record.user_id,
+                    text: &record.text,
+                    is_admin: record.is_admin,
                     force_boundary: false,
                 })
                 .collect();
-            let all: Vec<usize> = (0..cands.len()).collect();
-            let joined = crate::parser::coalesce::joined_text(&cands, &all);
-            (joined, rep.message_id.clone(), rep.timestamp_ms, rep.nickname.clone())
-        };
-
-        // C-3：保留原始事件。
-        if let Some(raw) = &ev.raw {
-            if let Err(e) = self.messages.append_raw_event(&cfg.round.round_id, raw).await {
-                warn!("原始事件写入失败: {e}");
+            synthetic.text = crate::parser::coalesce::joined_text(
+                &candidates,
+                &(0..members.len()).collect::<Vec<_>>(),
+            );
+            context.understanding = self.understand(&cfg, &synthetic, &context, true).await;
+            let evaluated = crate::replay::session::evaluate_understanding(
+                &cfg,
+                &context.record,
+                &context.understanding,
+                context.manual_phase,
+            );
+            let completed = context.completed_record(evaluated.outcome);
+            self.messages
+                .update(&cfg.round.round_id, &completed.record_id, |record| {
+                    record.processing = completed.processing.clone();
+                })
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("理解代表消息已不存在"))?;
+            if completed.record_id != new_record_id {
+                let mut member_result = completed
+                    .processing
+                    .as_ref()
+                    .and_then(|history| history.results.last())
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("新消息缺少原自动结果"))?;
+                member_result.original_outcome =
+                    crate::messages::processing::ProcessingOutcome::new(
+                        "Merged",
+                        format!("并入 #{}", completed.seq),
+                        None,
+                    );
+                self.messages
+                    .update(&cfg.round.round_id, &new_record_id, |record| {
+                        record
+                            .processing
+                            .get_or_insert_with(Default::default)
+                            .results
+                            .push(member_result.clone());
+                    })
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("新消息已不存在"))?;
             }
+            self.recompute_locked(&cfg).await?;
+            anyhow::Ok(())
         }
-        // 落原始记录（状态占位，recompute 回写）。
-        self.persist(&ev, "Pending", "pending", "message").await;
-
-        // LLM 解析合并文本 → ParseOverride（键=代表 message_id），保证重放一致。
-        if cfg.llm.enabled {
-            let rule = RuleParser::parse(&joined, &items, ev.is_admin);
-            if looks_like_order(&joined, &rule) {
-                let mut synthetic = ev.clone();
-                synthetic.text = joined.clone();
-                if let Ok(parsed) = self.llm_parse(&cfg, &synthetic).await {
-                    let mut rep_ev = ev.clone();
-                    rep_ev.message_id = rep_message_id.clone();
-                    rep_ev.nickname = rep_nick.clone();
-                    rep_ev.timestamp_ms = rep_ts;
-                    self.emit_parse_override(
-                        &cfg,
-                        &rep_ev,
-                        crate::messages::next_seq(),
-                        Utc::now(),
-                        &parsed,
-                        "合并代表消息 LLM 澄清",
-                    )
-                    .await;
-                }
-            }
+        .await;
+        if let Err(error) = result {
+            return self.persistence_failure(&ev, false, error).await;
         }
-
-        // 权威重算（追加更新 == 新消息更新）。
-        let _ = self.recompute().await;
-
         let state = self.state.lock().await;
-        let last = state.messages.last();
-        let (status, detail) = last
-            .map(|m| (m.status.clone(), m.detail.clone()))
-            .unwrap_or_else(|| ("Ignored".to_string(), String::new()));
+        let message = state
+            .messages
+            .iter()
+            .find(|message| message.record_id == new_record_id);
         PipelineOutcome {
-            status,
-            detail,
+            status: message
+                .map(|message| message.status.clone())
+                .unwrap_or_else(|| "Error".to_string()),
+            detail: message
+                .map(|message| message.detail.clone())
+                .unwrap_or_else(|| "重算后消息缺失".to_string()),
             reply: None,
             version: state.version,
             snapshot: state
                 .snapshot
                 .as_ref()
-                .and_then(|s| serde_json::to_value(s).ok()),
+                .and_then(|snapshot| serde_json::to_value(snapshot).ok()),
         }
     }
 
     /// 以消息日志为准的权威重算（实时/重放同源）；返回重放结果。
     pub async fn recompute(&self) -> anyhow::Result<ReplayResult> {
+        let _serial = self.message_write_guard().await;
         let cfg = self.cfg.get().await;
+        self.recompute_locked(&cfg).await
+    }
+
+    pub(crate) async fn message_write_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.ingest_lock.lock().await
+    }
+
+    /// Caller holds message_write_guard; manual writers also hold the config read guard.
+    pub(crate) async fn recompute_locked(&self, cfg: &AppConfig) -> anyhow::Result<ReplayResult> {
         let result =
-            crate::replay::session::replay(&self.messages, &cfg, ReplayOverrides::default()).await?;
+            crate::replay::session::replay(&self.messages, cfg, ReplayOverrides::default()).await?;
         let mut records = self.messages.read_all(&cfg.round.round_id).await?;
-        let outcomes: std::collections::HashMap<&str, (&str, &str)> = result
-            .outcomes
+        let messages: std::collections::HashMap<_, _> = result
+            .messages
             .iter()
-            .map(|o| (o.record_id.as_str(), (o.status.as_str(), o.detail.as_str())))
+            .map(|message| (message.record_id.as_str(), message))
             .collect();
         for record in &mut records {
-            if let Some((status, detail)) = outcomes.get(record.record_id.as_str()) {
-                record.status = (*status).to_string();
-                record.detail = (*detail).to_string();
+            if let Some(message) = messages.get(record.record_id.as_str()) {
+                record.record_revision = message.record_revision;
+                record.status = message.status.clone();
+                record.detail = message.detail.clone();
             }
         }
-        self.messages.replace_all(&cfg.round.round_id, &records).await?;
+        self.messages
+            .replace_all(&cfg.round.round_id, &records)
+            .await?;
         self.apply_replay(&result, &records).await;
         Ok(result)
     }
 
     /// 持久化一条入站消息日志（`routed=message`，`status` 记处理结果）。
-    async fn persist(&self, ev: &IncomingEvent, status: &str, detail: &str, routed: &str) {
-        let round_id = self.cfg.get().await.round.round_id.clone();
+    async fn persist(
+        &self,
+        round_id: &str,
+        ev: &IncomingEvent,
+        seq: i64,
+        status: &str,
+        detail: &str,
+        routed: &str,
+    ) -> anyhow::Result<LogMessageRecord> {
         let rec = LogMessageRecord {
             record_id: crate::messages::new_record_id(),
             record_revision: 1,
-            seq: crate::messages::next_seq(),
+            processing: None,
+            seq,
             group_id: ev.group_id.clone(),
             user_id: ev.user_id.clone(),
             nickname: ev.nickname.clone(),
@@ -1005,34 +836,62 @@ impl Pipeline {
             sender_user_id: ev.sender_user_id.clone(),
             sender_nickname: ev.sender_nickname.clone(),
         };
-        if let Err(e) = self.messages.append(&round_id, &rec).await {
-            warn!("消息日志写入失败: {e}");
+        self.messages.append(round_id, &rec).await?;
+        Ok(rec)
+    }
+
+    async fn persistence_failure(
+        &self,
+        ev: &IncomingEvent,
+        duplicate: bool,
+        error: anyhow::Error,
+    ) -> PipelineOutcome {
+        warn!("消息日志写入失败: {error}");
+        let mut state = self.state.lock().await;
+        if !duplicate {
+            state
+                .seen
+                .remove(&format!("{}::{}", ev.group_id, ev.message_id));
+        }
+        PipelineOutcome {
+            status: "Error".to_string(),
+            detail: "消息日志保存失败，本次未作为成功消息发布；请检查本地存储".to_string(),
+            reply: None,
+            version: state.version,
+            snapshot: state
+                .snapshot
+                .as_ref()
+                .and_then(|s| serde_json::to_value(s).ok()),
         }
     }
 
     async fn finish(
         &self,
+        round_id: &str,
+        context: &understanding::ProcessingContext,
         ev: &IncomingEvent,
         display: &str,
-        seq: i64,
-        status: &str,
-        detail: &str,
-        reply: Option<String>,
+        outcome: crate::messages::processing::ProcessingOutcome,
     ) -> PipelineOutcome {
-        self.persist(ev, status, detail, "message").await;
+        let record = match self
+            .persist_understanding(round_id, context, outcome.clone())
+            .await
+        {
+            Ok(record) => record,
+            Err(error) => {
+                return self
+                    .persistence_failure(ev, outcome.status == "Duplicate", error)
+                    .await
+            }
+        };
         let mut state = self.state.lock().await;
-        state.messages.push(MessageRecord {
-            seq,
-            user_id: ev.user_id.clone(),
-            display: display.to_string(),
-            text: ev.text.clone(),
-            status: status.to_string(),
-            detail: detail.to_string(),
-        });
+        state
+            .messages
+            .push(MessageRecord::from_log(&record, round_id, display));
         PipelineOutcome {
-            status: status.to_string(),
-            detail: detail.to_string(),
-            reply,
+            status: outcome.status,
+            detail: outcome.detail,
+            reply: outcome.reply,
             version: state.version,
             snapshot: state
                 .snapshot
