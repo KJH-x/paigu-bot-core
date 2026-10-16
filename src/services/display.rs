@@ -1,76 +1,59 @@
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Mutex, OnceLock};
+use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
 use crate::api::ApiState;
 
-const CACHE_LIMIT: usize = 64;
-
-fn board_cache() -> &'static Mutex<HashMap<i64, Value>> {
-    static CACHE: OnceLock<Mutex<HashMap<i64, Value>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub fn clear_cache() {
-    if let Ok(mut cache) = board_cache().lock() {
-        cache.clear();
-    }
-}
-
-fn remember(version: i64, board: &Value) {
-    if let Ok(mut cache) = board_cache().lock() {
-        if cache.len() >= CACHE_LIMIT {
-            if let Some(&oldest) = cache.keys().min() {
-                cache.remove(&oldest);
-            }
-        }
-        cache.insert(version, board.clone());
-    }
-}
-
+/// Compatibility callers still receive a complete coherent view; `since` is not
+/// a projection cursor and can never hide corrections to old message rows.
+#[cfg(test)]
 pub async fn display(state: &ApiState, since: i64) -> Value {
+    display_with_cursor(state, since, None, None).await
+}
+
+pub async fn display_with_cursor(
+    state: &ApiState,
+    _since: i64,
+    epoch: Option<&str>,
+    cursor: Option<u64>,
+) -> Value {
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.read().await;
     let (version, board) = state.pipeline.board().await;
-    let messages = state.pipeline.messages_since(since).await;
-    let who_whats = resolve_who_whats(state, state.pipeline.who_whats().await).await;
+    if board["round_id"]
+        .as_str()
+        .is_some_and(|id| id != cfg.round.round_id)
+    {
+        return json!({"unavailable":true,"error":"round_switching","round_id":cfg.round.round_id});
+    }
+    let messages = state.pipeline.messages_since(0).await;
+    let who_whats = resolve_who_whats(&cfg, state.pipeline.who_whats().await);
+    let (view_epoch, view_revision, previous) = state
+        .pipeline
+        .view_stamp(cfg.revision, &board, &messages)
+        .await;
+    let unchanged = epoch == Some(view_epoch.as_str()) && cursor == Some(view_revision);
+    let changed = previous.map_or_else(Vec::new, |prior| diff_board(&prior, &board));
     let status = state.gateway.status().await;
-
-    let changed = {
-        let previous = board_cache().lock().ok().and_then(|cache| {
-            cache
-                .iter()
-                .filter(|(cached, _)| **cached < version)
-                .max_by_key(|(cached, _)| **cached)
-                .map(|(_, value)| value.clone())
-        });
-        match previous {
-            Some(previous) => diff_board(&previous, &board),
-            None => Vec::new(),
-        }
-    };
-    remember(version, &board);
-
     json!({
-        "version": version,
-        "board": board,
-        "messages": messages,
-        "who_whats": who_whats,
-        "status": status,
-        "changed": changed,
+        "version":version,"view_epoch":view_epoch,"view_revision":view_revision,
+        "round_id":cfg.round.round_id,"title":cfg.round.title,"config_revision":cfg.revision,"catalog":cfg.round.items,
+        "full_resync":!unchanged,"message_mode":if unchanged {"unchanged"} else {"replace"},
+        "board":board,"messages":if unchanged {vec![]} else {messages},
+        "who_whats":who_whats,"status":status,"changed":changed
     })
 }
 
 /// 用 CN 覆盖 `who_whats` 的人名（U4）：按成员缓存 `nickname → user_id` 反查。
-async fn resolve_who_whats(state: &ApiState, who_whats: Vec<Value>) -> Vec<Value> {
+fn resolve_who_whats(cfg: &crate::settings::AppConfig, who_whats: Vec<Value>) -> Vec<Value> {
     if who_whats.is_empty() {
         return who_whats;
     }
-    let cfg = state.cfg.get().await;
     if cfg.members.cn_overrides.is_empty() {
         return who_whats;
     }
-    let members = crate::services::members::cached_members(&cfg);
-    let map = crate::services::members::cn_display_map(&cfg, &members);
+    let members = crate::services::members::cached_members(cfg);
+    let map = crate::services::members::cn_display_map(cfg, &members);
     if map.is_empty() {
         return who_whats;
     }

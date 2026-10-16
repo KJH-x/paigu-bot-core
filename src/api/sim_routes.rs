@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 
 use crate::bus::IncomingEvent;
 use crate::llm::pipeline::parse_timestamp_ms;
-use crate::services::display;
 use crate::settings::AppConfig;
 
 use super::{api_bad_request, ApiError, ApiState};
@@ -285,7 +284,6 @@ async fn sim_identity(Json(body): Json<SimIdentity>) -> Json<Value> {
 async fn sim_reset(State(state): State<Arc<ApiState>>) -> Json<Value> {
     state.pipeline.reset().await;
     clear_identities();
-    display::clear_cache();
     let (version, _) = state.pipeline.board().await;
     Json(json!({ "ok": true, "version": version }))
 }

@@ -24,6 +24,39 @@ pub fn routes() -> Router<Arc<ApiState>> {
             "/api/messages/:key/actions",
             get(actions).post(save_actions),
         )
+        .route("/api/messages/undo", get(get_undo).post(undo))
+        .route("/api/messages/:key/actions/suggest", post(suggest))
+}
+
+async fn suggest(
+    State(state): State<Arc<ApiState>>,
+    Path(key): Path<String>,
+    Json(body): Json<crate::services::message_actions::SuggestInput>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::message_actions::suggest(&state, &key, body)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
+}
+
+async fn get_undo(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<ActionsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::message_actions::undo_status(&state, &query.round_id)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
+}
+
+async fn undo(
+    State(state): State<Arc<ApiState>>,
+    Json(body): Json<crate::services::message_actions::UndoInput>,
+) -> Result<Json<Value>, ApiError> {
+    crate::services::message_actions::undo(&state, body)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
 }
 
 async fn save_actions(

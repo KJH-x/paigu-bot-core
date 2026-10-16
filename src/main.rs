@@ -62,6 +62,9 @@ async fn run_gateway_stack() -> Result<()> {
         Arc::new(llm::client::OpenAiClient::new()),
         messages.clone(),
     );
+    // Rebuild from the durable message/audit journal before accepting any new input.
+    // A corrupt/torn journal stops startup instead of silently reviving old choices.
+    pipeline.recompute().await?;
     let gateway = gateway::Gateway::new(store.clone(), pipeline.clone());
 
     {

@@ -10,6 +10,7 @@ import { verifyBoardLayout } from './board-layout.mjs';
 import { verifyMessageIdentity } from './message-identity.mjs';
 import { verifyAutomaticBaseline } from './automatic-baseline.mjs';
 import { verifyMessageActions } from './message-actions.mjs';
+import { verifyMessageTransactions } from './message-transactions.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -522,6 +523,10 @@ function buildCases() {
     {
       name: '完整动作手工编辑、忽略拒绝恢复与草稿冲突',
       fn: verifyMessageActions,
+    },
+    {
+      name: '补充原子事务、自动组转换、单步撤回与过期代填',
+      fn: verifyMessageTransactions,
     },
     {
       name: '当前轮次复盘只读与真实步骤',

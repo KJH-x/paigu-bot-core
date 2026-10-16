@@ -23,13 +23,18 @@ mod llm_parse;
 mod replay_view;
 mod state;
 mod understanding;
+mod view;
 
 #[cfg(test)]
 mod action_tests;
 #[cfg(test)]
 mod automatic_tests;
 #[cfg(test)]
+mod suggest_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transaction_tests;
 
 use admin::priority_eligibility;
 use state::{MessageRecord, State};
@@ -287,9 +292,18 @@ pub struct Pipeline {
     messages: Arc<MessageLog>,
     /// 串行化合并摄取（避免并发 `recompute` 的读改写竞态）。
     ingest_lock: Mutex<()>,
+    view_clock: Mutex<view::ViewClock>,
 }
 
 impl Pipeline {
+    pub(crate) async fn complete_action_draft(
+        &self,
+        cfg: &AppConfig,
+        system: &str,
+        user: &str,
+    ) -> anyhow::Result<String> {
+        self.llm.complete(&cfg.llm, system, user).await
+    }
     #[allow(dead_code)]
     pub fn new(cfg: Arc<ConfigStore>) -> Arc<Self> {
         Self::new_with_client(cfg, Arc::new(OpenAiClient::new()))
@@ -332,6 +346,7 @@ impl Pipeline {
             state: Mutex::new(State::default()),
             messages: messages.unwrap_or_else(MessageLog::from_env),
             ingest_lock: Mutex::new(()),
+            view_clock: Mutex::new(view::ViewClock::new()),
         })
     }
 
@@ -674,7 +689,7 @@ impl Pipeline {
             let overrides =
                 crate::replay::session::load_parse_overrides(&self.messages, &cfg.round.round_id)
                     .await;
-            let groups = crate::replay::session::message_groups(&cfg, &ordered, &overrides);
+            let groups = crate::replay::session::prospective_groups(&cfg, &ordered, &overrides);
             let group = groups
                 .iter()
                 .find(|group| {
@@ -718,6 +733,8 @@ impl Pipeline {
             self.messages
                 .update(&cfg.round.round_id, &completed.record_id, |record| {
                     record.processing = completed.processing.clone();
+                    record.status = completed.status.clone();
+                    record.detail = completed.detail.clone();
                 })
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("理解代表消息已不存在"))?;
@@ -736,6 +753,8 @@ impl Pipeline {
                     );
                 self.messages
                     .update(&cfg.round.round_id, &new_record_id, |record| {
+                        record.status = member_result.original_outcome.status.clone();
+                        record.detail = member_result.original_outcome.detail.clone();
                         record
                             .processing
                             .get_or_insert_with(Default::default)
@@ -788,22 +807,9 @@ impl Pipeline {
     pub(crate) async fn recompute_locked(&self, cfg: &AppConfig) -> anyhow::Result<ReplayResult> {
         let result =
             crate::replay::session::replay(&self.messages, cfg, ReplayOverrides::default()).await?;
-        let mut records = self.messages.read_all(&cfg.round.round_id).await?;
-        let messages: std::collections::HashMap<_, _> = result
-            .messages
-            .iter()
-            .map(|message| (message.record_id.as_str(), message))
-            .collect();
-        for record in &mut records {
-            if let Some(message) = messages.get(record.record_id.as_str()) {
-                record.record_revision = message.record_revision;
-                record.status = message.status.clone();
-                record.detail = message.detail.clone();
-            }
-        }
-        self.messages
-            .replace_all(&cfg.round.round_id, &records)
-            .await?;
+        // Inputs and original automatic outcomes are immutable. Current revisions
+        // and status belong to the rebuildable projection, not a second file commit.
+        let records = self.messages.read_only(&cfg.round.round_id).await?;
         self.apply_replay(&result, &records).await;
         Ok(result)
     }

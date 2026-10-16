@@ -170,44 +170,6 @@ impl Pipeline {
             .append_raw_event(&cfg.round.round_id, &value)
             .await
     }
-
-    /// §10：人工确认「待确认」消息 → 写 `ParseOverride` 事件（调用方随后 `recompute`）。
-    pub async fn apply_parse_override(
-        &self,
-        cfg: &AppConfig,
-        rec: &crate::messages::MessageRecord,
-        corrected: &ParsedMessage,
-        reason: &str,
-    ) -> anyhow::Result<()> {
-        let now = Utc::now();
-        let event_id = EventId(uuid::Uuid::new_v4().to_string());
-        let event = EventEnvelope {
-            event_id: event_id.clone(),
-            round_id: RoundId(cfg.round.round_id.clone()),
-            group_id: rec.group_id.clone(),
-            user_id: UserId("admin".to_string()),
-            raw_message_id: Some(rec.message_id.clone()),
-            event_type: "parse_override".to_string(),
-            effective_at: now,
-            sequence: crate::messages::next_seq(),
-            payload: DomainEvent::ParseOverride(ParseOverrideEvent {
-                event_id,
-                round_id: RoundId(cfg.round.round_id.clone()),
-                target_raw_message_id: rec.message_id.clone(),
-                target_record_id: Some(rec.record_id.clone()),
-                target_record_revision: Some(rec.record_revision.saturating_add(1)),
-                corrected_parsed_message: serde_json::to_value(corrected)?,
-                admin_user_id: UserId("admin".to_string()),
-                reason: reason.to_string(),
-                occurred_at: now,
-            }),
-            status: EventStatus::Active,
-        };
-        self.messages
-            .append_raw_event(&cfg.round.round_id, &serde_json::to_value(event)?)
-            .await?;
-        Ok(())
-    }
 }
 
 /// 取歧义片段的「首 token」（到首个分隔符为止），如 `克莱门莎（可能为：…）` → `克莱门莎`。

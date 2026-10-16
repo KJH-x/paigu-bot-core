@@ -284,7 +284,10 @@ async fn override_guards_round_revision_and_exact_record_identity() {
         .await
         .unwrap()
         .remove(0);
-    assert_eq!(current.record_revision, 2);
+    assert_eq!(
+        current.record_revision, 1,
+        "人工版本留在事务投影，原记录不改写"
+    );
     assert_eq!(current.record_id, record.record_id);
     assert_eq!(current.seq, record.seq);
     assert_eq!(current.timestamp_ms, record.timestamp_ms);

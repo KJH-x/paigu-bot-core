@@ -393,7 +393,12 @@ async fn realtime_and_replay_merge_match() {
     let log = MessageLog::new(&dir, dir.join("events"));
     let records = log.read_all(&cfg.round.round_id).await.unwrap();
     assert_eq!(
-        records.iter().filter(|r| r.status == "Merged").count(),
+        pipeline
+            .messages_since(0)
+            .await
+            .iter()
+            .filter(|r| r["status"] == "Merged")
+            .count(),
         1,
         "首条应标记 Merged"
     );

@@ -6,6 +6,7 @@ use crate::settings::{default_config, ItemConfig, PriorityWindow, SubitemConfig}
 pub(super) struct CountingLlm {
     pub(super) calls: AtomicUsize,
     reply: String,
+    pub(super) prompts: std::sync::Mutex<Vec<(String, String)>>,
 }
 
 #[async_trait]
@@ -13,10 +14,14 @@ impl LlmClient for CountingLlm {
     async fn complete(
         &self,
         _: &crate::settings::LlmSettings,
-        _: &str,
-        _: &str,
+        system: &str,
+        user: &str,
     ) -> anyhow::Result<String> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.prompts
+            .lock()
+            .unwrap()
+            .push((system.into(), user.into()));
         Ok(self.reply.clone())
     }
 }
@@ -69,6 +74,7 @@ pub(super) async fn fixture(
     let llm = Arc::new(CountingLlm {
         calls: AtomicUsize::new(0),
         reply: reply.to_string(),
+        prompts: std::sync::Mutex::new(vec![]),
     });
     let pipeline = Pipeline::new_with_client_dir(store.clone(), llm.clone(), dir.join("messages"));
     let state = crate::api::ApiState {
@@ -241,7 +247,11 @@ async fn automatic_groups_keep_original_results_and_claim_cancel_are_separate() 
     state.pipeline.ingest(incoming("排 徽章 甲 1", 1000)).await;
     state.pipeline.ingest(incoming("排 徽章 甲 2", 2000)).await;
     let records = state.messages.read_all(&cfg.round.round_id).await.unwrap();
-    assert_eq!(records[0].status, "Merged");
+    assert_eq!(records[0].status, "Applied", "原自动结果不可被投影改写");
+    assert_eq!(
+        state.pipeline.messages_since(0).await[0]["status"],
+        "Merged"
+    );
     assert_eq!(
         records[0].processing.as_ref().unwrap().results[0]
             .original_outcome
@@ -483,7 +493,7 @@ async fn legacy_record_is_readable_but_details_do_not_invent_an_automatic_baseli
 }
 
 #[tokio::test]
-async fn changed_group_topology_requires_review_and_restoring_it_reuses_saved_actions() {
+async fn merge_setting_changes_do_not_repartition_persisted_automatic_units() {
     let (state, llm) = fixture(false, "{}").await;
     let mut cfg = state.cfg.get().await;
     cfg.merge.enabled = true;
@@ -496,8 +506,9 @@ async fn changed_group_topology_requires_review_and_restoring_it_reuses_saved_ac
     let revision = cfg.revision;
     state.cfg.put(cfg, revision).await.unwrap();
     let split = state.pipeline.recompute().await.unwrap();
-    assert_eq!(quantity(&split.board), 1);
-    assert_eq!(split.outcomes[1].status, "NeedConfirm");
+    assert_eq!(quantity(&split.board), 3);
+    assert_eq!(split.outcomes[0].status, "Merged");
+    assert_eq!(split.outcomes[1].status, "Applied");
     let mut cfg = state.cfg.get().await;
     cfg.merge.enabled = true;
     let revision = cfg.revision;

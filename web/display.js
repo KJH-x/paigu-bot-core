@@ -12,6 +12,7 @@
     refreshMs: P.INLINE.refreshMs || 5000,
     roundId: P.qs('round') || '',
     version: 0,
+    viewEpoch: '', viewRevision: 0, connectionRevision: 0,
     meta: null,
     config: null,
     items: [],
@@ -26,6 +27,17 @@
   };
 
   var boardEl, boardEmpty, messagesEl, whoEls, statusEl, boardRenderer, smart;
+  var undoSlot = null, undoBusy = false;
+  function refreshUndo() {
+    var button = $('undo-message-action'), round = state.roundId, api = state.apiBase;
+    if (state.source !== 'local' || !round) { button.disabled = true; button.title = '仅本地当前轮次可撤回'; return; }
+    P.get(api + '/api/messages/undo?round_id=' + encodeURIComponent(round)).then(function (slot) {
+      if (round !== state.roundId || api !== state.apiBase || state.source !== 'local') return;
+      undoSlot = slot; button.disabled = undoBusy || !slot.available;
+      button.textContent = slot.available ? '撤回最近修订（' + slot.records + '条）' : '撤回最近修订';
+      button.title = slot.available ? '只撤回最近一笔人工事务；之后的新消息仍保留' : slot.reason || '暂无可撤回修订';
+    }).catch(function () { button.disabled = true; button.title = '撤回状态暂不可用，请刷新'; });
+  }
 
   var MESSAGE_STATUS_TEXT = {
     applied: '已记录',
@@ -126,6 +138,7 @@
     }
     P.openMessageEditor({ apiBase: state.apiBase, message: m, onSaved: function (res) {
       if (res && res.result && res.result.messages) renderMessages(P.normalizeMessages(res.result), true, false);
+      refreshUndo();
       restart(false);
     }});
   }
@@ -249,6 +262,16 @@
 
   function applyPayload(payload) {
     if (!payload) return;
+    if (payload.unavailable) { throw new Error('轮次正在切换，请稍后刷新'); }
+    if (payload.round_id && state.roundId && payload.round_id !== state.roundId) {
+      state.messages = []; state.items = []; state.loaded = false; boardRenderer.clear();
+      messagesEl.replaceChildren(); smart.reset();
+    }
+    if (payload.catalog) {
+      state.roundId = payload.round_id;
+      state.meta = P.buildMeta({ round: { round_id: payload.round_id, title: payload.title, items: payload.catalog } });
+      setRound(payload.title);
+    }
     if (state.loaded && payload.changed === false && payload.version != null && payload.version === state.version) {
       state.status = P.normalizeStatus(payload);
       renderStatus(state.status);
@@ -263,8 +286,8 @@
     state.items = nextItems;
     renderBoard(nextItems, changeMap);
 
-    if (payload.messages !== undefined) {
-      renderMessages(P.normalizeMessages(payload), false, !state.loaded);
+    if (payload.messages !== undefined && payload.message_mode !== 'unchanged') {
+      renderMessages(P.normalizeMessages(payload), payload.message_mode === 'replace', !state.loaded);
     }
 
     if (payload.who_whats !== undefined) {
@@ -278,6 +301,7 @@
     state.status = P.normalizeStatus(payload);
     renderStatus(state.status);
     setVersion(payload.version);
+    state.viewEpoch = payload.view_epoch || ''; state.viewRevision = payload.view_revision || 0;
     state.loaded = true;
     markUpdated();
   }
@@ -320,6 +344,7 @@
 
   function pollOnce() {
     if (state.inFlight) return;
+    var generation = state.connectionRevision;
 
     if (state.source === 'remote') {
       if (!state.remoteBase) {
@@ -330,6 +355,7 @@
       }
       state.inFlight = true;
       P.loadRemote(state.remoteBase, state.roundId).then(function (snap) {
+        if (generation !== state.connectionRevision) return;
         applyRemote(snap);
         state.failures = 0;
         hideBanner();
@@ -346,8 +372,10 @@
     }
 
     state.inFlight = true;
-    P.get('/api/display?since=' + encodeURIComponent(state.version)).then(function (payload) {
+    P.get(state.apiBase + '/api/display?epoch=' + encodeURIComponent(state.viewEpoch) + '&view_revision=' + state.viewRevision).then(function (payload) {
+      if (generation !== state.connectionRevision) return;
       applyPayload(payload);
+      refreshUndo();
       state.failures = 0;
       hideBanner();
       setConn('ok', 'API 正常');
@@ -363,6 +391,7 @@
 
   function restart(resetVersion) {
     if (resetVersion) {
+      state.connectionRevision++; state.viewEpoch = ''; state.viewRevision = 0;
       state.version = 0;
       state.items = [];
       state.messages = [];
@@ -387,7 +416,7 @@
   }
 
   function loadConfig() {
-    return P.get('/api/config').then(function (res) {
+    return P.get(state.apiBase + '/api/config').then(function (res) {
       var cfg = res && res.config ? res.config : res;
       if (!cfg) return;
       state.config = cfg;
@@ -449,6 +478,16 @@
       restart(true);
     });
     $('refresh').addEventListener('click', function () { restart(false); });
+    $('undo-message-action').addEventListener('click', function () {
+      if (undoBusy || state.source !== 'local' || !undoSlot || !undoSlot.available) return;
+      var slot = undoSlot, round = state.roundId, api = state.apiBase;
+      undoBusy = true; this.disabled = true;
+      P.post(api + '/api/messages/undo', { transaction_id: window.crypto.randomUUID(), round_id: round, config_revision: slot.config_revision, undo_token: slot.undo_token }).then(function (res) {
+        if (round !== state.roundId || api !== state.apiBase) return;
+        if (res.result && res.result.messages) renderMessages(P.normalizeMessages(res.result), true, false);
+        P.toast('已撤回最近修订，后续消息仍保留'); restart(false);
+      }).catch(function (e) { showBanner('撤回未完成：' + ((e.data && e.data.message) || P.errorText(e)), true); }).finally(function () { undoBusy = false; refreshUndo(); });
+    });
 
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {

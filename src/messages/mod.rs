@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod processing;
+pub mod transactions;
 
 fn default_record_revision() -> u64 {
     1
@@ -255,6 +256,8 @@ impl JsonlMessageStore {
 pub struct MessageLog {
     dir: PathBuf,
     events_dir: PathBuf,
+    #[cfg(test)]
+    durable_fault: std::sync::atomic::AtomicU8,
 }
 
 impl MessageLog {
@@ -279,6 +282,8 @@ impl MessageLog {
         Arc::new(Self {
             dir,
             events_dir: events_dir.into(),
+            #[cfg(test)]
+            durable_fault: std::sync::atomic::AtomicU8::new(0),
         })
     }
 
@@ -393,7 +398,8 @@ impl MessageLog {
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
-            .append(true)
+            .write(true)
+            .truncate(false)
             .open(path)?;
         let length = file.metadata()?.len();
         if length > 0 {
@@ -405,9 +411,25 @@ impl MessageLog {
                 "事件日志末尾不完整，未提交修订；请先检查本地存储"
             );
         }
+        file.seek(SeekFrom::End(0))?;
         let mut line = serde_json::to_vec(ev)?;
         line.push(b'\n');
-        if let Err(error) = file.write_all(&line).and_then(|_| file.sync_data()) {
+        #[cfg(test)]
+        let fault = self.durable_fault.swap(0, Ordering::SeqCst);
+        #[cfg(test)]
+        if fault == 1 {
+            anyhow::bail!("injected failure before journal write");
+        }
+        #[cfg(test)]
+        let write = if fault == 2 {
+            file.write_all(&line[..line.len() / 2])
+                .and_then(|_| Err(std::io::Error::other("injected interrupted journal write")))
+        } else {
+            file.write_all(&line).and_then(|_| file.sync_data())
+        };
+        #[cfg(not(test))]
+        let write = file.write_all(&line).and_then(|_| file.sync_data());
+        if let Err(error) = write {
             file.set_len(length)
                 .and_then(|_| file.sync_data())
                 .map_err(|rollback| {
@@ -415,7 +437,50 @@ impl MessageLog {
                 })?;
             return Err(error.into());
         }
+        #[cfg(test)]
+        if fault == 3 {
+            anyhow::bail!("injected loss after durable commit, before publish/response");
+        }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_durable_fault(&self, fault: u8) {
+        self.durable_fault.store(fault, Ordering::SeqCst);
+    }
+
+    /// 读取原始事件（C-3）。
+    pub async fn read_events_strict(
+        &self,
+        round_id: &str,
+    ) -> anyhow::Result<Vec<serde_json::Value>> {
+        let path = self.event_path_for(round_id);
+        let _guard = JsonlMessageStore::lock();
+        if !path.exists() {
+            return Ok(vec![]);
+        }
+        let text = std::fs::read_to_string(path)?;
+        anyhow::ensure!(
+            text.is_empty() || text.ends_with('\n'),
+            "事件日志末尾不完整，未提交；请检查本地存储"
+        );
+        text.lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).map_err(Into::into))
+            .collect()
+    }
+
+    /// NC events stay private raw data; malformed domain/audit rows fail closed.
+    pub async fn domain_events(
+        &self,
+        round_id: &str,
+    ) -> anyhow::Result<Vec<crate::domain::event::EventEnvelope>> {
+        self.read_events_strict(round_id)
+            .await?
+            .into_iter()
+            .filter(|value| value.get("event_type").is_some())
+            .map(|value| serde_json::from_value(value).map_err(Into::into))
+            .collect()
     }
 
     /// 读取原始事件（C-3）。

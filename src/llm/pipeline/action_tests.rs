@@ -3,7 +3,7 @@ use crate::parser::action_override::{ActionSelection, Operation};
 use crate::services::message_actions::{self, SaveActions};
 use std::sync::atomic::Ordering;
 
-async fn opened(state: &crate::api::ApiState) -> (String, SaveActions) {
+pub(super) async fn opened(state: &crate::api::ApiState) -> (String, SaveActions) {
     let cfg = state.cfg.get().await;
     let record = state
         .messages
@@ -20,6 +20,8 @@ async fn opened(state: &crate::api::ApiState) -> (String, SaveActions) {
         config_revision: cfg.revision,
         record_revision: context["message"]["record_revision"].as_u64().unwrap(),
         selection: serde_json::from_value(context["editable_selection"].clone()).unwrap(),
+        supplements: vec![],
+        release_supplements: vec![],
     };
     (record.record_id, body)
 }
@@ -384,7 +386,8 @@ async fn unknown_manual_selection_version_stops_instead_of_reviving_an_older_cho
         .await
         .unwrap()
         .remove(0);
-    event["payload"]["corrected_parsed_message"]["action_selection_version"] = 42.into();
+    event["payload"]["corrected_parsed_message"]["action_transaction_version"] = 42.into();
+    event["payload"]["corrected_parsed_message"]["changes"][0]["revision"] = 3.into();
     event["payload"]["target_record_revision"] = 3.into();
     state
         .messages

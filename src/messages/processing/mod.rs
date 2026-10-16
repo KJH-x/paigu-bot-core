@@ -147,6 +147,9 @@ pub fn original_summary(record: &MessageRecord) -> Option<AutomaticSummary> {
 
 impl ProcessingHistory {
     pub fn latest_for(&self, members: &[&MessageRecord]) -> Option<&AutomaticResult> {
+        if self.unreadable.is_some() || self.results.last().is_some_and(|r| r.format_version != 1) {
+            return None;
+        }
         self.results
             .iter()
             .rev()

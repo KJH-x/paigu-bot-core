@@ -174,9 +174,17 @@ pub async fn replay(
     base: &AppConfig,
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
-    let records = store.read_all(&base.round.round_id).await?;
-    let parse_overrides = load_parse_overrides(store, &base.round.round_id).await;
-    let manual_phase = load_manual_phase(store, &base.round.round_id).await;
+    let records = store.read_only(&base.round.round_id).await?;
+    let events = store.domain_events(&base.round.round_id).await?;
+    let parse_overrides = collect_parse_overrides(&events);
+    let manual_phase = events
+        .iter()
+        .filter(|e| matches!(e.payload, DomainEvent::RoundPhaseSet(_)))
+        .max_by_key(|e| (e.effective_at, e.sequence))
+        .and_then(|e| match &e.payload {
+            DomainEvent::RoundPhaseSet(set) => set.phase,
+            _ => None,
+        });
     replay_messages_with_parse(base, &records, overrides, &parse_overrides, manual_phase).await
 }
 
@@ -514,6 +522,118 @@ async fn process_one(
 }
 
 pub(crate) fn message_groups(
+    cfg: &AppConfig,
+    ordered: &[&MessageRecord],
+    overrides: &ParseOverrides,
+) -> Vec<Vec<usize>> {
+    let positions: HashMap<_, _> = ordered
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.record_id.as_str(), i))
+        .collect();
+    let mut units = vec![];
+    for (owner, record) in ordered.iter().enumerate() {
+        let Some(history) = &record.processing else {
+            continue;
+        };
+        if history.unreadable.is_some()
+            || history
+                .results
+                .last()
+                .is_some_and(|r| r.format_version != 1)
+        {
+            continue;
+        }
+        for (index, result) in history.results.iter().enumerate() {
+            if result.format_version != 1 {
+                continue;
+            }
+            let Some(mut members) = result
+                .members
+                .iter()
+                .map(|m| positions.get(m.record_id.as_str()).copied())
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            if members.is_empty() {
+                continue;
+            }
+            members.sort_unstable();
+            members.dedup();
+            if members.last() != Some(&owner)
+                || members
+                    .iter()
+                    .any(|&i| overrides.has_record(&ordered[i].record_id))
+            {
+                continue;
+            }
+            let refs: Vec<_> = members.iter().map(|&i| ordered[i]).collect();
+            if result.matches(&refs) {
+                units.push((
+                    refs.iter().map(|r| r.seq).max().unwrap_or(0),
+                    index,
+                    result.created_at_ms,
+                    members,
+                ));
+            }
+        }
+    }
+    units.sort_by(|a, b| (b.0, b.1, b.2).cmp(&(a.0, a.1, a.2)));
+    let mut assigned = vec![false; ordered.len()];
+    let mut groups = vec![];
+    for (_, _, _, members) in units {
+        if members.iter().any(|&i| assigned[i]) {
+            continue;
+        }
+        for &i in &members {
+            assigned[i] = true;
+        }
+        groups.push(members);
+    }
+    // Legacy records alone retain rule-based grouping; persisted units never get regrouped by aliases.
+    let legacy_candidates: Vec<_> = ordered
+        .iter()
+        .map(|r| Candidate {
+            user_id: &r.user_id,
+            text: &r.text,
+            is_admin: r.is_admin,
+            force_boundary: r.processing.is_some()
+                || overrides.has_record(&r.record_id)
+                || !r.routed.eq_ignore_ascii_case("message"),
+        })
+        .collect();
+    let legacy_groups = if cfg.merge.enabled && cfg.merge.same_sender {
+        coalesce::group_candidates(&legacy_candidates, &cfg.round.to_items())
+    } else {
+        (0..ordered.len()).map(|i| vec![i]).collect()
+    };
+    for group in legacy_groups {
+        let legacy: Vec<_> = group
+            .into_iter()
+            .filter(|&i| {
+                !assigned[i]
+                    && ordered[i].processing.is_none()
+                    && !overrides.has_record(&ordered[i].record_id)
+            })
+            .collect();
+        if !legacy.is_empty() {
+            for &i in &legacy {
+                assigned[i] = true;
+            }
+            groups.push(legacy);
+        }
+    }
+    for (i, used) in assigned.iter().enumerate() {
+        if !used {
+            groups.push(vec![i]);
+        }
+    }
+    groups.sort_by_key(|g| *g.last().unwrap_or(&0));
+    groups
+}
+
+pub(crate) fn prospective_groups(
     cfg: &AppConfig,
     ordered: &[&MessageRecord],
     overrides: &ParseOverrides,

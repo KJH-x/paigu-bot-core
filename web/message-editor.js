@@ -23,9 +23,9 @@
     wrap.appendChild(modal); document.body.appendChild(wrap);
     var beforeFocus = document.activeElement, closed = false, saving = false, context, actions = [], treatment = 'replace', note;
     var save = modal.querySelector('.ov-ok'), error = modal.querySelector('.modal-err'), closeButton = modal.querySelector('.ov-cancel');
-    var transaction = id(), lastRequest = null;
+    var transaction = id(), lastRequest = null, picked = [], released = [], draftVersion = 0, suggestController = null;
     closeButton.focus();
-    function close() { if (saving) return; closed = true; wrap.remove(); if (beforeFocus && beforeFocus.isConnected) beforeFocus.focus(); }
+    function close() { if (saving) return; closed = true; if (suggestController) suggestController.abort(); wrap.remove(); if (beforeFocus && beforeFocus.isConnected) beforeFocus.focus(); }
     closeButton.addEventListener('click', close);
     wrap.addEventListener('click', function (e) { if (e.target === wrap) close(); });
     wrap.addEventListener('keydown', function (e) {
@@ -36,7 +36,8 @@
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     });
-    modal.addEventListener('input', function () { error.textContent = ''; });
+    modal.addEventListener('input', function () { draftVersion++; error.textContent = ''; });
+    modal.addEventListener('change', function () { draftVersion++; });
     var endpoint = opts.apiBase + '/api/messages/' + encodeURIComponent(opts.message.record_id) + '/actions';
     P.get(endpoint + '?round_id=' + encodeURIComponent(opts.message.round_id)).then(function (data) {
       if (closed) return;
@@ -58,11 +59,20 @@
         compare.appendChild(el('p', 'hint', '自动理解保留不变；当前执行结果可能因修订或权限变化而不同。'));
       } else { compare.appendChild(el('p', '', '此历史消息没有可核对的原自动基线，不会伪造或重新解析。')); }
       content.appendChild(compare);
-      if (!data.editable) {
-        content.appendChild(el('p', 'ae-warning', '此消息属于自动合并组，须整组修订；完整组事务尚未开放，本次不会修改任何消息。'));
-        data.automatic_group.members.forEach(function (m) { content.appendChild(el('p', '', '#' + m.seq + ' ' + m.text)); });
+      if (data.absorbed_main) {
+        content.appendChild(el('p', 'ae-warning', '此条已作为补充纳入主消息，不重复执行。请在主消息修改动作或解除关联。'));
+        content.appendChild(button('去主消息 #' + data.absorbed_main.seq, function () { close(); P.openMessageEditor(Object.assign({}, opts, { message: Object.assign({}, data.absorbed_main, { round_id: data.round_id }) })); }));
         return;
       }
+      if (!data.editable && !opts.convertGroup) {
+        content.appendChild(el('p', 'ae-warning', '自动组共同执行以下记录。转为人工后，在最早一条保存完整替换动作，其余作为补充停用；原文与原自动结果不变。'));
+        data.automatic_group.members.forEach(function (m) { content.appendChild(el('p', '', '#' + m.seq + ' ' + m.text)); });
+        content.appendChild(button('转为整组人工修订', function () { close(); P.openMessageEditor(Object.assign({}, opts, { convertGroup: true, message: Object.assign({}, data.group_main, { round_id: data.round_id }) })); }, 'ae-convert-group'));
+        return;
+      }
+      data.editable = true;
+      picked = (data.linked_supplements || []).slice();
+      if (opts.convertGroup) picked = data.automatic_group.members.filter(function (m) { return m.record_id !== data.message.record_id; });
       var draft = copy(data.editable_selection); treatment = draft.kind; actions = draft.actions || [];
       var operation = select([['replace','编辑动作'],['ignore','人工忽略'],['reject','人工拒绝'],['automatic','恢复自动结果']], treatment, '处理方式', function (v) { treatment = v; drawActions(); });
       operation.className = 'ae-treatment';
@@ -72,6 +82,55 @@
       note = el('textarea', 'ae-note'); note.value = draft.note || ''; note.rows = 2; note.maxLength = 2000;
       note.placeholder = '说明当时的意思或修订原因，便于复盘（可选）';
       content.appendChild(field('管理员解释', note));
+      var supplements = el('details', 'ae-supplements');
+      var supplementSummary = el('summary'); supplements.appendChild(supplementSummary);
+      function selectedSummary() { supplementSummary.textContent = '补充消息 · 已选 ' + picked.length + ' 条（选中条将停止重复执行）'; }
+      supplements.appendChild(el('p', 'hint', '只选择用于解释主条的补充，不选择后来撤排等独立操作。自动组按完整范围选择；取消既有关联会恢复它被纳入前的选择。'));
+      var linked = data.linked_supplements || [], fixed = opts.convertGroup ? picked.map(function (m) { return m.record_id; }) : [];
+      (data.supplement_units || []).forEach(function (unit) {
+        var check = el('input'); check.type = 'checkbox'; check.checked = unit.every(function (m) { return picked.some(function (p) { return p.record_id === m.record_id; }); });
+        check.disabled = unit.some(function (m) { return fixed.indexOf(m.record_id) >= 0; });
+        var label = el('label', 'ae-supplement'); label.appendChild(check);
+        label.appendChild(el('span', '', unit.map(function (m) { return '#' + m.seq + ' ' + (m.display || m.nickname) + '：' + m.text; }).join('\n')));
+        check.addEventListener('change', function () {
+          unit.forEach(function (m) {
+            picked = picked.filter(function (p) { return p.record_id !== m.record_id; });
+            released = released.filter(function (p) { return p.record_id !== m.record_id; });
+            if (check.checked) picked.push(m);
+            else if (linked.some(function (p) { return p.record_id === m.record_id; })) released.push(m);
+          });
+          draftVersion++; selectedSummary();
+        }); supplements.appendChild(label);
+      });
+      // Conversion members may share the main's execution unit, not a candidate unit.
+      if (fixed.length) supplements.appendChild(el('p', 'ae-warning', '整组转换固定包含：' + picked.map(function (m) { return '#' + m.seq + ' ' + m.text; }).join('；')));
+      if (!(data.supplement_units || []).length && !fixed.length) supplements.appendChild(el('p', 'hint', '当前没有可选择的后续消息。'));
+      selectedSummary(); content.appendChild(supplements);
+      var ai = el('details', 'ae-suggest'); ai.appendChild(el('summary', '', '用解释辅助代填（可选）'));
+      ai.appendChild(el('p', 'hint', '仅主动点击时向已配置模型发送选中消息、当前草稿、解释与必要目录，不发送全名单或 NapCat 原始事件。结果只填草稿，保存不再请求模型。'));
+      var instruction = el('textarea'); instruction.rows = 2; instruction.maxLength = 2000; instruction.placeholder = '例如：这里是总共三份徽章甲，不是再加三份';
+      ai.appendChild(field('给模型的修订解释', instruction));
+      var aiStatus = el('p', 'hint'); aiStatus.setAttribute('role', 'status');
+      var aiButton = button('代填当前草稿', function () {
+        if (!instruction.value.trim()) { aiStatus.textContent = '请先填写解释。'; instruction.focus(); return; }
+        if (suggestController) suggestController.abort(); suggestController = new AbortController();
+        var controller = suggestController, requestId = id(), version = draftVersion;
+        aiStatus.textContent = '请求中；仍可手动编辑，后来的修改不会被覆盖。';
+        P.post(endpoint + '/suggest', { request_id: requestId, draft_version: version, round_id: data.round_id, config_revision: data.config_revision,
+          record_revision: data.message.record_revision, selection: { kind: 'replace', actions: copy(actions), note: note.value },
+          supplements: picked.map(recordVersion), instruction: instruction.value }, { timeout: 65000, signal: controller.signal }).then(function (res) {
+          if (closed || controller !== suggestController || controller.signal.aborted) return;
+          if (version !== draftVersion || res.request_id !== requestId || res.draft_version !== version || res.record_id !== data.message.record_id || res.round_id !== data.round_id) {
+            aiStatus.textContent = '草稿已变化，未覆盖你的新编辑。可以重新代填。'; return;
+          }
+          actions = copy(res.selection.actions); treatment = 'replace'; operation.value = treatment; draftVersion++; drawActions();
+          aiStatus.textContent = '已填入草稿，请核对或继续修改；尚未保存或执行。';
+        }).catch(function (e) { if (!closed && controller === suggestController && !controller.signal.aborted) aiStatus.textContent = '代填未完成，草稿不变：' + P.errorText(e); });
+      }, 'ae-suggest-button');
+      aiButton.disabled = !data.model_draft_available;
+      if (!data.model_draft_available) aiStatus.textContent = '模型未启用；手动编辑和保存仍可用。';
+      ai.appendChild(aiButton); ai.appendChild(button('取消代填请求', function () { if (suggestController) suggestController.abort(); aiStatus.textContent = '已停止等待，草稿未改变。'; }));
+      ai.appendChild(aiStatus); content.appendChild(ai);
       var index = data.catalog || [];
       function newLine() { return { line_id: id(), item_id: '', subitem_id: null, quantity: 1, claim_type: 'Split', slot_policy: 'Normal', is_proxy_card: false, notes: null }; }
       function itemLabel(item, i) { var dup = index.filter(function (v) { return v.name === item.name; }).length > 1; return item.name + (dup ? '（' + item.kind + '·第' + (i + 1) + '项）' : ''); }
@@ -125,6 +184,7 @@
         row.appendChild(more); return row;
       }
       function drawActions() {
+        draftVersion++;
         var active = document.activeElement;
         var redrawFocus = body.contains(active), activeCard = active && active.closest('.ae-action');
         var activeId = activeCard && activeCard.dataset.actionId;
@@ -205,13 +265,15 @@
           }
         }
       }
-      var signature = JSON.stringify(selection);
+      if (picked.length && treatment !== 'replace') { error.textContent = '有关联补充时请保存完整替换动作；若要恢复整组原选择，请撤回最近事务。'; return; }
+      var signature = JSON.stringify([selection,picked.map(recordVersion),released.map(recordVersion)]);
       if (lastRequest && lastRequest !== signature) transaction = id();
       lastRequest = signature;
       saving = true; error.textContent = ''; save.disabled = true; save.textContent = '正在保存…';
+      if (suggestController) suggestController.abort();
       var controls = Array.from(modal.querySelectorAll('input,select,textarea,button'));
       var disabled = controls.map(function (n) { return n.disabled; }); controls.forEach(function (n) { n.disabled = true; });
-      P.post(endpoint, { transaction_id: transaction, round_id: context.round_id, config_revision: context.config_revision, record_revision: context.message.record_revision, selection: selection }).then(function (response) {
+      P.post(endpoint, { transaction_id: transaction, round_id: context.round_id, config_revision: context.config_revision, record_revision: context.message.record_revision, selection: selection, supplements: picked.map(recordVersion), release_supplements: released.map(recordVersion) }).then(function (response) {
         if (closed) return;
         if (opts.onSaved) opts.onSaved(response);
         saving = false; close(); if (P.toast) P.toast(response.deduplicated ? '这笔修订已保存，当前结果已刷新' : '已保存并重算');
@@ -225,4 +287,5 @@
       });
     });
   };
+  function recordVersion(m) { return { record_id: m.record_id, record_revision: m.record_revision }; }
 })();

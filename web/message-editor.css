@@ -27,6 +27,11 @@
 .action-editor .ae-remove-item { grid-column: 5; grid-row: 1; }
 .action-editor .ae-warning { padding: 10px; border-left: 3px solid var(--warning, #b57900); background: var(--panel-2); }
 .action-editor .ae-note { resize: vertical; min-height: 60px; max-height: 180px; margin-top: 2px; }
+.action-editor .ae-supplements, .action-editor .ae-suggest { border: 1px solid var(--border); padding: 8px 10px; margin: 10px 0; }
+.action-editor .ae-supplement { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.action-editor .ae-supplement input { flex-shrink: 0; margin-top: 4px; }
+.action-editor .ae-supplement span { white-space: pre-wrap; overflow-wrap: anywhere; }
+.action-editor .ae-suggest button { margin: 8px 8px 0 0; }
 .action-editor .modal-err { padding: 0 16px; min-height: 24px; color: var(--danger); }
 .action-editor .modal-actions { border-top: 1px solid var(--border); margin: 0; padding: 12px 16px; align-items: center; }
 .action-editor .ae-save-hint { margin-right: auto; font-size: 12px; color: var(--muted); }

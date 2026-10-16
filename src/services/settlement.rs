@@ -94,6 +94,10 @@ pub fn round_locked(round_id: &str) -> Result<bool, ServiceError> {
     Ok(read_draft(round_id)?.locked)
 }
 
+pub(crate) fn checkpoint(round_id: &str) -> Result<Value, ServiceError> {
+    serde_json::to_value(read_draft(round_id)?).map_err(|e| ServiceError::Internal(e.into()))
+}
+
 pub async fn is_locked(state: &ApiState) -> Result<bool, ServiceError> {
     let round_id = state.cfg.get().await.round.round_id;
     Ok(round_locked(&round_id)? || state.pipeline.is_locked().await)
@@ -257,7 +261,7 @@ pub async fn restore_persistent_lock(state: &ApiState) -> Result<(), ServiceErro
     let round_id = state.cfg.get().await.round.round_id;
     state
         .pipeline
-        .set_locked(read_draft(&round_id)?.locked)
+        .restore_settlement_lock(read_draft(&round_id)?.locked)
         .await;
     Ok(())
 }

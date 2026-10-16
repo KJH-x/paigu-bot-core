@@ -137,6 +137,8 @@ pub struct ParseOverrides {
     records: HashMap<String, (ParsedMessage, u64, String)>,
     selections: HashMap<String, (super::action_override::SavedSelection, u64)>,
     invalid_selections: HashMap<String, u64>,
+    versions: HashMap<String, u64>,
+    choices: std::collections::BTreeMap<String, crate::messages::transactions::Choice>,
 }
 
 impl ParseOverrides {
@@ -151,7 +153,11 @@ impl ParseOverrides {
             .selections
             .get(record_id)
             .map_or(revision, |(_, v)| revision.max(*v));
-        self.invalid_selections
+        let revision = self
+            .invalid_selections
+            .get(record_id)
+            .map_or(revision, |v| revision.max(*v));
+        self.versions
             .get(record_id)
             .map_or(revision, |v| revision.max(*v))
     }
@@ -186,15 +192,50 @@ impl ParseOverrides {
         self.invalid_selections.contains_key(record_id)
     }
 
-    pub fn insert_selection(
+    pub fn choices(
+        &self,
+    ) -> &std::collections::BTreeMap<String, crate::messages::transactions::Choice> {
+        &self.choices
+    }
+
+    pub fn absorbed_by(&self, id: &str) -> Option<&str> {
+        self.choices.get(id).and_then(|c| c.absorbed_by.as_deref())
+    }
+
+    pub fn apply_choice(
         &mut self,
-        record_id: String,
-        saved: super::action_override::SavedSelection,
+        id: &str,
         revision: u64,
+        choice: Option<crate::messages::transactions::Choice>,
     ) {
-        self.records.remove(&record_id);
-        self.invalid_selections.remove(&record_id);
-        self.selections.insert(record_id, (saved, revision));
+        self.records.remove(id);
+        self.selections.remove(id);
+        self.invalid_selections.remove(id);
+        self.choices.remove(id);
+        self.versions.insert(
+            id.to_string(),
+            self.versions.get(id).copied().unwrap_or(0).max(revision),
+        );
+        let Some(choice) = choice else {
+            return;
+        };
+        self.choices.insert(id.into(), choice.clone());
+        if let Ok(saved) =
+            serde_json::from_value::<super::action_override::SavedSelection>(choice.value.clone())
+        {
+            if saved.action_selection_version == 1 {
+                self.selections.insert(id.into(), (saved, revision));
+                return;
+            }
+        }
+        if choice.value.get("action_selection_version").is_none() {
+            if let Ok(parsed) = serde_json::from_value::<ParsedMessage>(choice.value) {
+                self.records
+                    .insert(id.into(), (parsed, revision, choice.reason));
+                return;
+            }
+        }
+        self.invalid_selections.insert(id.into(), revision);
     }
 }
 
@@ -202,52 +243,82 @@ impl ParseOverrides {
 /// Legacy/automatic message-bound overrides remain readable without pretending to know their source.
 pub fn collect_parse_overrides(events: &[EventEnvelope]) -> ParseOverrides {
     let mut map = ParseOverrides::default();
-    for ev in events {
-        if let DomainEvent::ParseOverride(over) = &ev.payload {
-            if let Some(record_id) = &over.target_record_id {
-                if let Ok(saved) = serde_json::from_value::<super::action_override::SavedSelection>(
-                    over.corrected_parsed_message.clone(),
-                ) {
-                    if saved.action_selection_version == 1 {
-                        map.insert_selection(
-                            record_id.clone(),
-                            saved,
-                            over.target_record_revision.unwrap_or(1),
-                        );
-                        continue;
-                    }
-                }
-                if over
-                    .corrected_parsed_message
-                    .get("action_selection_version")
-                    .is_some()
+    for event in events {
+        let DomainEvent::ParseOverride(over) = &event.payload else {
+            continue;
+        };
+        let value = &over.corrected_parsed_message;
+        if value.get("action_transaction_version").is_some() {
+            if let Some(tx) = crate::messages::transactions::decode(event) {
+                let unique: std::collections::HashSet<_> =
+                    tx.changes.iter().map(|c| &c.record_id).collect();
+                if !tx.changes.is_empty()
+                    && unique.len() == tx.changes.len()
+                    && matches!(tx.kind.as_str(), "save" | "undo")
+                    && tx.changes.iter().all(|c| {
+                        !c.record_id.is_empty()
+                            && c.revision > 0
+                            && c.after.as_ref().is_none_or(|choice| {
+                                serde_json::from_value::<super::action_override::SavedSelection>(
+                                    choice.value.clone(),
+                                )
+                                .is_ok_and(|s| s.action_selection_version == 1)
+                                    || (choice.value.get("action_selection_version").is_none()
+                                        && serde_json::from_value::<ParsedMessage>(
+                                            choice.value.clone(),
+                                        )
+                                        .is_ok())
+                            })
+                    })
                 {
-                    map.records.remove(record_id);
-                    map.selections.remove(record_id);
-                    map.invalid_selections
-                        .insert(record_id.clone(), over.target_record_revision.unwrap_or(1));
+                    for change in tx.changes {
+                        map.apply_choice(&change.record_id, change.revision, change.after);
+                    }
                     continue;
                 }
             }
-            if let Ok(corrected) =
-                serde_json::from_value::<ParsedMessage>(over.corrected_parsed_message.clone())
-            {
-                if let Some(record_id) = &over.target_record_id {
-                    map.selections.remove(record_id);
-                    map.invalid_selections.remove(record_id);
-                    map.records.insert(
-                        record_id.clone(),
-                        (
-                            corrected,
-                            over.target_record_revision.unwrap_or(1),
-                            over.reason.clone(),
-                        ),
-                    );
-                } else {
-                    map.messages
-                        .insert(over.target_raw_message_id.clone(), corrected);
+            // A broken transaction must never publish a subset or revive older choices.
+            if let Some(id) = &over.target_record_id {
+                map.apply_choice(
+                    id,
+                    over.target_record_revision.unwrap_or(1),
+                    Some(crate::messages::transactions::Choice {
+                        value: serde_json::json!({"action_selection_version":0}),
+                        reason: "事务损坏，需核对".into(),
+                        absorbed_by: None,
+                    }),
+                );
+            }
+            if let Some(changes) = value["changes"].as_array() {
+                for change in changes {
+                    if let Some(id) = change["record_id"].as_str() {
+                        map.apply_choice(
+                            id,
+                            change["revision"].as_u64().unwrap_or(1),
+                            Some(crate::messages::transactions::Choice {
+                                value: serde_json::json!({"action_selection_version":0}),
+                                reason: "事务损坏，需核对".into(),
+                                absorbed_by: None,
+                            }),
+                        );
+                    }
                 }
             }
+            continue;
+        }
+        if let Some(id) = &over.target_record_id {
+            map.apply_choice(
+                id,
+                over.target_record_revision.unwrap_or(1),
+                Some(crate::messages::transactions::Choice {
+                    value: value.clone(),
+                    reason: over.reason.clone(),
+                    absorbed_by: None,
+                }),
+            );
+        } else if let Ok(parsed) = serde_json::from_value::<ParsedMessage>(value.clone()) {
+            map.messages
+                .insert(over.target_raw_message_id.clone(), parsed);
         }
     }
     map

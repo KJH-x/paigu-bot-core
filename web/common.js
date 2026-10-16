@@ -105,6 +105,11 @@
       init.signal = ctrl.signal;
       timer = global.setTimeout(function () { ctrl.abort(); }, opts.timeout || 8000);
     }
+    function abortExternal() { if (ctrl) ctrl.abort(); }
+    if (opts.signal) {
+      if (opts.signal.aborted) abortExternal();
+      else opts.signal.addEventListener('abort', abortExternal, { once: true });
+    }
     if (opts.body !== undefined) {
       init.headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(opts.body);
@@ -130,7 +135,7 @@
         if (!err.url) err.url = url;
       }
       throw err;
-    });
+    }).finally(function () { if (opts.signal) opts.signal.removeEventListener('abort', abortExternal); });
   }
 
   function get(path, opts) { return request(path, Object.assign({ method: 'GET' }, opts || {})); }

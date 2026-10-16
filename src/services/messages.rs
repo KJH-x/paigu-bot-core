@@ -460,105 +460,68 @@ pub struct OverrideInput {
     pub parsed: crate::parser::parsed_event::ParsedMessage,
 }
 
-/// §10：人工确认「待确认」消息 → 写 `ParseOverride` 并重算。
+/// Compatibility input is translated to the same guarded, durable action transaction.
 pub async fn override_message(
     state: &ApiState,
     key: &str,
     body: OverrideInput,
 ) -> Result<Value, ServiceError> {
-    let _serial = state.pipeline.message_write_guard().await;
-    // Keep the active round/config fixed until this manual write has been recomputed.
-    let cfg = state.cfg.read().await;
+    use crate::parser::{action_override, parsed_event::ParsedIntent};
+    let cfg = state.cfg.get().await;
     if cfg.round.round_id != body.round_id {
         return Err(ServiceError::Conflict(
-            json!({"error":"round_changed", "round_id":cfg.round.round_id}),
+            json!({"error":"round_changed","round_id":cfg.round.round_id}),
         ));
     }
-    if crate::services::settlement::round_locked(&cfg.round.round_id)?
-        || state.pipeline.is_locked().await
-    {
-        return Err(ServiceError::Locked("轮次已锁定，不能修改解析".to_string()));
-    }
-    // No numeric/seq fallback for this administrative write.
-    let record_id = key.to_string();
-    let mut current = find_record(state, &cfg.round.round_id, &record_id).await?;
-    let raw = state
+    let current = state
         .messages
-        .read_raw_events(&cfg.round.round_id, 0)
-        .await
-        .map_err(ServiceError::from)?;
-    let events: Vec<crate::domain::event::EventEnvelope> = raw
+        .read_only(&body.round_id)
+        .await?
         .into_iter()
-        .filter_map(|v| serde_json::from_value(v).ok())
-        .collect();
-    let overrides = crate::parser::parsed_event::collect_parse_overrides(&events);
-    current.record_revision = overrides.record_revision(&record_id, current.record_revision);
-    if current.record_revision != body.record_revision {
-        return Err(ServiceError::Conflict(
-            json!({"error":"stale_record_revision", "message":message_view(&current)}),
-        ));
-    }
-    if matches!(
-        body.parsed.intent,
-        crate::parser::parsed_event::ParsedIntent::AdminCommand
-    ) || body.parsed.admin_command.is_some()
+        .find(|r| r.record_id == key)
+        .ok_or_else(|| ServiceError::NotFound("消息不存在或缺少稳定身份".into()))?;
+    if matches!(body.parsed.intent, ParsedIntent::AdminCommand)
+        || body.parsed.admin_command.is_some()
         || body
             .parsed
             .items
             .iter()
-            .any(|item| item.quantity == 0 || item.quantity > 99)
+            .any(|i| i.quantity == 0 || i.quantity > 99)
     {
         return Err(ServiceError::BadRequest(
-            "修订只能包含排谷动作，数量应为 1–99 的整数".to_string(),
+            "修订只能包含排谷动作，数量应为 1–99 的整数".into(),
         ));
     }
-    // Until MP-3 provides a multi-record transaction, never partially detach an automatic group.
-    if cfg.merge.enabled && cfg.merge.same_sender {
-        let mut records = state
-            .messages
-            .read_all(&cfg.round.round_id)
-            .await
-            .map_err(ServiceError::from)?;
-        records.sort_by_key(|r| (r.timestamp_ms, r.seq));
-        let candidates: Vec<_> = records
-            .iter()
-            .map(|r| crate::parser::coalesce::Candidate {
-                user_id: &r.user_id,
-                text: &r.text,
-                is_admin: r.is_admin,
-                force_boundary: !r.routed.eq_ignore_ascii_case("message")
-                    || overrides.has_record(&r.record_id),
-            })
-            .collect();
-        let groups = crate::parser::coalesce::group_candidates(&candidates, &cfg.round.to_items());
-        if groups
-            .iter()
-            .any(|g| g.len() > 1 && g.iter().any(|&i| records[i].record_id == record_id))
-        {
-            return Err(ServiceError::Conflict(
-                json!({"error":"auto_group_requires_transaction", "message":"此消息属于自动合并组；完整组修订尚未接线，未修改任何记录"}),
-            ));
-        }
-    }
-    let reason = body.reason.unwrap_or_else(|| "人工确认".to_string());
-    state
-        .pipeline
-        .apply_parse_override(&cfg, &current, &body.parsed, &reason)
-        .await
-        .map_err(ServiceError::from)?;
-    let computed = state
-        .pipeline
-        .recompute_locked(&cfg)
-        .await
-        .map_err(ServiceError::from)?;
-    replay::remember_replay(&computed);
-    let result = replay::replay_result_json(&computed);
-    let message = find_record(state, &cfg.round.round_id, &record_id).await?;
-    Ok(json!({
-        "ok": true,
-        "message": message_view(&message),
-        "result": result,
-    }))
+    let understood = crate::replay::session::prepare_understanding(
+        &cfg,
+        &current,
+        body.parsed,
+        crate::messages::processing::UnderstandingSource::Control,
+    )
+    .await;
+    let note = body.reason.unwrap_or_else(|| "人工确认".into());
+    let selection = match understood.validation.status.as_str() {
+        "Applied" => action_override::ActionSelection::Replace {
+            actions: action_override::editable(&understood.events, understood.is_modify),
+            note,
+        },
+        "Ignored" => action_override::ActionSelection::Ignore { note },
+        _ => return Err(ServiceError::Unprocessable(understood.validation.detail)),
+    };
+    super::message_actions::save(
+        state,
+        key,
+        super::message_actions::SaveActions {
+            transaction_id: uuid::Uuid::new_v4().to_string(),
+            round_id: body.round_id,
+            config_revision: cfg.revision,
+            record_revision: body.record_revision,
+            selection,
+            supplements: vec![],
+            release_supplements: vec![],
+        },
+    )
+    .await
 }
 
 #[cfg(test)]

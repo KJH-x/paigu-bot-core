@@ -77,6 +77,13 @@ impl Pipeline {
         self.state.lock().await.locked
     }
 
+    /// Restore a persisted settlement lock without adding an artificial phase event.
+    pub(crate) async fn restore_settlement_lock(&self, locked: bool) {
+        if locked {
+            self.state.lock().await.locked = true;
+        }
+    }
+
     /// 锁/解锁：写 `RoundPhaseSet` 事件（事件溯源的锁=阶段），并即时更新内存缓存。
     /// `true` → 阶段覆盖为 `Settling`（锁定）；`false` → 清除覆盖。
     pub async fn set_locked(&self, locked: bool) {
