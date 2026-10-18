@@ -1,10 +1,6 @@
 (function () {
   'use strict';
-
-  var THEME_KEY = 'paigu.theme';
-  var WORKFLOW_MS = 5000;
-  var root = document.documentElement;
-
+  var THEME_KEY='paigu.theme', WORKFLOW_MS=5000, root=document.documentElement;
   var ICON = {
     logo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg>',
     flag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h11l-1.6 4L16 12H5"/></svg>',
@@ -16,19 +12,18 @@
     moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
   };
 
-  var STEPS = [
-    { n: 1, label: '开团', href: 'round.html', icon: 'flag', title: '开团 · 轮次与商品（round）' },
-    { n: 2, label: '排谷', href: 'display.html', icon: 'grid', title: '排谷 · 排位/消息/名单' },
-    { n: 3, label: '结算', href: 'settlement.html', icon: 'calc', title: '结算 · 试算' },
-    { n: 4, label: '下单', href: 'settlement.html#order', icon: 'cart', title: '下单 / 锁定' },
-    { n: 5, label: '复盘', href: 'replay.html', icon: 'replay', title: '复盘 · 重放' }
+
+  var STEPS=[
+    {n:0,key:'index',label:'总览',icon:'logo'},
+    {n:1,key:'round',label:'轮次与商品',icon:'flag'},
+    {n:2,key:'display',label:'排谷',icon:'grid'},
+    {n:3,key:'settlement',label:'结算与下单',icon:'calc'},
+    {n:5,key:'replay',label:'复盘',icon:'replay'},
+    {n:6,key:'members',label:'成员',icon:'grid'},
+    {n:7,key:'settings',label:'系统设置',icon:'calc'}
   ];
-
-  var PAGE_DEFAULT = { index: 0, display: 2, admin: 0, round: 1, settings: 0, settlement: 3, replay: 5 };
-
-  var state = { workflow: null, ok: false, step: null, timer: null };
-  var listeners = [];
-
+  var state={workflow:null,ok:false,step:null,timer:null,generation:0}, listeners=[];
+  function $(id){return document.getElementById(id);}
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -72,194 +67,135 @@
 
   setTheme(readTheme(), false);
 
-  function pageName() {
-    var p = (window.location.pathname || '').split('/').pop();
-    return p && p.indexOf('.') > -1 ? p : (p || 'index.html');
-  }
 
-  function pageDefault() {
-    var p = pageName().replace(/\.html$/i, '');
-    return Object.prototype.hasOwnProperty.call(PAGE_DEFAULT, p) ? PAGE_DEFAULT[p] : 2;
+  function pageKey(){return document.body.dataset.page || 'display';}
+  function apiBase(){return window.PAIGU.resolveApiBase();}
+  function badge(id,kind,text){
+    return '<span class="status-badge '+(kind || '')+'" id="'+id+'">'+esc(text)+'</span>';
   }
-
-  function apiBase() {
-    if (!window.PAIGU) return '';
-    var q = window.PAIGU.qs('api');
-    if (q) return window.PAIGU.stripSlash(q);
-    try {
-      var s = window.localStorage.getItem('paigu.display.api');
-      if (s) return window.PAIGU.stripSlash(s);
-    } catch (e) { /* ignore */ }
-    return window.PAIGU.resolveApiBase();
+  function renderBadges(wf,down){
+    var host=$('wf-status');if(!host)return;
+    if(down || !wf){host.innerHTML=badge('wf-api','bad','API 未连接')+badge('wf-clients','warn','接收器状态未知');return;}
+    var gw=wf.gateway || {}, clients=gw.clients, locked=!!wf.locked;
+    host.innerHTML=
+      badge('wf-round','','激活轮：'+(wf.title || wf.round_id || '—')+(wf.category==='test'?' · 测试':' · 正常'))+
+      badge('wf-api','ok','API 正常')+
+      badge('wf-listening',gw.listening?'ok':'warn',gw.listening?'接入监听中':'接入未监听')+
+      badge('wf-clients',Number(clients)>0?'ok':'warn',Number(clients)>0?'接收器 '+clients:'未连接接收器')+
+      badge('wf-version','','版本 v'+(wf.version == null?'—':wf.version))+
+      badge('wf-locked',locked?'warn':'',wf.lock_error?'锁状态不可读 · 暂停写入':'锁定：'+(locked?'是':'否'))+
+      badge('wf-phase',wf.phase==null?'warn':'',wf.phase_label || wf.phase || '阶段未配置');
+    $('wf-round').title='稳定标识：'+wf.round_id+'；这里只显示激活轮，不会切换轮次';
+    host.title='状态读取：'+(wf.updated_at || '未知')+'（不是最后收到消息的时间）';
   }
-
-  function badge(id, kind, text, dot) {
-    var d = dot === false ? '' : '<span class="dot"></span>';
-    return '<span class="status-badge ' + (kind || '') + '" id="' + id + '">' + d + esc(text) + '</span>';
+  function phaseStep(wf){
+    if(!wf)return null;
+    if(wf.locked || /^(locked|settling)$/i.test(wf.phase || ''))return 3;
+    if(/^phase(iii|ii|i|3|2|1)$/i.test(wf.phase || ''))return 2;
+    return wf.phase==='Phase0'?1:null;
   }
-
-  function renderBadges(wf, down) {
-    var host = $('wf-status');
-    if (!host) return;
-    if (down || !wf) {
-      host.innerHTML = badge('wf-api', 'bad', '未连接', true) +
-        '<span class="status-badge">工作流不可用</span>';
-      return;
-    }
-    var gw = wf.gateway || {};
-    var clients = gw.clients != null ? gw.clients : '—';
-    var listenKind = gw.listening === true ? 'ok' : (gw.listening === false ? 'warn' : '');
-    var version = wf.version != null ? wf.version : '—';
-    var locked = !!wf.locked;
-    var phase = wf.phase == null
-      ? badge('wf-phase', 'warn', '阶段未配置', true)
-      : badge('wf-phase', 'ok', wf.phase_label || wf.phase, true);
-    host.innerHTML =
-      badge('wf-api', 'ok', 'API 正常', true) +
-      badge('wf-clients', listenKind, 'NapCat ' + clients, true) +
-      badge('wf-version', '', '版本 v' + version, false) +
-      badge('wf-locked', locked ? 'warn' : '', '锁定：' + (locked ? '是' : '否'), false) +
-      phase;
-  }
-
-  /** 流程进度（弱标记）：由 /api/workflow 的 phase/locked 推导，**不**决定「当前模块」高亮。 */
-  function phaseStep(wf) {
-    if (!wf) return null;
-    if (wf.locked === true) return 4;
-    var p = String(wf.phase == null ? '' : wf.phase).toLowerCase();
-    if (p === 'locked') return 4;
-    if (p === 'settling') return 3;
-    if (p === 'phasei' || p === 'phase1' || p === 'phaseii' || p === 'phase2' ||
-        p === 'phaseiii' || p === 'phase3') return 2;
-    if (p === 'phase0') return 1;
-    return null;
-  }
-
-  /** 「当前模块」高亮（唯一的强样式）。 */
-  function setActiveStep(n) {
-    if (n == null) return;
-    state.step = n;
-    var i;
-    var steps = document.querySelectorAll('#wf-stepper .step');
-    for (i = 0; i < steps.length; i++) {
-      steps[i].classList.toggle('active', +steps[i].getAttribute('data-step') === n);
-    }
-    var tabs = document.querySelectorAll('.mobile-tabs .mtab');
-    for (i = 0; i < tabs.length; i++) {
-      tabs[i].classList.toggle('active', +tabs[i].getAttribute('data-step') === n);
-    }
-  }
-
-  /** 阶段进度（弱元素）：细下划线 + 小圆点，避免与 hover / active 争抢注意力。 */
-  function setPhaseProgress(n) {
-    var steps = document.querySelectorAll('#wf-stepper .step');
-    for (var i = 0; i < steps.length; i++) {
-      var sn = +steps[i].getAttribute('data-step');
-      steps[i].classList.toggle('phase-now', n != null && sn === n);
-      steps[i].classList.toggle('phase-done', n != null && sn < n);
-    }
-  }
-
-  function emit() {
-    for (var i = 0; i < listeners.length; i++) {
-      try { listeners[i](state.ok ? state.workflow : null, state); } catch (e) { /* ignore */ }
-    }
-  }
-
-  function fetchWorkflow() {
-    if (!window.PAIGU) return;
-    var base = apiBase();
-    if (!base) { renderBadges(null, true); return; }
-    window.PAIGU.get(base + '/api/workflow').then(function (wf) {
-      state.workflow = wf;
-      state.ok = true;
-      renderBadges(wf, false);
-      setPhaseProgress(phaseStep(wf));
-      emit();
-    }).catch(function () {
-      state.workflow = null;
-      state.ok = false;
-      renderBadges(null, true);
-      setPhaseProgress(null);
-      emit();
+  function setActiveStep(n){
+    state.step=n;
+    document.querySelectorAll('#wf-stepper .step,.mobile-tabs .mtab').forEach(function(a){
+      var active=Number(a.dataset.step)===n;a.classList.toggle('active',active);
+      if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');
     });
   }
-
-  function scheduleFetch() {
-    if (state.timer) window.clearTimeout(state.timer);
-    state.timer = window.setTimeout(function () {
-      if (!document.hidden) fetchWorkflow();
-      scheduleFetch();
-    }, WORKFLOW_MS);
+  function setPhaseProgress(n){
+    document.querySelectorAll('#wf-stepper .step').forEach(function(a){
+      var i=Number(a.dataset.step), business=i>0 && i<6;
+      a.classList.toggle('phase-now',business && n!=null && i===n);
+      a.classList.toggle('phase-done',business && n!=null && i<n);
+    });
   }
-
-  function renderStepper() {
-    var host = $('wf-stepper');
-    if (!host) return;
-    var html = '';
-    for (var i = 0; i < STEPS.length; i++) {
-      var s = STEPS[i];
-      html += '<a class="step" data-step="' + s.n + '" href="' + s.href + '" title="' + esc(s.title || s.label) + '">' +
-        '<span class="num">' + s.n + '</span>' +
-        '<span class="lbl">' + esc(s.label) + '</span>' +
-        '</a>';
+  function emit(){listeners.forEach(function(fn){try{fn(state.ok?state.workflow:null,state);}catch(e){}});}
+  function fetchWorkflow(){
+    var base=apiBase(), generation=++state.generation;
+    return window.PAIGU.get(base+'/api/workflow').then(function(wf){
+      if(base!==apiBase() || generation!==state.generation)return;
+      state.workflow=wf;state.ok=true;renderBadges(wf,false);setPhaseProgress(phaseStep(wf));emit();
+    }).catch(function(){
+      if(base!==apiBase() || generation!==state.generation)return;
+      state.workflow=null;state.ok=false;renderBadges(null,true);setPhaseProgress(null);emit();
+    });
+  }
+  function scheduleFetch(){
+    if(state.timer)window.clearTimeout(state.timer);
+    state.timer=window.setTimeout(function(){if(!document.hidden)fetchWorkflow();scheduleFetch();},WORKFLOW_MS);
+  }
+  function renderNavigation(){
+    var host=$('wf-stepper');
+    if(host){
+      host.setAttribute('aria-label','全站工作区');
+      host.innerHTML=STEPS.map(function(s){
+        return '<a class="step'+(s.n===6?' auxiliary':'')+'" data-step="'+s.n+'" href="'+esc(window.PAIGU.pageHref(s.key+'.html'))+'">'+
+          '<span class="workspace-icon" aria-hidden="true">'+ICON[s.icon]+'</span><span class="lbl">'+s.label+'</span></a>';
+      }).join('');
     }
-    host.innerHTML = html;
+    var mobile=$('mobile-tabs');
+    if(!mobile){mobile=document.createElement('nav');mobile.id='mobile-tabs';mobile.className='mobile-tabs';document.body.appendChild(mobile);}
+    mobile.setAttribute('aria-label','全站工作区（窄屏）');
+    mobile.innerHTML=STEPS.map(function(s){return '<a class="mtab" data-step="'+s.n+'" href="'+esc(window.PAIGU.pageHref(s.key+'.html'))+'"><span class="ic">'+ICON[s.icon]+'</span><span class="mlbl">'+s.label+'</span></a>';}).join('');
+    var active=STEPS.find(function(s){return s.key===pageKey();});setActiveStep(active?active.n:2);
   }
-
-  function renderMobileTabs() {
-    var nav = $('mobile-tabs');
-    if (!nav) {
-      nav = document.createElement('nav');
-      nav.id = 'mobile-tabs';
-      nav.className = 'mobile-tabs';
-      document.body.appendChild(nav);
-    }
-    var html = '';
-    for (var i = 0; i < STEPS.length; i++) {
-      var s = STEPS[i];
-      html += '<a class="mtab" data-step="' + s.n + '" href="' + s.href + '">' +
-        '<span class="ic">' + ICON[s.icon] + '</span>' +
-        '<span class="mlbl">' + esc(s.label) + '</span>' +
-        '</a>';
-    }
-    nav.innerHTML = html;
+  function applyHash(){
+    var hash=window.location.hash;
+    document.querySelectorAll('.section-nav a').forEach(function(a){
+      var active=new URL(a.href).hash===hash;a.classList.toggle('active',active);
+      if(active)a.setAttribute('aria-current','location');else a.removeAttribute('aria-current');
+    });
+    if(!hash)return;
+    var el=document.getElementById(hash.slice(1));if(!el)return;
+    var fold=el.closest('.collapsed');
+    if(fold){fold.classList.remove('collapsed');var toggle=fold.querySelector('[data-collapse]');if(toggle)toggle.setAttribute('aria-expanded','true');}
+    el.scrollIntoView({block:'start'});el.classList.add('hash-focus');
+    window.setTimeout(function(){el.classList.remove('hash-focus');},1500);
   }
-
-  function samePage(href) {
-    var h = String(href || '').split('#')[0];
-    return !h || h === pageName();
+  function normalizeLinks(){
+    document.querySelectorAll('a[href]').forEach(function(a){
+      var raw=a.getAttribute('href');if(!raw || raw[0]==='#')return;
+      var url=new URL(raw,window.location.href), key=url.pathname.split('/').pop().replace(/\.html$/i,'');
+      if(url.origin!==window.location.origin || !STEPS.some(function(s){return s.key===key;}) && key!=='admin')return;
+      var next=window.PAIGU.pageHref(url.href);if(a.href!==next)a.href=next;
+    });
   }
-
-  function applyHash() {
-    var h = (window.location.hash || '').replace(/^#/, '');
-    if (!h) return;
-    var el = null;
-    try { el = document.getElementById(h); } catch (e) { return; }
-    if (!el) return;
-    if (el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    el.classList.add('hash-focus');
-    window.setTimeout(function () { el.classList.remove('hash-focus'); }, 1500);
+  function bindNav(){
+    normalizeLinks();
+    document.addEventListener('click',function(e){
+      var a=e.target.closest && e.target.closest('a[href]');
+      if(!a || e.defaultPrevented || e.button!==0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target==='_blank')return;
+      var url=new URL(a.href), current=new URL(window.location.href), key=url.pathname.split('/').pop().replace(/\.html$/i,'');
+      if(url.origin!==current.origin || url.searchParams.get('api') && url.searchParams.get('api')!==apiBase())return;
+      if(key!==pageKey() && url.pathname!==current.pathname)return;
+      if(!url.hash && a.closest('#wf-stepper,.mobile-tabs,.brand')){e.preventDefault();return;}
+      if(url.hash){e.preventDefault();window.location.hash=url.hash;applyHash();}
+    });
+    if(window.MutationObserver)new MutationObserver(normalizeLinks).observe(document.body,{childList:true,subtree:true});
   }
-
-  function bindNav() {
-    var nodes = document.querySelectorAll('#wf-stepper .step, .mobile-tabs .mtab, .section-nav a');
-    for (var i = 0; i < nodes.length; i++) {
-      nodes[i].addEventListener('click', function (e) {
-        var a = e.target && e.target.closest ? e.target.closest('a') : null;
-        if (!a) return;
-        var href = a.getAttribute('href') || '';
-        if (!samePage(href)) return;
-        e.preventDefault();
-        var idx = href.indexOf('#');
-        var hash = idx >= 0 ? href.slice(idx + 1) : '';
-        if (hash) window.location.hash = hash;
-        else if (window.scrollTo) window.scrollTo({ top: 0, behavior: 'smooth' });
-        applyHash();
-      });
-    }
+  function legacyEntry(){
+    var hash=window.location.hash, target=null;
+    if(pageKey()==='settings' && hash==='#sec-members')target='members.html#sec-members';
+    if(pageKey()==='settings' && hash==='#sec-messages' || pageKey()==='index' && hash==='#sec-msglog')target='display.html#sec-msglog';
+    if(target){window.location.replace(window.PAIGU.pageHref(target));return true;}return false;
   }
-
+  function organizeChrome(){
+    var header=document.querySelector('.app-topbar');if(!header)return;
+    var row=header.querySelector('.shell-row'), tools=header.querySelector('.tools-row');if(!row || !tools)return;
+    document.querySelectorAll('.nav-links').forEach(function(n){n.remove();});
+    var brand=row.querySelector('.brand');
+    if(brand){brand.innerHTML='<span class="brand-logo">'+ICON.logo+'</span>';brand.setAttribute('aria-label','总览');brand.title='排谷 · 总览';brand.href=window.PAIGU.pageHref('index.html');}
+    var current=STEPS.find(function(s){return s.key===pageKey();});
+    var title=document.createElement('h1');title.id='workspace-title';title.textContent=current?current.label:'排谷';tools.insertBefore(title,tools.firstChild);
+    var status=$('wf-status');if(status)tools.insertBefore(status,title.nextSibling);
+    var input=$('api'), connection=input && input.closest('label'), theme=$('theme-toggle');
+    if(connection){connection.classList.add('connection-field');row.insertBefore(connection,theme);}
+    var main=document.querySelector('main');
+    if(!main){main=document.createElement('main');main.id='main-content';while(header.nextSibling)main.appendChild(header.nextSibling);header.parentNode.appendChild(main);}
+    main.setAttribute('tabindex','-1');
+    var skip=document.createElement('a');skip.className='skip-link';skip.href='#main-content';skip.textContent='跳到工作区';document.body.insertBefore(skip,document.body.firstChild);
+    function measure(){root.style.setProperty('--shell-height',Math.ceil(header.getBoundingClientRect().height)+'px');}
+    measure();if(window.ResizeObserver)new ResizeObserver(measure).observe(header);else window.addEventListener('resize',measure);
+  }
   function initCollapse() {
     var nodes = document.querySelectorAll('button[data-collapse]');
     for (var i = 0; i < nodes.length; i++) {
@@ -446,62 +382,6 @@
     };
   }
 
-  function wireThemeToggle() {
-    var btn = $('theme-toggle');
-    paintThemeToggle();
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      setTheme(currentTheme() === 'dark' ? 'light' : 'dark', true);
-    });
-  }
-
-  function init() {
-    organizeChrome();
-    installMermaidLite();
-    renderStepper();
-    renderMobileTabs();
-    renderBadges(null, true);
-    setActiveStep(pageDefault());
-    wireThemeToggle();
-    initCollapse();
-    initColTabs();
-    bindNav();
-    window.addEventListener('hashchange', applyHash);
-    var apiInput = $('api');
-    if (apiInput) {
-      if (!apiInput.value) apiInput.value = apiBase();
-      apiInput.addEventListener('change', function () { fetchWorkflow(); });
-    }
-    document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) fetchWorkflow();
-    });
-    fetchWorkflow();
-    scheduleFetch();
-    if (document.readyState === 'complete') applyHash();
-    else window.addEventListener('load', applyHash);
-  }
-
-  function organizeChrome() {
-    var header = document.querySelector('.app-topbar');
-    if (!header) return;
-    var row = header.querySelector('.shell-row');
-    var tools = header.querySelector('.tools-row');
-    if (!row || !tools) return;
-    var labels = row.querySelectorAll('label');
-    for (var i = 0; i < labels.length; i++) {
-      labels[i].classList.add('connection-field');
-      tools.appendChild(labels[i]);
-    }
-    var status = row.querySelector('.wf-status');
-    var theme = row.querySelector('#theme-toggle');
-    if (status && theme) row.insertBefore(status, theme);
-    function measureHeader() {
-      root.style.setProperty('--shell-height', Math.ceil(header.getBoundingClientRect().height) + 'px');
-    }
-    measureHeader();
-    if (window.ResizeObserver) new ResizeObserver(measureHeader).observe(header);
-    else window.addEventListener('resize', measureHeader);
-  }
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -528,35 +408,35 @@
     return wd + ' ' + rel + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
 
-  window.PAIGU_SHELL = {
-    refresh: fetchWorkflow,
-    getState: function () {
-      return { ok: state.ok, workflow: state.workflow, step: state.step };
-    },
-    setActiveStep: setActiveStep,
-    setPhaseProgress: setPhaseProgress,
-    relDay: relDay,
-    onWorkflow: function (fn) {
-      if (typeof fn !== 'function') return function () {};
-      listeners.push(fn);
-      if (state.ok && state.workflow) {
-        try { fn(state.workflow, state); } catch (e) { /* ignore */ }
-      }
-      return function () {
-        var idx = listeners.indexOf(fn);
-        if (idx >= 0) listeners.splice(idx, 1);
-      };
-    },
-    theme: {
-      get: currentTheme,
-      set: function (t) { setTheme(t, true); }
+
+  function init(){
+    if(legacyEntry())return;
+    organizeChrome();installMermaidLite();renderNavigation();renderBadges(null,true);
+    paintThemeToggle();var theme=$('theme-toggle');if(theme)theme.addEventListener('click',function(){setTheme(currentTheme()==='dark'?'light':'dark',true);});
+    initCollapse();initColTabs();bindNav();
+    window.addEventListener('hashchange',applyHash);
+    var api=$('api');if(api){
+      api.value=apiBase();
+      api.addEventListener('change',function(e){
+        e.stopImmediatePropagation();
+        var value=api.value.trim(), parsed;
+        try{parsed=new URL(value);if(!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash)throw new Error('invalid');}
+        catch(err){api.value=apiBase();window.PAIGU.toast('请输入不含密钥或查询参数的 HTTP(S) API 地址','bad');return;}
+        value=window.PAIGU.stripSlash(value);if(value===apiBase()){api.value=value;return;}
+        var next=new URL(window.location.href);next.searchParams.set('api',value);
+        try{window.localStorage.setItem('paigu.display.api',value);}catch(err){}
+        window.location.assign(next.href);
+      },true);
     }
-  };
-
-  function onReady(fn) {
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
-    else fn();
+    document.addEventListener('visibilitychange',function(){if(!document.hidden)fetchWorkflow();});
+    fetchWorkflow();scheduleFetch();
+    if(document.readyState==='complete')applyHash();else window.addEventListener('load',applyHash);
   }
-
-  onReady(init);
+  window.PAIGU_SHELL={
+    refresh:fetchWorkflow,getState:function(){return {ok:state.ok,workflow:state.workflow,step:state.step};},
+    setActiveStep:setActiveStep,setPhaseProgress:setPhaseProgress,relDay:relDay,
+    onWorkflow:function(fn){if(typeof fn!=='function')return function(){};listeners.push(fn);if(state.ok && state.workflow)fn(state.workflow,state);return function(){var i=listeners.indexOf(fn);if(i>=0)listeners.splice(i,1);};},
+    theme:{get:currentTheme,set:function(t){setTheme(t,true);}}
+  };
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();

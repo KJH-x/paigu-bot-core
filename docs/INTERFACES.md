@@ -441,6 +441,8 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 ## 8.9 消息动作人工修订（2026-10-16，分批实施）
 
+第六批接线登记（2026-10-18，实施中）：全站工作区为总览、轮次与商品、排谷、结算与下单、复盘、成员、系统设置；新增 `/members`、`/index`、`/display` 短路由，`.html` 与 `/web/*.html` 继续兼容，根路径仍为排谷。admin 旧页转总览，保留查询和锚点；旧 settings 成员/消息锚点转唯一工作区。导航仅传白名单连接/展示上下文，绝不调用激活。成员页面沿用现有配置/成员接口，保存只合并 CN/别名，不替换其他分区；消息修改统一进入排谷动作编辑器。完成状态以验收记录为准。
+
 下一阶段登记：保存可带 `supplements:[{record_id,record_revision}]`；单条/多条选择统一一条版本化事务日志和完整逻辑检查点，补充条关联主条并拒绝执行。`GET /api/messages/undo?round_id=...` 查询最近事务槽，`POST /api/messages/undo` 带 `{transaction_id,round_id,config_revision,undo_token}` 原子追加逆事务并重放当前日志；非恢复旧快照。已存自动组按产物成员冻结，当前 merge/别名仅影响新入站预分组。实现状态与逐项验收见专项 §18/§16。
 
 第三批单条合同已接线、隔离回归通过：`POST /api/messages/:record_id/actions` 必需 `{transaction_id,round_id,config_revision,record_revision,selection}`，selection 为 `automatic/replace/ignore/reject`（均含 note，解释独立于原文）。replace 的 actions 包含 `{action_id,operation:"claim|cancel|modify",items:[{line_id,item_id,subitem_id,quantity,claim_type,slot_policy,is_proxy_card,notes}],target_claim_id?,target_item_id?,quantity?}`；claim/modify 用 items，cancel 的目标模式互斥。枚举种类/策略使用现有 PascalCase。拒绝额外字段、任意事件/身份/时间、无效数量/目录与越权目标。先准备/重算、单条同步追加版本化 ParseOverride 选择、再发布；同键重试不重复，跨轮/配置/记录过期/同键异内容拒绝，自动组仍拒绝半改。恢复自动缺少匹配基线时阻止，不重解析。未知人工载荷版本不回退旧动作，而为 NeedConfirm。

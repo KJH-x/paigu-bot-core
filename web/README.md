@@ -1,6 +1,6 @@
 # web · 排谷机器人前端（A4）
 
-纯 vanilla JS、无构建、无框架。页面覆盖入口、开团、设置、排谷展示、结算/下单、模拟器与重放；只依赖本地 HTTP API（DESIGN §5）。
+纯 vanilla JS、无构建、无框架。七个工作区统一导航：总览、轮次与商品、排谷、结算与下单、复盘、成员、系统设置；模拟器页已移除。依赖本地 HTTP API 或只读远程快照。
 
 ## 文件
 
@@ -9,8 +9,10 @@
 | `index.html` | 入口导航 + `/api/health` 检查 |
 | `display.html` / `display.js` | 展示页：排位表 + 消息流 + who-whats + 状态 |
 | `round.html` / `round.js` | 开团页：轮次库、阶段窗口、商品目录与子项调价 |
-| `settings.html` / `settings.js` | 设置页：gateway / LLM / display / 成员 CN 等非流程配置 |
-| `admin.html` / `admin.js` | 兼容管理入口 |
+| `settings.html` / `settings.js` | 系统设置：gateway / LLM / display / 私有备份 |
+| `members.html` / `members.js` | 成员称呼、别名及缓存来源；分别保存；LLM 建议先预览再选入草稿 |
+| `admin.html` | 兼容管理入口，保留查询与锚点转总览，不加载旧 admin.js |
+| `msglog.js` / `message-editor.js` | 排谷原文只读日志与统一动作编辑器；远程只读不请求本机私有日志 |
 | `settlement.html` / `settlement.js` / `settlement.css` | 结算试算、排包与下单方案 |
 | `replay.html` / `replay.js` / `replay.css` | 重放步进查看器：步进/播放、累积排位与状态差异高亮、列视图、Mermaid、核对条、双向联动 |
 | `display.css` / `theme.css` / `app.css` | 共用基础样式、语义 token、工作流外壳与响应式布局 |
@@ -47,9 +49,9 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 ## 配置覆盖（优先级从高到低）
 
 1. URL 查询参数：`?api=<base>`、`?source=local|remote`、`?remote=<base>`、`?round=<round_id>`
-2. `localStorage`（在页面上改过 API/数据源后记住）
-3. 页面内联：`window.PAIGU_WEB = { apiBase, dataSource, remoteBaseUrl, refreshMs }`
-4. 默认：`API_BASE = http://127.0.0.1:21081`，`refreshMs = 5000`
+2. 页面显式内联 `apiBase`；HTTP(S) 部署默认当前同源
+3. 仅 file 模式回退本机保存的 API 偏好，最后默认 `http://127.0.0.1:21081`
+4. 展示来源/远程地址/刷新间隔独立沿用其展示偏好；`P.pageHref` 为跨工作区链接保留 API，不将远程静态快照当作可写 API
 示例：`display.html?source=remote&remote=https://example.pages.dev/rounds/月行水上`
 
 ## 展示页行为
@@ -99,7 +101,7 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 | `shell.js` | 统一外壳：品牌 + **工作流 Stepper** + 状态徽标（API / NapCat `clients` / `version` / `locked` / 阶段）+ 主题切换（持久化 `paigu.theme`，首绘前生效防闪烁）+ `/api/workflow` 轮询（5s）+ 移动端底部阶段 Tab + 面板切换 |
 
 - **流程来源**：只读 `GET /api/workflow`（阶段 `phase`/`phase_label`、`locked`、`version`、`claims`、`gateway.bound_addr`、`settlement_configured`、`priority_window`）。
-- **Stepper 五步**：`开团→round` · `排谷→/` · `结算→settlement` · `下单/锁定→settlement#order` · `复盘→replay`；`phase=null`（未配置阶段）时显示「阶段未配置」并高亮「排谷」。
+- **现行导航七区**：每页一次点击可到其余六区，当前页由实际工作区决定，与业务阶段解耦；未配置/断线/锁定不影响导航。`/` 保持排谷默认入口；七页短路由与 `/web/*.html` 可用。旧 `settings#sec-members`、`settings#sec-messages`、`index#sec-msglog` 到唯一新入口；API、监听、接收器分别显示，零接收器不是绿色。
 - **响应式**：`≥1200` 桌面多列；`768–1199` 平板（Stepper 可横滚）；`<768` 移动（底部阶段 Tab + 单列 + 吸附操作条）。
 - **图标**：全部内联 SVG；**零新增依赖**（replay 的 Mermaid 视图由 `shell.js` 内置的 Mermaid-lite 渲染，不再依赖 CDN）。
 - 页面脚本（`display.js`/`admin.js`/`replay.js`/`settlement.js`/`round.js`/`settings.js`）**未改数据契约**，所有既有 `id`/`class` 保留。

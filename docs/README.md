@@ -65,12 +65,13 @@
 
 ## 六、仓库内其它文档
 
-- [桌面信息架构、功能整并与可达性计划](./PLAN-ui-ia-2026-10-15.md)（2026-10-18 更新）：已获实施授权，G0 核心已回归；含导航缺口、功能归属、G1–G5 后续及固定用例，不代表整体完成或部署。
+- [桌面信息架构、功能整并与可达性计划](./PLAN-ui-ia-2026-10-15.md)（2026-10-18 更新）：G0 核心与 G1/G2 七区导航/成员迁移已回归，分区保存、草稿保护等仍在推进，不代表整体完成或部署。
+- [消息与桌面逐项验收台账](./VERIFICATION-msg-ia-2026-10-18.md)：MP 41 项、IA 18 项逐条登记实际证据，不按测试总数推算完成率。
 - [消息动作 override、原位重算与单步撤回计划](./PLAN-message-reprocess-2026-10-15.md)（2026-10-18 更新）：含代码/当前合同与 41 项目标；第五批统一写门闩、配置/备份恢复、锁与轮次隔离及 G0 交互。设置往返、功能整并及完整验收仍未完成，尚未部署。冲突旧提案在文末，实际门禁见 §16/§18.1–18.2。
 - [用户提议与确认](./USER-PROPOSALS-2026-10-16.md)：P-01–10 归纳原意与执行边界，对应 DECISIONS H-1–8。
 
 - [../AGENTS.md](../AGENTS.md) - 仓库级 agent 指南（模块地图 / 常用命令 / 约定 / 红线 / 隐私扫描）
 - [../README.md](../README.md) - 仓库总览与运行方式
-- [../web/README.md](../web/README.md) - 前端（display / admin / sim / replay / settlement）
+- [../web/README.md](../web/README.md) - 前端七工作区与旧入口兼容
 - [../tests/e2e/README.md](../tests/e2e/README.md) - 端到端测试说明
 - [../simulation-corpus/](../simulation-corpus/) - 语料与回归（`*.public.md` 为可入库脱敏版）

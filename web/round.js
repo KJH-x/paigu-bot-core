@@ -42,10 +42,6 @@
   };
 
   function apiBase() {
-    try {
-      var s = window.localStorage.getItem('paigu.display.api');
-      if (s) return P.stripSlash(s);
-    } catch (e) { /* ignore */ }
     return P.resolveApiBase();
   }
 

@@ -1,4 +1,35 @@
 /* Shared desktop workspaces; page data and controls remain in their own modules. */
+.skip-link { position: fixed; left: 12px; top: -80px; z-index: 200; padding: 10px 14px; background: var(--nl-surface); color: var(--nl-ink); border: 2px solid var(--page-accent); }
+.skip-link:focus { top: 8px; }
+.workspace-icon { display: inline-flex; width: 16px; height: 16px; flex: 0 0 16px; }
+.workspace-icon svg { width: 16px; height: 16px; }
+body[data-page] #workspace-title { margin: 0 6px 0 0; color: #f1f4f7; font-size: 15px; font-weight: 700; white-space: nowrap; }
+body[data-page] .app-topbar .step { gap: 7px; padding: 9px 12px; }
+body[data-page] .step.auxiliary { border-left: 1px solid var(--nl-line); margin-left: 8px; }
+body[data-page] .app-topbar .wf-status { margin: 0; gap: 5px; flex-shrink: 1; min-width: 0; flex-wrap: nowrap; }
+body[data-page] #wf-round { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-page] .app-topbar .brand-logo { margin: 0; }
+body[data-page] .app-topbar .connection-field { margin-left: auto; }
+body[data-page] .section-nav a.active { color: var(--page-accent); box-shadow: inset 0 -2px 0 var(--page-accent); }
+body[data-page] .panel-head h2 { margin: 0; font-size: 14px; }
+.workspace-notice { margin: 8px; padding: 8px 12px; color: var(--nl-muted); border: 1px solid var(--nl-line); }
+.workspace-notice.warning { border-left: 3px solid var(--warning); }
+.message-raw { white-space: pre-wrap; overflow-wrap: anywhere; }
+body[data-page="members"] { --page-accent: #5765dc; }
+body[data-page="members"] #form { padding: 8px; }
+body[data-page="members"] #member-source { margin-top: 12px; }
+body[data-page="members"] #member-source > summary::after { content: '展开设置 ▾'; margin-left: auto; font-size: 12px; color: var(--nl-muted); }
+body[data-page="members"] #member-source[open] > summary::after { content: '收起设置 ▴'; }
+body[data-page="members"] .cn-table th:first-child { width: 70px; }
+body[data-page="members"] .cn-table th:nth-child(2) { width: 18%; }
+body[data-page="members"] .cn-table th:nth-child(3) { width: 14%; }
+body[data-page="members"] .cn-table th:nth-child(4) { width: 20%; }
+body[data-page="members"] .cn-table th:nth-child(5) { width: 24%; }
+body[data-page="members"] .cn-table input { width: 100%; }
+body[data-page="members"] #member-suggestions { margin-top: 12px; }
+body[data-page="members"] #member-suggestions[hidden] { display: none; }
+body[data-page="members"] .panel-head::before { content: none; }
+body[data-page="members"] .table-scroll { overflow: auto; }
 body[data-page] .brand-text small { display: none; }
 body[data-page] .app-topbar { align-items: stretch; }
 body[data-page] .app-topbar .shell-row { width: 100%; }

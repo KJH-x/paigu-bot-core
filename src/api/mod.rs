@@ -90,6 +90,8 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
     let settlement_page = ServeFile::new(web.join("settlement.html"));
     let round_page = ServeFile::new(web.join("round.html"));
     let settings_page = ServeFile::new(web.join("settings.html"));
+    let members_page = ServeFile::new(web.join("members.html"));
+    let index_page = ServeFile::new(web.join("index.html"));
 
     Router::new()
         .merge(config_routes::routes())
@@ -102,12 +104,15 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .merge(replay_routes::routes())
         .merge(rounds_routes::routes())
         .merge(settlement_routes::routes())
-        .route("/", get_service(display_page))
+        .route("/", get_service(display_page.clone()))
+        .route("/display", get_service(display_page))
+        .route("/index", get_service(index_page))
         .route("/admin", get_service(admin_page))
         .route("/replay", get_service(replay_page))
         .route("/settlement", get_service(settlement_page))
         .route("/round", get_service(round_page))
         .route("/settings", get_service(settings_page))
+        .route("/members", get_service(members_page))
         .nest_service("/web", ServeDir::new(web.clone()))
         .fallback_service(ServeDir::new(web))
         .with_state(state)

@@ -12,13 +12,11 @@
   <link rel="stylesheet" href="newlook.css" />
   <link rel="stylesheet" href="workbench.css" />
   <script>
-    window.PAIGU_WEB = { apiBase: "http://127.0.0.1:21081" };
+    window.PAIGU_WEB = {};
   </script>
-  <script defer src="./vendor/pinyin-pro.js"></script>
 <script defer src="./common.js"></script>
   <script defer src="shell.js"></script>
   <script defer src="./manage.js"></script>
-  <script defer src="./msglog.js"></script>
   <script defer src="./settings.js"></script>
 </head>
 <body data-page="settings">
@@ -45,13 +43,7 @@
         <button id="load" class="small">重新载入</button>
         <button id="reload" class="small">从磁盘重载</button>
         <button id="save" class="primary">保存配置</button>
-        <span class="nav-links">
-          <a href="index.html">首页</a>
-          <a href="round.html">开团</a>
-          <a href="display.html">展示</a>
-          <a href="settlement.html">结算</a>
-          <a href="replay.html">回放</a>
-        </span>
+
       </div>
     </header>
 
@@ -61,8 +53,6 @@
       <a href="#sec-gateway">接入</a>
       <a href="#sec-display">展示</a>
       <a href="#sec-llm">LLM</a>
-      <a href="#sec-members">成员 / CN</a>
-      <a href="#sec-messages">消息日志</a>
       <a href="#sec-snapshot">快照</a>
     </nav>
 
@@ -120,60 +110,11 @@
           </div>
         </section>
 
-        <section class="panel admin-section" id="sec-members">
-            <div class="panel-head">
-              <span>成员名称与别名</span>
-              <span class="spacer"></span>
-              <button id="members-cn-llm" class="small">LLM 清理群名片</button>
-              <button id="members-cn-save" class="small">保存成员 CN</button>
-            </div>
-          <div class="panel-body">
-            <div class="split">
-              <label class="field"><span>群号</span><input id="mb-group" /></label>
-              <label class="field"><span>成员缓存文件</span><input id="mb-cache" /></label>
-              <label class="field"><span>每日拉取时间</span><input id="mb-pull" placeholder="19:00" /></label>
-            </div>
-            <div class="row">
-              <button id="members-refresh" class="small">拉取群成员</button>
-              <span id="members-info" class="hint"></span>
-            </div>
-            <div class="explain" style="margin-top:8px">
-              <b>昵称来源统一 = 群名片（card）</b>；<b>CN = 清洗后的群名片，绑定 QQ(user_id)</b>。用途：① 请求匹配；② <b>制作结算表格/账单里的人名</b>（回退顺序：CN → 清洗后群名片 → user_id）。
-              未编辑者 CN 自动填充（= 清洗后群名片，清洗会截断到首个括号/空白）；人工编辑 CN 后写入 <code>members.cn_overrides</code> 并停止自动填充（config 热载 + 乐观并发 409）。
-            </div>
-            <div class="row" style="margin-top:8px;gap:8px">
-              <input id="members-filter" type="search" placeholder="筛选：群名片 / CN / 别名 / 拼音（全拼或首字母）" style="flex:1" />
-            </div>
-            <div class="table-scroll" style="max-height:40vh;margin-top:8px">
-              <table class="grid cn-table">
-                <thead><tr><th>成员标识</th><th>群名片</th><th>自动清洗（预览）</th><th>最终称呼（CN）</th><th>别名</th><th>角色</th><th>跟随状态</th></tr></thead>
-                <tbody id="members-body"></tbody>
-              </table>
-              <div id="members-empty" class="empty">尚未加载成员列表</div>
-            </div>
-          </div>
-        </section>
+
       </div>
 
       <div class="layout" style="margin-top:12px">
-        <section class="panel admin-section" id="sec-messages">
-          <div class="panel-head">
-            <span>消息日志</span>
-            <span class="spacer"></span>
-            <span id="msg-info" class="hint"></span>
-            <button id="msg-refresh" class="small">刷新消息</button>
-          </div>
-          <div class="panel-body">
-            <div class="hint">编辑文本或时间后会按消息唯一 ID 保存并权威重算；“重新路由”会按当前白名单重新判断该消息。</div>
-            <div id="msg-empty" class="empty">尚未加载消息</div>
-            <div class="table-wrap" style="max-height:46vh;overflow:auto">
-              <table class="grid">
-                <thead><tr><th>seq / ID</th><th>消息 / 来源</th><th>时间（本地）</th><th>状态 / 路由</th><th>操作</th></tr></thead>
-                <tbody id="msg-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </section>
+
 
         <section class="panel admin-section" id="sec-snapshot">
           <div class="panel-head"><span>私有备份与恢复</span></div>

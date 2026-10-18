@@ -67,6 +67,8 @@
     var v = qs('api');
     if (v) return stripSlash(v);
     if (INLINE.apiBase) return stripSlash(INLINE.apiBase);
+    if (global.location && /^https?:$/.test(global.location.protocol)) return stripSlash(global.location.origin);
+    try { var chosen=global.localStorage.getItem('paigu.display.api');if(chosen)return stripSlash(chosen); } catch(e) { /* local files may not allow storage */ }
     return DEFAULT_API;
   }
 
@@ -75,6 +77,16 @@
     if (v) return String(v).trim();
     if (INLINE.wsUrl) return String(INLINE.wsUrl).trim();
     return DEFAULT_WS;
+  }
+
+  function pageHref(href, values) {
+    var target = new URL(href, global.location.href);
+    target.searchParams.set('api', resolveApiBase());
+    if (/\/(display(?:\.html)?)?$/.test(target.pathname)) {
+      ['source','remote','round'].forEach(function(key){var value=qs(key);if(value)target.searchParams.set(key,value);});
+    }
+    Object.keys(values || {}).forEach(function(key){if(values[key]!=null)target.searchParams.set(key,values[key]);});
+    return target.href;
   }
 
   function resolveSource() {
@@ -1032,6 +1044,7 @@
     normalizeStatus: normalizeStatus,
     normalizeMembers: normalizeMembers,
     embeddedMembers: embeddedMembers,
+    pageHref: pageHref,
     diffBoardItems: diffBoardItems,
     normalizeChanged: normalizeChanged,
     resolveRemoteCandidates: resolveRemoteCandidates,

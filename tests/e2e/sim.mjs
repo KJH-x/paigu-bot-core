@@ -12,6 +12,7 @@ import { verifyAutomaticBaseline } from './automatic-baseline.mjs';
 import { verifyMessageActions } from './message-actions.mjs';
 import { verifyMessageTransactions } from './message-transactions.mjs';
 import { verifyCorrectnessGates } from './correctness-gates.mjs';
+import { verifyWorkspaceNavigation } from './workspace-navigation.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -714,6 +715,7 @@ function buildCases() {
     },
     { name: '固定宽度、盒列对齐与复盘切步', fn: verifyBoardLayout },
     { name: 'CN作用域保存、整盒关联、等效移动与锁定、私有备份预检', fn: verifyCorrectnessGates },
+    { name: '七工作区42对点击、旧入口、连接上下文与只读消息真源', fn: verifyWorkspaceNavigation },
     {
       name: 'remote 数据源',
       fn: async (page, ctx) => {

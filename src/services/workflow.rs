@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use crate::api::ApiState;
 
 pub async fn snapshot(state: &ApiState) -> Value {
+    let _serial = state.pipeline.message_write_guard().await;
     let cfg = state.cfg.get().await;
     let now_ms = chrono::Utc::now().timestamp_millis();
 
@@ -49,6 +50,7 @@ pub async fn snapshot(state: &ApiState) -> Value {
         "round_id": cfg.round.round_id,
         "title": cfg.round.title,
         "group_id": cfg.round.group_id,
+        "category": cfg.round.category,
         "phase": phase.map(|p| p.as_str()),
         "phase_label": phase.map(|p| p.label()),
         "phases": phases,
@@ -70,8 +72,15 @@ pub async fn snapshot(state: &ApiState) -> Value {
         for (key, value) in src {
             dst.insert(key.clone(), value.clone());
         }
-        if let Ok(locked) = crate::services::settlement::round_locked(&cfg.round.round_id) {
-            dst.insert("locked".to_string(), json!(locked));
+        match crate::services::settlement::round_locked(&cfg.round.round_id) {
+            Ok(locked) => {
+                let phase_locked = dst.get("locked").and_then(Value::as_bool).unwrap_or(false);
+                dst.insert("locked".to_string(), json!(locked || phase_locked));
+            }
+            Err(_) => {
+                dst.insert("locked".to_string(), json!(true));
+                dst.insert("lock_error".to_string(), json!(true));
+            }
         }
     }
     body

@@ -446,10 +446,6 @@
     renderStatus({});
 
     state.source = P.resolveSource() || readStore('source') || P.INLINE.dataSource || 'local';
-    if (!P.qs('api')) {
-      var storedApi = readStore('api');
-      if (storedApi) state.apiBase = P.stripSlash(storedApi);
-    }
     if (!P.qs('remote')) {
       var storedRemote = readStore('remote');
       if (storedRemote) state.remoteBase = P.stripSlash(storedRemote);

@@ -56,11 +56,6 @@
     setVal('dp-source', dp.data_source || 'local');
     setVal('dp-remote', dp.remote_base_url);
 
-    var mb = cfg.members || {};
-    setVal('mb-group', mb.group_id);
-    setVal('mb-cache', mb.cache_path);
-    setVal('mb-pull', mb.daily_pull_at);
-
     setRev();
     $('form').classList.remove('hidden');
     $('loading').classList.add('hidden');
@@ -94,44 +89,7 @@
     cfg.display.data_source = val('dp-source') || 'local';
     cfg.display.remote_base_url = val('dp-remote');
 
-    cfg.members = cfg.members || {};
-    cfg.members.group_id = val('mb-group');
-    cfg.members.cache_path = val('mb-cache');
-    cfg.members.daily_pull_at = val('mb-pull');
-    cfg.members.cn_overrides = collectOverrides();
-
     return cfg;
-  }
-
-  function collectOverrides() {
-    var ids=new Set((state.members || []).map(function(m){return m.user_id;}));
-    var out = ((state.config && state.config.members && state.config.members.cn_overrides) || []).filter(function(o){return !ids.has(o.user_id);});
-    (state.members || []).forEach(function (m) {
-      if (!m.user_id) return;
-      var aliases = M.dedupe(m.aliases || []);
-      // 未编辑的 CN 由前端自动填充（=清洗后群名片），不落库；仅持久化用户编辑过的 CN / 别名。
-      if (!m.cnTouched && !aliases.length) return;
-      out.push({ user_id: m.user_id, cn: m.cnTouched ? (m.cn || '').trim() : '', aliases: aliases });
-    });
-    return out;
-  }
-
-  function saveMembers() {
-    if(!state.config) return;
-    var baseline=JSON.stringify(state.config.members.cn_overrides || []), overrides=collectOverrides();
-    var controls=Array.from($('members-body').querySelectorAll('input,button'));controls.forEach(function(n){n.disabled=true;});
-    $('members-cn-save').disabled=true;
-    P.get('/api/config').then(function(res){
-      var latest=res.config;
-      if(latest.round.round_id!==state.config.round.round_id) throw new Error('轮次已切换，当前草稿保留，请重新核对。');
-      if(JSON.stringify(latest.members.cn_overrides || [])!==baseline) throw new Error('成员称呼已被其他操作修改，当前草稿保留，请重新核对。');
-      latest.members.cn_overrides=overrides;
-      return P.put('/api/config',{config:latest,revision:res.revision});
-    }).then(function(res){
-      state.config.members.cn_overrides=P.deepClone(res.config.members.cn_overrides);state.revision=res.revision;setRev();
-      P.toast('仅成员称呼与别名已保存，其他分区草稿未提交','ok');banner('');
-    }).catch(function(e){banner('成员保存未完成，草稿保留：'+P.errorText(e),true);})
-      .finally(function(){controls.forEach(function(n){n.disabled=false;});$('members-cn-save').disabled=false;});
   }
 
   function load() {
@@ -201,149 +159,6 @@
     });
   }
 
-  /* ------------------------------ 成员 CN ------------------------------ */
-
-  function buildMembers(res) {
-    var raw = (res && res.members) || [];
-    var overrides = (state.config && state.config.members && state.config.members.cn_overrides) || [];
-    var byId = {};
-    overrides.forEach(function (o) { byId[o.user_id] = o; });
-    return raw.map(function (m) {
-      m = m || {};
-      var uid = m.user_id != null ? String(m.user_id) : '';
-      var ov = byId[uid];
-      var card = m.card != null ? String(m.card) : '';
-      var rawName = card.trim() ? card : (m.nickname != null ? String(m.nickname) : '');
-      var cleaned = P.cleanNickname(rawName);
-      return {
-        user_id: uid,
-        nickname: m.nickname != null ? String(m.nickname) : '',
-        raw: rawName,
-        cleaned: cleaned,
-        role: m.role || '',
-        resolved: m.resolved != null ? String(m.resolved) : '',
-        cn: ov && ov.cn ? ov.cn : cleaned,
-        cnTouched: !!(ov && ov.cn),
-        aliases: ov ? M.asStrArray(ov.aliases) : [],
-        fallback: !!m.fallback
-      };
-    });
-  }
-
-  function pinyinText(text) {
-    var out = [];
-    if (window.pinyinPro) {
-      try { out = window.pinyinPro.pinyin(String(text || ''), { toneType: 'none', type: 'array' }) || []; }
-      catch (e) { out = []; }
-    }
-    return out.join('');
-  }
-
-  function pinyinInitials(text) {
-    if (!window.pinyinPro) return '';
-    try {
-      return window.pinyinPro.pinyin(String(text || ''), { pattern: 'first', toneType: 'none', type: 'array' }).join('');
-    } catch (e) { return ''; }
-  }
-
-  function memberHaystack(m) {
-    var base = [m.user_id, m.raw, m.cleaned, m.cn, m.resolved, (m.aliases || []).join(' ')].join(' ');
-    return (base + ' ' + pinyinText(base) + ' ' + pinyinInitials(base)).toLowerCase();
-  }
-
-  function renderMembers() {
-    var tbody = $('members-body');
-    if (!tbody) return;
-    while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-    var filterEl = $('members-filter');
-    var q = filterEl ? filterEl.value.trim().toLowerCase() : '';
-    var list = state.members || [];
-    var shown = 0;
-    list.forEach(function (m, i) {
-      if (q && memberHaystack(m).indexOf(q) < 0) return;
-      shown++;
-      var tr = document.createElement('tr');
-      tr.innerHTML =
-        '<td class="mono mono-id">' + P.esc(m.user_id) + '</td>' +
-        '<td>' + P.esc(m.raw || '') + '</td>' +
-        '<td class="member-clean-preview">' + P.esc(m.cleaned || '') + '</td>' +
-        '<td><input class="cn" ' + (!m.user_id ? 'disabled title="占位示例没有成员标识，不能保存" ' : '') + 'data-user="' + P.esc(m.user_id) + '" value="' + P.esc(m.cn || '') + '" placeholder="' + P.esc(m.resolved || m.cleaned || '') + '" /></td>' +
-        '<td><input class="aliases" ' + (!m.user_id ? 'disabled ' : '') + 'data-user="' + P.esc(m.user_id) + '" value="' + P.esc((m.aliases || []).join(', ')) + '" placeholder="别名，逗号分隔" /></td>' +
-        '<td>' + P.esc(m.role || '') + '</td>' +
-        '<td><button type="button" class="small" ' + (!m.user_id ? 'disabled ' : '') + 'data-use="' + i + '">恢复自动</button><span class="hint">' + (!m.user_id ? '只读占位示例' : (m.cnTouched ? '自定义' : '自动跟随群名片')) + '</span></td>';
-      tbody.appendChild(tr);
-    });
-    $('members-empty').hidden = shown > 0;
-    $('members-info').textContent = (q ? shown + ' / ' : '') + list.length + ' 人' + (list.length && list[0].fallback ? '（内置子集，未接入群）' : '');
-  }
-
-  function onMembersInput(ev) {
-    var t = ev.target;
-    if (!t || !t.dataset || !t.dataset.user) return;
-    var uid = t.dataset.user;
-    var entry = null;
-    for (var i = 0; i < state.members.length; i++) {
-      if (state.members[i].user_id === uid) { entry = state.members[i]; break; }
-    }
-    if (!entry) return;
-    if (t.classList.contains('aliases')) entry.aliases = M.splitTokens(t.value);
-    else { entry.cn = t.value; entry.cnTouched = true; }
-  }
-
-  function onMembersClick(ev) {
-    var b = ev.target.closest ? ev.target.closest('button[data-use]') : null;
-    if (!b) return;
-    var i = parseInt(b.getAttribute('data-use'), 10);
-    var m = state.members[i];
-    if (!m) return;
-    m.cn = m.cleaned || m.resolved || m.nickname || '';
-    m.cnTouched = false;
-    renderMembers();
-    var restored=$('members-body').querySelector('button[data-use="'+i+'"]');if(restored)restored.focus();
-  }
-
-  function loadMembers() {
-    return P.get('/api/members').then(function (res) {
-      state.members = buildMembers(res && res.members !== undefined ? res : { members: res });
-      if (!state.members.length) state.members = P.embeddedMembers();
-      renderMembers();
-    }).catch(function (err) {
-      state.members = P.embeddedMembers();
-      renderMembers();
-      banner('成员列表加载失败：' + P.errorText(err) + '。已显示内置子集（DESIGN §8）。', false);
-    });
-  }
-
-  function refreshMembers() {
-    $('members-refresh').disabled = true;
-    $('members-info').textContent = '拉取中…';
-    P.post('/api/members/refresh', {}).then(function () { return loadMembers(); })
-      .then(function () { P.toast('成员列表已刷新', 'ok'); })
-      .catch(function (err) {
-        banner('拉取群成员失败：' + P.errorText(err) + '（需 NapCat 已接入且 Gateway 在线）。', true);
-        state.members = P.embeddedMembers();
-        renderMembers();
-      }).then(function () { $('members-refresh').disabled = false; });
-  }
-
-  function llmCleanMembers() {
-    var btn = $('members-cn-llm');
-    if (btn) btn.disabled = true;
-    P.post('/api/members/cn-suggest', {}).then(function (res) {
-      var sug = (res && res.suggestions) || [];
-      var byId = {};
-      sug.forEach(function (s) { byId[s.user_id] = s.cn; });
-      var filled = 0;
-      (state.members || []).forEach(function (m) {
-        if (byId[m.user_id]) { m.cn = byId[m.user_id]; m.cnTouched = true; filled++; }
-      });
-      renderMembers();
-      banner('LLM 清理完成：' + filled + ' 条建议已填入 CN，可编辑后保存。', true);
-    }).catch(function (err) {
-      banner('LLM 清理失败：' + P.errorText(err), false);
-    }).then(function () { if (btn) btn.disabled = false; });
-  }
-
   /* ------------------------------ 快照 ------------------------------ */
   function exportSnapshot() {
     var out = val('snap-out').trim();
@@ -386,26 +201,13 @@
         '备份轮次：'+res.manifest.round_id+' → 当前轮：'+res.target_round_id+'；消息 '+res.current_messages+' → '+res.import_messages+'。'+res.effect+(res.applicable?'':' 请先手动激活匹配轮次，再预检。');
       banner('');
       P.toast(applied?'备份已应用':'预检完成，尚未应用', 'ok');
-      if (applied) msg.load();
+      if (applied && window.PAIGU_SHELL) window.PAIGU_SHELL.refresh();
     }).catch(function (err) {
       if (err.status === 409) banner('导入冲突（HTTP 409）：revision 已变化，请先「重新载入」配置。', true);
       else banner('快照导入失败：' + P.errorText(err), true);
       $('snap-import-result').textContent = '导入失败：' + P.errorText(err);
     }).then(function () { $('snap-import').disabled = false; });
   }
-
-  /* ------------------------------ 消息日志 ------------------------------ */
-
-  var msg = window.PAIGU_MSGLOG.create({
-    tbody: 'msg-body',
-    empty: 'msg-empty',
-    info: 'msg-info',
-    refresh: 'msg-refresh',
-    getRevision: function () { return state.revision; },
-    setRevision: function (v) { state.revision = v; setRev(); },
-    onBanner: banner,
-    onToast: function (t, k) { P.toast(t, k); }
-  });
 
   /* ------------------------------ 绑定 ------------------------------ */
 
@@ -415,26 +217,19 @@
       var v = P.stripSlash(e.target.value) || P.DEFAULT_API;
       e.target.value = v;
       try { window.localStorage.setItem('paigu.display.api', v); } catch (err) { /* ignore */ }
-      load().then(loadMembers).catch(function () {});
+      load().catch(function () {});
     });
-    $('load').addEventListener('click', function () { load().then(loadMembers).catch(function () {}); });
+    $('load').addEventListener('click', function () { load().catch(function () {}); });
     $('reload').addEventListener('click', reloadDisk);
     $('save').addEventListener('click', save);
     $('gw-reply-toggle').addEventListener('click', function () { toggleGateway('reply'); });
     $('gw-admin-toggle').addEventListener('click', function () { toggleGateway('admin'); });
-    $('members-refresh').addEventListener('click', refreshMembers);
-  if ($('members-cn-llm')) $('members-cn-llm').addEventListener('click', llmCleanMembers);
-    $('members-cn-save').addEventListener('click', saveMembers);
-  $('members-body').addEventListener('input', onMembersInput);
-  $('members-body').addEventListener('click', onMembersClick);
-  if ($('members-filter')) $('members-filter').addEventListener('input', renderMembers);
     $('snap-export').addEventListener('click', exportSnapshot);
     $('snap-import').addEventListener('click', function(){importSnapshot(false);});
     $('snap-apply').addEventListener('click', function(){importSnapshot(true);});
     $('snap-path').addEventListener('input',function(){state.importPreflight=null;$('snap-apply').disabled=true;});
 
-    load().then(loadMembers).catch(function () {});
-    msg.load();
+    load().catch(function () {});
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

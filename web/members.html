@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>成员 · 排谷</title><link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./display.css" /><link rel="stylesheet" href="./theme.css" /><link rel="stylesheet" href="./app.css" />
+  <link rel="stylesheet" href="./manage.css" /><link rel="stylesheet" href="./newlook.css" /><link rel="stylesheet" href="./workbench.css" />
+  <script defer src="./vendor/pinyin-pro.js"></script><script defer src="./common.js"></script><script defer src="./shell.js"></script>
+  <script defer src="./manage.js"></script><script defer src="./members.js"></script>
+</head>
+<body data-page="members"><div class="page">
+    <header class="topbar app-topbar">
+      <div class="shell-row">
+        <a class="brand" href="index.html">
+          <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5l9-4 9 4-9 4-9-4z"/><path d="M3 7.5v9l9 4 9-4v-9"/><path d="M12 11.5v9"/></svg></span>
+          <span class="brand-text"><b>成员</b></span>
+        </a>
+        <nav class="stepper" id="wf-stepper" aria-label="工作流步骤"></nav>
+        <div class="wf-status" id="wf-status"></div>
+        <span class="spacer"></span>
+        <label class="row tight">
+          <span class="hint">API</span>
+          <input id="api" size="26" />
+        </label>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="切换主题"></button>
+      </div>
+      <div class="tools-row">
+        <span id="rev-badge" class="status-badge">revision —</span>
+        <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
+        <span class="spacer"></span>
+        <button id="load" class="small">重新载入</button>
+      </div>
+    </header>
+
+
+  <div id="banner" class="banner" role="status"></div>
+  <nav class="section-nav" aria-label="成员页内导航"><a href="#sec-members">称呼与别名</a><a href="#member-source">数据来源</a></nav>
+  <div id="form" class="hidden">
+    <p id="members-source-info" class="workspace-notice"></p>
+        <section class="panel admin-section" id="sec-members">
+            <div class="panel-head">
+              <span>成员名称与别名</span>
+              <span class="spacer"></span>
+              <button id="members-cn-llm" class="small">预览 AI 称呼建议</button>
+              <button id="members-cn-save" class="small">保存称呼与别名</button>
+            </div>
+          <div class="panel-body">
+            <div class="row">
+              <button id="members-refresh" class="small">拉取群成员</button>
+              <span id="members-info" class="hint"></span>
+            </div>
+            <p class="hint">群名片 → 自动清洗 → 最终称呼。编辑称呼会固定该名字；“恢复自动”重新跟随群名片。别名独立保存，不改成员原消息。</p>
+            <div class="row" style="margin-top:8px;gap:8px">
+              <input id="members-filter" type="search" placeholder="筛选：群名片 / CN / 别名 / 拼音（全拼或首字母）" style="flex:1" />
+            </div>
+            <div class="table-scroll" style="margin-top:8px">
+              <table class="grid cn-table">
+                <thead><tr><th>成员标识</th><th>群名片</th><th>自动清洗（预览）</th><th>最终称呼（CN）</th><th>别名</th><th>角色</th><th>跟随状态</th></tr></thead>
+                <tbody id="members-body"></tbody>
+              </table>
+              <div id="members-empty" class="empty">尚未加载成员列表</div>
+            </div>
+          </div>
+        </section>
+    <section id="member-suggestions" class="panel" hidden>
+      <div class="panel-head"><h2>AI 建议预览 · 尚未保存</h2><span class="spacer"></span><button id="members-ai-apply" type="button">将勾选建议填入草稿</button><button id="members-ai-dismiss" type="button">关闭建议</button></div>
+      <div class="panel-body"><p class="hint" id="members-ai-info"></p><table class="grid"><thead><tr><th>采用</th><th>群名片</th><th>当前称呼</th><th>建议称呼</th></tr></thead><tbody id="members-ai-body"></tbody></table></div>
+    </section>
+    <details class="panel" id="member-source">
+      <summary class="panel-head">成员数据来源与拉取设置</summary><div class="panel-body">
+        <p class="hint">这里只配置本机缓存与拉取策略，不会自动接收消息或拉取成员。拉取需要已连接的 NapCat；没有接收器时仍可使用本地缓存和人工称呼。</p>
+            <div class="split">
+              <label class="field"><span>群号</span><input id="mb-group" /></label>
+              <label class="field"><span>成员缓存文件</span><input id="mb-cache" /></label>
+              <label class="field"><span>每日拉取时间</span><input id="mb-pull" placeholder="19:00" /></label>
+            </div>
+
+        <button id="members-source-save" type="button">仅保存成员来源设置</button>
+      </div>
+    </details>
+  </div>
+  <div id="loading" class="empty">正在载入成员…</div>
+</div></body></html>

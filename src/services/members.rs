@@ -49,10 +49,21 @@ fn members_from_disk(cache_path: &Path) -> (Vec<Value>, &'static str) {
 }
 
 pub async fn get_members(state: &ApiState) -> Value {
-    let cfg = state.cfg.get().await;
+    let cfg = state.cfg.read().await;
     let (members, source) = members_from_disk(Path::new(&cfg.members.cache_path));
     let decorated: Vec<Value> = members.iter().map(|m| decorate_member(&cfg, m)).collect();
-    json!({ "members": decorated, "source": source })
+    let cache = (source == "cache").then(|| Path::new(&cfg.members.cache_path));
+    let cached_group_id = cache
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+        .and_then(|v| v.get("group_id").and_then(scalar_string));
+    let updated = cache
+        .and_then(|p| std::fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64);
+    json!({ "members": decorated, "source": source, "round_id":cfg.round.round_id,
+        "config_revision":cfg.revision,"cached_group_id":cached_group_id,"cache_updated_at_ms":updated })
 }
 
 fn scalar_string(v: &Value) -> Option<String> {
