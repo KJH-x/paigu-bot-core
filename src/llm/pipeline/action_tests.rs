@@ -205,6 +205,27 @@ async fn typed_multi_action_order_and_ids_survive_reordering_without_duplicate_e
         quantity(&state.pipeline.recompute().await.unwrap().board),
         2
     );
+    let (id, mut body) = opened(&state).await;
+    if let ActionSelection::Replace { actions, .. } = &mut body.selection {
+        assert_eq!(actions[0].action_id, "second");
+        actions.remove(0);
+    }
+    message_actions::save(&state, &id, body).await.unwrap();
+    let after_delete = state.pipeline.recompute().await.unwrap();
+    assert_eq!(
+        quantity(&after_delete.board),
+        0,
+        "delete only the second claim; the remaining latest cancellation still executes"
+    );
+    assert_eq!(after_delete.events.len(), 2);
+    assert!(after_delete
+        .events
+        .iter()
+        .all(|event| !event.event_id.0.ends_with("-second")));
+    assert!(after_delete
+        .events
+        .iter()
+        .any(|event| event.event_id.0.ends_with("-primary")));
 }
 
 #[tokio::test]

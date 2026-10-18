@@ -70,6 +70,10 @@
       src.appendChild(el('b', '', opts.message.display + ' · #' + data.message.seq));
       src.appendChild(el('p', 'ae-raw', data.message.text));
       src.appendChild(el('p', 'hint', '当前：' + (titles[data.current_outcome.status] || data.current_outcome.status) + ' · ' + (data.current_outcome.summary || data.current_outcome.detail || '')));
+      if(data.current_outcome.summary && data.current_outcome.detail && data.current_outcome.detail!==data.current_outcome.summary){
+        var execution=el('details','ae-execution');execution.open=/未命中|失败|不再有效/.test(data.current_outcome.detail);
+        execution.appendChild(el('summary','','执行说明'));execution.appendChild(el('p',execution.open?'ae-warning':'hint',data.current_outcome.detail));src.appendChild(execution);
+      }
       content.appendChild(src);
       var compare = el('details', 'ae-compare'), summary = el('summary', '', '查看原自动结果'); compare.appendChild(summary);
       if (data.original_automatic) {

@@ -40,68 +40,100 @@ pub(crate) async fn prepare_understanding(
         title: cfg.round.title.clone(),
         items: cfg.round.to_items(),
     }];
-    let outcome = EventValidator::new(super::REPLAY_CONFIDENCE_THRESHOLD)
-        .validate(
-            input,
-            ValidateContext {
-                user_id: &UserId(rec.user_id.clone()),
-                group_id: &rec.group_id,
-                raw_message_id: Some(rec.message_id.clone()),
-                active_rounds: &rounds,
-                box_map: &crate::settings::box_redirect_map(&cfg.round.items),
-                now,
-                sequence: rec.seq,
-            },
-        )
-        .await;
-    match outcome {
-        Ok(ValidationOutcome::Ok(mut event)) => {
-            let mut detail = describe_event(&event);
-            if result.is_modify {
-                detail = format!("改单：{detail}");
-                if let DomainEvent::ClaimCreated(created) = &event.payload {
-                    let mut targets = Vec::<ItemId>::new();
-                    for line in &created.items {
-                        if !targets.contains(&line.item_id) {
-                            targets.push(line.item_id.clone());
+    let inputs = if input.intent == ParsedIntent::Cancel && input.items.len() > 1 {
+        std::mem::take(&mut input.items)
+            .into_iter()
+            .map(|item| {
+                let mut part = input.clone();
+                part.items = vec![item];
+                part
+            })
+            .collect::<Vec<_>>()
+    } else {
+        vec![input]
+    };
+    let mut descriptions = Vec::new();
+    for (position, input) in inputs.into_iter().enumerate() {
+        let outcome = EventValidator::new(super::REPLAY_CONFIDENCE_THRESHOLD)
+            .validate(
+                input,
+                ValidateContext {
+                    user_id: &UserId(rec.user_id.clone()),
+                    group_id: &rec.group_id,
+                    raw_message_id: Some(rec.message_id.clone()),
+                    active_rounds: &rounds,
+                    box_map: &crate::settings::box_redirect_map(&cfg.round.items),
+                    now,
+                    sequence: rec.seq,
+                },
+            )
+            .await;
+        match outcome {
+            Ok(ValidationOutcome::Ok(mut event)) => {
+                let mut detail = describe_event(&event);
+                if result.is_modify {
+                    detail = format!("改单：{detail}");
+                    if let DomainEvent::ClaimCreated(created) = &event.payload {
+                        let mut targets = Vec::<ItemId>::new();
+                        for line in &created.items {
+                            if !targets.contains(&line.item_id) {
+                                targets.push(line.item_id.clone());
+                            }
+                        }
+                        for target in targets {
+                            result.events.push(super::cancel_for_modify(
+                                &rounds[0].round_id,
+                                rec,
+                                rec.seq,
+                                now,
+                                target,
+                            ));
                         }
                     }
-                    for target in targets {
-                        result.events.push(super::cancel_for_modify(
-                            &rounds[0].round_id,
-                            rec,
-                            rec.seq,
-                            now,
-                            target,
+                }
+                if rec.processing.is_none() {
+                    super::stabilize_event(&mut event, rec.seq);
+                    if position > 0 {
+                        event.event_id = crate::domain::ids::EventId(format!(
+                            "evt-{}-cancel-{position}",
+                            rec.seq
                         ));
                     }
                 }
+                result.events.push(*event);
+                if rec.processing.is_some() {
+                    stabilize_events(&mut result.events, rec);
+                }
+                descriptions.push(detail);
+                result.validation =
+                    ProcessingOutcome::new("Applied", descriptions.join("；"), None);
             }
-            if rec.processing.is_none() {
-                super::stabilize_event(&mut event, rec.seq);
+            Ok(ValidationOutcome::NeedConfirm(reply)) | Ok(ValidationOutcome::Reject(reply)) => {
+                let is_confirm =
+                    matches!(reply, crate::parser::reply::BotReply::NeedConfirm { .. });
+                let text = reply.text_content().unwrap_or("需要核对").to_string();
+                result.validation = ProcessingOutcome::new(
+                    if is_confirm {
+                        "NeedConfirm"
+                    } else {
+                        "Rejected"
+                    },
+                    text.clone(),
+                    Some(text),
+                );
+                result.events.clear();
+                return result;
             }
-            result.events.push(*event);
-            if rec.processing.is_some() {
-                stabilize_events(&mut result.events, rec);
+            Ok(ValidationOutcome::Ignore) => {
+                result.events.clear();
+                return result;
             }
-            result.validation = ProcessingOutcome::new("Applied", detail, None);
-        }
-        Ok(ValidationOutcome::NeedConfirm(reply)) | Ok(ValidationOutcome::Reject(reply)) => {
-            let is_confirm = matches!(reply, crate::parser::reply::BotReply::NeedConfirm { .. });
-            let text = reply.text_content().unwrap_or("需要核对").to_string();
-            result.validation = ProcessingOutcome::new(
-                if is_confirm {
-                    "NeedConfirm"
-                } else {
-                    "Rejected"
-                },
-                text.clone(),
-                Some(text),
-            );
-        }
-        Ok(ValidationOutcome::Ignore) => {}
-        Err(error) => {
-            result.validation = ProcessingOutcome::new("Error", format!("处理失败: {error}"), None);
+            Err(error) => {
+                result.validation =
+                    ProcessingOutcome::new("Error", format!("处理失败: {error}"), None);
+                result.events.clear();
+                return result;
+            }
         }
     }
     result
@@ -115,6 +147,55 @@ pub(crate) struct Evaluation {
 }
 
 impl Evaluation {
+    pub fn explain_cancellations(&mut self, previous: &[EventEnvelope], cfg: &AppConfig) {
+        if !self
+            .events
+            .iter()
+            .any(|event| matches!(event.payload, DomainEvent::ClaimCancelled(_)))
+        {
+            return;
+        }
+        let mut prefix = previous.to_vec();
+        let mut warnings = Vec::new();
+        for event in &self.events {
+            if let DomainEvent::ClaimCancelled(cancel) = &event.payload {
+                let lines = crate::engine::replay::collect_effective_claims(&prefix, &[]);
+                let matched = lines.iter().any(|line| {
+                    line.user_id == event.user_id
+                        && cancel
+                            .target_claim_id
+                            .as_ref()
+                            .is_none_or(|id| &line.claim_id == id)
+                        && cancel
+                            .target_item_id
+                            .as_ref()
+                            .is_none_or(|id| &line.item_id == id)
+                });
+                if !matched {
+                    let reason = if cancel.target_claim_id.is_some() {
+                        "原指定申购已无有效数量；未改撤其他申购".to_string()
+                    } else if let Some(id) = &cancel.target_item_id {
+                        let item = cfg
+                            .round
+                            .items
+                            .iter()
+                            .find(|item| item.item_id == id.0)
+                            .map(|item| item.name.as_str())
+                            .unwrap_or("原商品");
+                        format!("{item}没有本成员可撤的有效数量")
+                    } else {
+                        "本成员没有可撤的最近一笔申购".to_string()
+                    };
+                    warnings.push(format!("撤销未命中：{reason}"));
+                }
+            }
+            prefix.push(event.clone());
+        }
+        if !warnings.is_empty() {
+            self.outcome.detail = format!("{}；{}", self.outcome.detail, warnings.join("；"));
+        }
+    }
+
     pub fn skipped(status: &str, detail: impl Into<String>) -> Self {
         Self {
             outcome: ProcessingOutcome::new(status, detail, None),

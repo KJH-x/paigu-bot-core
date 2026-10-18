@@ -318,7 +318,7 @@ async fn compute(
                 .collect::<Vec<_>>()
                 .join("\n");
         }
-        let processed = process_one(
+        let mut processed = process_one(
             cfg,
             &representative,
             parse_overrides,
@@ -326,6 +326,7 @@ async fn compute(
             automatic,
         )
         .await;
+        processed.explain_cancellations(&events, cfg);
 
         let rep_uid = ordered[rep_pos].user_id.clone();
         if !processed.events.is_empty() {

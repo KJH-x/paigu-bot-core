@@ -87,6 +87,25 @@ export async function verifyMessageActions(page, ctx) {
     await page.keyboard.press('Escape');
     await page.locator('.draft-guard [data-choice="discard"]').click();
     check(await row.evaluate(n => n === document.activeElement), 'focus returns to original row');
+    // A saved exact target can later disappear; do not silently retarget another claim.
+    const revise=async(id,selection)=>{const current=await api(ctx.base,'GET',`/api/messages/${id}/actions?round_id=${round}`);return api(ctx.base,'POST',`/api/messages/${id}/actions`,{transaction_id:'final-'+Math.random().toString(36).slice(2),round_id:round,config_revision:current.config_revision,record_revision:current.message.record_revision,selection});};
+    await revise(record.record_id,{kind:'automatic',note:'恢复自动作为精确撤销验收基线'});
+    await send('排 徽章 甲 1');await send('撤 徽章 1');
+    const raw=(await api(ctx.base,'GET','/api/messages')).messages, cancellation=raw[raw.length-1];
+    const cancelRoute=`/api/messages/${cancellation.record_id}/actions`;
+    const cancelDetails=await api(ctx.base,'GET',cancelRoute+'?round_id='+round);
+    const exactTarget=cancelDetails.cancel_targets[0].claim_id,exact=structuredClone(cancelDetails.editable_selection);
+    exact.actions[0].target_claim_id=exactTarget;exact.actions[0].target_item_id=null;exact.actions[0].quantity=null;
+    await revise(cancellation.record_id,exact);
+    await revise(record.record_id,{kind:'ignore',note:'第一条原认购不执行'});
+    await page.locator('#refresh').click();
+    const cancelledRow=page.locator('#messages .msg').filter({hasText:'撤 徽章 1'});
+    await cancelledRow.click();
+    await dialog.locator('.ae-original').filter({hasText:'撤销未命中'}).waitFor();
+    check(await dialog.getByRole('combobox',{name:'原申购',exact:true}).inputValue()===exactTarget,'expired target remains the exact old reference');
+    check((await dialog.getByRole('combobox',{name:'原申购',exact:true}).locator('option:checked').textContent()).includes('原目标已失效'),'expired target has an explicit readable label');
+    check((await api(ctx.base,'GET','/api/board')).board.user_summaries[0].items[0].quantity===1,'another claim remains allocated');
+    await capture('message-expired-exact-cancel');await page.keyboard.press('Escape');
     check(!errors.length, errors.join('; '));
   } finally {
     page.off('pageerror', onError);

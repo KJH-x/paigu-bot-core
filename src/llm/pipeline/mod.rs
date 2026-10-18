@@ -26,6 +26,8 @@ mod understanding;
 mod view;
 
 #[cfg(test)]
+mod acceptance_tests;
+#[cfg(test)]
 mod action_tests;
 #[cfg(test)]
 mod automatic_tests;
@@ -515,7 +517,7 @@ impl Pipeline {
                 .await;
         }
         context.understanding = self.understand(&cfg, &ev, &context, false).await;
-        let evaluated = crate::replay::session::evaluate_understanding(
+        let mut evaluated = crate::replay::session::evaluate_understanding(
             &cfg,
             &context.record,
             &context.understanding,
@@ -534,6 +536,7 @@ impl Pipeline {
         }
         let (events, eligibilities, snapshot) = {
             let state = self.state.lock().await;
+            evaluated.explain_cancellations(&state.events, &cfg);
             let mut events = state.events.clone();
             events.extend(evaluated.events);
             let mut eligibilities = state.eligibilities.clone();
