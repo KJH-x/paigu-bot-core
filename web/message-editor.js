@@ -51,6 +51,21 @@
       context = data;
       modal.querySelector('.ae-loading').hidden = true;
       var content = modal.querySelector('.ae-content'); content.hidden = false;
+      var resume=opts.resumeTask;
+      if(resume && (resume.round_id!==data.round_id || resume.record_id!==data.message.record_id || resume.record_revision!==data.message.record_revision)){
+        content.appendChild(el('p','ae-warning','记录或轮次已经变化。以下旧草稿只读保留，未套用、未执行；请重新核对当前消息。'));
+        content.appendChild(el('p','', '原消息：'+data.message.text));
+        content.appendChild(el('p','', '保留处理：'+({replace:'替换动作',ignore:'人工忽略',reject:'人工拒绝',automatic:'恢复自动'}[resume.draft.kind] || resume.draft.kind)));
+        content.appendChild(el('p','', '保留的管理员解释：'+(resume.draft.note || '无')));
+        var catalog=resume.catalog || data.catalog || [];
+        (resume.draft.actions || []).forEach(function(a,i){content.appendChild(el('p','', '原草稿动作 '+(i+1)+'：'+({claim:'排',cancel:'撤',modify:'改'}[a.operation] || a.operation)+' · '+(a.items || []).map(function(line){
+          var item=catalog.find(function(it){return it.item_id===line.item_id;}),sub=item && (item.subitems || []).find(function(s){return s.subitem_id===line.subitem_id;});
+          return (item?item.name:'原商品已不可用')+(sub?'·'+sub.name:'')+' ×'+line.quantity+'（'+({Normal:'普通',Tail:'包尾',FullBox:'整盒'}[line.slot_policy] || line.slot_policy)+'）'+(line.notes?' · '+line.notes:'');
+        }).join('、')+(a.operation==='cancel'?(a.target_claim_id?'原指定认购':'原商品条件')+' · 数量 '+(a.quantity==null?'按原动作':a.quantity):'')));});
+        (resume.picked || []).forEach(function(m){content.appendChild(el('p','', '保留补充：#'+m.seq+' '+m.text));});
+        (resume.released || []).forEach(function(m){content.appendChild(el('p','', '原计划解除补充：#'+m.seq+' '+m.text));});
+        return;
+      }
       var src = el('section', 'ae-original');
       src.appendChild(el('b', '', opts.message.display + ' · #' + data.message.seq));
       src.appendChild(el('p', 'ae-raw', data.message.text));
@@ -80,7 +95,8 @@
       data.editable = true;
       picked = (data.linked_supplements || []).slice();
       if (opts.convertGroup) picked = data.automatic_group.members.filter(function (m) { return m.record_id !== data.message.record_id; });
-      var draft = copy(data.editable_selection); treatment = draft.kind; actions = draft.actions || [];
+      var draft = copy(resume?resume.draft:data.editable_selection); treatment = draft.kind; actions = draft.actions || [];
+      if(resume){picked=copy(resume.picked || []);released=copy(resume.released || []);content.appendChild(el('p','ae-warning','已带回此标签的动作草稿，尚未保存。权限按当前设置重新校验，原消息位置不变。'));}
       var operation = select([['replace','编辑动作'],['ignore','人工忽略'],['reject','人工拒绝'],['automatic','恢复自动结果']], treatment, '处理方式', function (v) { treatment = v; drawActions(); });
       operation.className = 'ae-treatment';
       operation.querySelector('option[value="automatic"]').disabled = !data.can_restore_automatic;
@@ -89,6 +105,20 @@
       note = el('textarea', 'ae-note'); note.value = draft.note || ''; note.rows = 2; note.maxLength = 2000;
       note.placeholder = '说明当时的意思或修订原因，便于复盘（可选）';
       content.appendChild(field('管理员解释', note));
+      var policy=el('div','ae-policy-links');
+      policy.appendChild(el('span','hint','若理解动作正确，但被名单或阶段政策拒绝，可改全轮权限（不会重问模型）：'));
+      function goToPolicy(section){
+        try{
+          var task={kind:'message-policy',round_id:data.round_id,record_id:data.message.record_id,record_revision:data.message.record_revision,config_revision:data.config_revision,
+            draft:{kind:treatment,actions:copy(actions),note:note.value},picked:copy(picked),released:copy(released),catalog:copy(data.catalog),convertGroup:!!opts.convertGroup,view:opts.captureView?opts.captureView():null};
+          var token=P.storeTask(task);if(opts.taskToken)P.clearTask(opts.taskToken);
+          var origin=new URL(window.location.href);origin.searchParams.set('handoff',token);origin.searchParams.set('record',task.record_id);origin.searchParams.set('message_round',task.round_id);
+          window.history.replaceState(null,'',origin.href);close(true);
+          P.navigate(P.pageHref('round.html',{handoff:token})+'#'+section);
+        }catch(e){error.textContent='草稿尚在本页，未跳转：'+P.errorText(e);}
+      }
+      policy.appendChild(button('管理优先名单与时段',function(){goToPolicy('sec-round-basic');}));
+      policy.appendChild(button('管理阶段权限',function(){goToPolicy('sec-phases');}));content.appendChild(policy);
       var supplements = el('details', 'ae-supplements');
       var supplementSummary = el('summary'); supplements.appendChild(supplementSummary);
       function selectedSummary() { supplementSummary.textContent = '补充消息 · 已选 ' + picked.length + ' 条（选中条将停止重复执行）'; }
@@ -247,8 +277,8 @@
         restoreEditFocus();
       }
       drawActions(); save.disabled = false;
-      baseline=opts.convertGroup?'convert-group':draftSignature();
-      unregisterDraft=P.registerDraft({id:'message-editor',label:'消息动作与管理员解释',isDirty:function(){return !closed && baseline!==draftSignature();},save:saveDraft,discard:function(){close(true);},restoreFocus:function(){if(beforeFocus && beforeFocus.isConnected)beforeFocus.focus({preventScroll:true});}});
+      baseline=opts.convertGroup || resume?'preserved-draft':draftSignature();
+      unregisterDraft=P.registerDraft({id:'message-editor',label:'消息动作与管理员解释',isDirty:function(){return !closed && baseline!==draftSignature();},save:saveDraft,discard:function(){if(opts.taskToken)P.clearTask(opts.taskToken);close(true);},restoreFocus:function(){if(beforeFocus && beforeFocus.isConnected)beforeFocus.focus({preventScroll:true});}});
       var focus = modal.querySelector('.ov-item') || operation; focus.focus();
     }).catch(function (e) { if (!closed) {
       modal.querySelector('.ae-loading').textContent = '读取失败，未修改消息。';
@@ -287,6 +317,7 @@
       savePromise=P.post(endpoint, { transaction_id: transaction, round_id: context.round_id, config_revision: context.config_revision, record_revision: context.message.record_revision, selection: selection, supplements: picked.map(recordVersion), release_supplements: released.map(recordVersion) }).then(function (response) {
         if (closed) return;
         if (opts.onSaved) opts.onSaved(response);
+        if(opts.taskToken)P.clearTask(opts.taskToken);
         saving = false; baseline=draftSignature();close(true); if (P.toast) P.toast(response.deduplicated ? '这笔修订已保存，当前结果已刷新' : '已保存并重算');
       }).catch(function (e) {
         if (closed) return;

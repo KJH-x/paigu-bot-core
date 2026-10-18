@@ -202,3 +202,13 @@ body[data-page="settings"] .settings-panels input[type="checkbox"] { width:20px;
 .overview-tasks { margin:8px; }
 .overview-task { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 0; border-bottom:1px solid var(--nl-line); }
 .overview-task:last-child { border-bottom:0; }
+.message-filter-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; padding:6px 8px; border-bottom:1px solid var(--nl-line); }
+.message-filter-bar label { display:flex; gap:6px; align-items:center; font-size:12px; }
+.message-filter-bar select { width:110px; }
+#messages .msg[hidden] { display:none !important; }
+#messages .message-located { outline:2px solid var(--page-accent); outline-offset:-2px; }
+.ae-policy-links { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 0; border-bottom:1px solid var(--nl-line); }
+.ae-policy-links .hint { flex:1 0 100%; }
+#policy-return { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+#policy-return p { margin:0; flex:1; min-width:300px; }
+.task-return { font-weight:700; padding:6px; border:1px solid var(--nl-line); }

@@ -1005,6 +1005,31 @@
     return (Math.round(Number(cents) || 0) / 100).toFixed(2);
   }
 
+  var TASK_PREFIX='paigu.private.task.', TASK_TTL=2*60*60*1000;
+  function storeTask(task){
+    var token=global.crypto.randomUUID(), now=Date.now(), count=0;
+    for(var i=global.sessionStorage.length-1;i>=0;i--){
+      var key=global.sessionStorage.key(i);if(!key.startsWith(TASK_PREFIX))continue;
+      try{var old=JSON.parse(global.sessionStorage.getItem(key));if(now-old.created_at>TASK_TTL)global.sessionStorage.removeItem(key);else count++;}catch(e){global.sessionStorage.removeItem(key);}
+    }
+    if(count>=10)throw new Error('此标签已有十份未完成草稿，请先返回原任务处理');
+    task=Object.assign({},task,{schema:1,created_at:now,api:resolveApiBase()});
+    global.sessionStorage.setItem(TASK_PREFIX+token,JSON.stringify(task));return token;
+  }
+  function readTask(token){
+    if(!/^[0-9a-f-]{36}$/.test(token || ''))throw new Error('任务链接无效');
+    var value=global.sessionStorage.getItem(TASK_PREFIX+token);if(!value)throw new Error('此标签没有对应草稿，请回原标签打开；不会自动切轮');
+    var task=JSON.parse(value);
+    if(task.schema!==1 || Date.now()-task.created_at>TASK_TTL){global.sessionStorage.removeItem(TASK_PREFIX+token);throw new Error('任务已过期，请重新选择消息');}
+    if(task.api!==resolveApiBase())throw new Error('任务属于另一 API 实例，草稿未套用');
+    return task;
+  }
+  function clearTask(token){if(/^[0-9a-f-]{36}$/.test(token || '')){
+    global.sessionStorage.removeItem(TASK_PREFIX+token);
+    var url=new URL(global.location.href);if(url.searchParams.get('handoff')===token){url.searchParams.delete('handoff');global.history.replaceState(null,'',url.href);}
+  }}
+  function hasPrivateTask(){try{for(var i=0;i<global.sessionStorage.length;i++)if(global.sessionStorage.key(i).startsWith(TASK_PREFIX))return true;}catch(e){}return false;}
+
   var drafts = new Map(), draftGuard = null, navigating = false;
   function registerDraft(spec) {
     if (!spec.id || typeof spec.isDirty !== 'function') throw new Error('草稿必须有身份与状态');
@@ -1072,7 +1097,7 @@
     });
   }
   global.addEventListener('beforeunload', function (e) {
-    if (!navigating && dirtyDrafts().length) { e.preventDefault(); e.returnValue = ''; }
+    if (!navigating && (dirtyDrafts().length || hasPrivateTask())) { e.preventDefault(); e.returnValue = ''; }
   });
   document.addEventListener('click', function (e) {
     var a = e.target.closest && e.target.closest('a[href]');
@@ -1081,7 +1106,7 @@
     if (!/^https?:$/.test(url.protocol)) return;
     var sameWorkspace = url.origin === current.origin && url.search === current.search &&
       (url.pathname === current.pathname || url.pathname.split('/').pop().replace(/\.html$/, '') === document.body.dataset.page);
-    if (sameWorkspace || !dirtyDrafts().length) return;
+    if (sameWorkspace || !dirtyDrafts().length && !hasPrivateTask()) return;
     e.preventDefault(); e.stopImmediatePropagation();
     protectAction(function () { navigate(url.href); }).catch(function (err) { toast(errorText(err), 'bad'); });
   }, true);
@@ -1090,6 +1115,9 @@
     registerDraft: registerDraft,
     protectAction: protectAction,
     navigate: navigate,
+    storeTask: storeTask,
+    readTask: readTask,
+    clearTask: clearTask,
     DEFAULT_WS: DEFAULT_WS,
     INLINE: INLINE,
     EMBEDDED_MEMBERS: EMBEDDED_MEMBERS,

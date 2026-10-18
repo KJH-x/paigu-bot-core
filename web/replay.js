@@ -109,6 +109,9 @@
       (steps.length ? state.current + 1 : 0) + ' 步';
     $('step-count').textContent = state.data.latest_only ? '仅当前快照' : (steps.length ? (state.current + 1) + '/' + steps.length : '0/0');
     $('source-info').textContent = state.active ? '当前激活轮次 · 版本 ' + state.data.version : '导入文件 · ' + state.source;
+    var step=steps[state.current], message=step && msgBySeq(step.message_seq), process=$('process-message');
+    process.disabled=!(state.active && message && message.record_id && state.data.round_id);
+    process.title=state.active?'复盘保持只读；在排谷打开同一稳定记录，不自动保存':'导入文件只读，不连接本机写入记录';
   }
 
   function renderList() {
@@ -677,6 +680,10 @@
     });
 
     $('btn-first').addEventListener('click', function () { setPlaying(false); goToStep(0); });
+    $('process-message').addEventListener('click',function(){
+      if(!state.active)return;var step=state.data.steps[state.current],message=step && msgBySeq(step.message_seq);
+      if(message && message.record_id && state.data.round_id)P.navigate(P.pageHref('display.html',{source:'local',record:message.record_id,message_round:state.data.round_id}));
+    });
     $('btn-prev').addEventListener('click', function () { setPlaying(false); goToStep(state.current - 1); });
     $('btn-next').addEventListener('click', function () { setPlaying(false); goToStep(state.current + 1); });
     $('btn-last').addEventListener('click', function () {
@@ -696,8 +703,7 @@
     });
 
     document.addEventListener('keydown', function (e) {
-      var tag = e.target && e.target.tagName;
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if(e.target && e.target.closest && e.target.closest('input,select,textarea,button,a,summary,[contenteditable="true"]'))return;
       if (!state.data) return;
       var steps = state.data.steps || [];
       if (e.key === 'ArrowRight') { e.preventDefault(); setPlaying(false); goToStep(state.current + 1); }

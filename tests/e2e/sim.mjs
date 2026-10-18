@@ -14,6 +14,7 @@ import { verifyMessageTransactions } from './message-transactions.mjs';
 import { verifyCorrectnessGates } from './correctness-gates.mjs';
 import { verifyWorkspaceNavigation } from './workspace-navigation.mjs';
 import { verifyScopedSettings } from './scoped-settings.mjs';
+import { verifyPolicyReturn } from './message-policy-return.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -718,6 +719,7 @@ function buildCases() {
     { name: 'CN作用域保存、整盒关联、等效移动与锁定、私有备份预检', fn: verifyCorrectnessGates },
     { name: '七工作区42对点击、旧入口、连接上下文与只读消息真源', fn: verifyWorkspaceNavigation },
     { name: '系统四分区、作用域冲突、三选草稿与实例维护取消', fn: verifyScopedSettings },
+    { name: '权限设置携草稿返回、筛选定位、复盘到处理与版本冲突', fn: verifyPolicyReturn },
     {
       name: 'remote 数据源',
       fn: async (page, ctx) => {

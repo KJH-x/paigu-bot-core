@@ -1137,6 +1137,8 @@
       setConn('ok', '已连接');
       $('form').classList.remove('hidden');
       $('loading').classList.add('hidden');
+      renderPolicyTask();
+      if(window.PAIGU_SHELL && window.location.hash)window.PAIGU_SHELL.locateSection();
     }).catch(function (err) {
       banner('无法载入配置：' + P.errorText(err) + '。请确认本地服务已在 ' + apiBase() + ' 运行。', true);
       setConn('bad', '未连接');
@@ -1192,6 +1194,19 @@
   }
 
   function draftSignature(){return JSON.stringify([collectConfig().round,state.items.map(serializeItem)]);}
+
+  function renderPolicyTask(){
+    var token=P.qs('handoff');if(!token)return;
+    var notice=$('policy-return');if(!notice){notice=document.createElement('div');notice.id='policy-return';notice.className='workspace-notice';$('banner').after(notice);}
+    notice.replaceChildren();
+    try{
+      var task=P.readTask(token);if(task.kind!=='message-policy')throw new Error('此任务不属于消息权限设置');
+      var text=document.createElement('p');text.textContent=task.round_id===state.config.round.round_id?
+        '来自消息修订：动作草稿只保留在本标签，尚未执行。权限保存会影响当前整轮并确定性重算，不重问模型；不会自动添加成员。':
+        '激活轮已变化：不会自动激活原轮、添加名单或套用消息草稿。请返回排谷核对。';notice.appendChild(text);
+      var back=document.createElement('a');back.className='task-return';back.textContent='返回原消息与动作草稿';back.href=P.pageHref('display.html',{handoff:token,record:task.record_id,message_round:task.round_id,source:'local'});notice.appendChild(back);
+    }catch(e){notice.textContent=P.errorText(e);notice.classList.add('warning');}
+  }
 
   /* ------------------------------ 阶段时间窗 ------------------------------ */
 
@@ -1318,8 +1333,7 @@
     roundBody.appendChild($('sec-phases'));
     $('rd-window-ms').classList.add('time-summary');
     bind();
-    loadRounds();
-    load().catch(function () {});
+    Promise.all([loadRounds(),load()]).then(function(){if(window.PAIGU_SHELL && window.location.hash)window.PAIGU_SHELL.locateSection();}).catch(function(){});
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

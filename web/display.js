@@ -28,6 +28,7 @@
 
   var boardEl, boardEmpty, messagesEl, whoEls, statusEl, boardRenderer, smart;
   var undoSlot = null, undoBusy = false;
+  var pinnedRecord='', locatePending=!!(P.qs('record') || P.qs('handoff')), locating=false, resumeTask=null, taskToken=P.qs('handoff') || '';
   function refreshUndo() {
     var button = $('undo-message-action'), round = state.roundId, api = state.apiBase;
     if (state.source !== 'local' || !round) { button.disabled = true; button.title = '仅本地当前轮次可撤回'; return; }
@@ -48,7 +49,8 @@
     ignored: '已忽略',
     ignore: '已忽略',
     duplicate: '已去重',
-    merged: '已合并'
+    merged: '已合并',
+    error: '处理失败'
   };
 
   var SYSTEM_LABELS = {
@@ -132,15 +134,55 @@
     return el;
   }
 
-  function openOverride(m) {
+  function captureMessageView(){return {filter:$('message-filter').value,scroll:messagesEl.scrollTop,page_scroll:window.scrollY,pinned:pinnedRecord};}
+  function openOverride(m, task) {
     if (state.source !== 'local' || !m.record_id || !m.record_revision || !m.round_id) {
       showBanner('此消息缺少可编辑的本地身份，请刷新后重试。', true); return;
     }
-    P.openMessageEditor({ apiBase: state.apiBase, message: m, onSaved: function (res) {
+    pinnedRecord=m.record_id;filterMessages();
+    P.openMessageEditor({ apiBase: state.apiBase, message: m, resumeTask:task || null,taskToken:task?taskToken:'',convertGroup:!!(task && task.convertGroup),captureView:captureMessageView,onSaved: function (res) {
       if (res && res.result && res.result.messages) renderMessages(P.normalizeMessages(res.result), true, false);
       refreshUndo();
       restart(false);
     }});
+  }
+
+  function matchesFilter(m){var filter=$('message-filter').value;return filter==='all' || (filter==='manual'?!!m.manual_note || m.record_revision>1:String(m.status).toLowerCase()===filter.toLowerCase());}
+  function filterMessages(){
+    var count=0,pinned=false;
+    Array.from(messagesEl.children).forEach(function(node){var m=node.__msg, match=matchesFilter(m), keep=m.record_id===pinnedRecord;node.hidden=!match && !keep;node.classList.toggle('message-located',keep);if(!node.hidden)count++;if(keep&&!match)pinned=true;});
+    $('message-filter-info').textContent=pinned?'定位条目已不符筛选，仍保留在原处':$('message-filter').value==='all'?'':'当前 '+count+' / '+state.messages.length+' 条';
+    $('clear-message-location').hidden=!pinnedRecord;
+  }
+  function locateRequested(){
+    if(!locatePending || locating || !state.loaded)return;
+    locatePending=false;
+    function issue(message){$('message-location-info').hidden=false;$('message-location-info').textContent=message;}
+    if(state.source!=='local'){issue('当前来源只读，不恢复本机修订草稿或打开可写消息。');return;}
+    var target=P.qs('record'), expected=P.qs('message_round');
+    try{if(taskToken){resumeTask=P.readTask(taskToken);target=resumeTask.record_id;expected=resumeTask.round_id;}}
+    catch(e){issue(P.errorText(e));return;}
+    if(!target)return;
+    if(expected && expected!==state.roundId){issue('链接属于另一轮次，未自动激活或套用草稿；请在轮次页显式核对。');return;}
+    locating=true;
+    function show(message){
+      if(resumeTask && resumeTask.view){$('message-filter').value=resumeTask.view.filter || 'all';}
+      pinnedRecord=target;filterMessages();
+      var node=Array.from(messagesEl.children).find(function(n){return n.__msg.record_id===target;});
+      if(node){
+        if(resumeTask && resumeTask.view){messagesEl.scrollTop=resumeTask.view.scroll || 0;window.scrollTo(0,resumeTask.view.page_scroll || 0);}else node.scrollIntoView({block:'nearest'});
+        node.focus({preventScroll:true});
+      }
+      openOverride(message,resumeTask);
+    }
+    var message=state.messages.find(function(m){return m.record_id===target;});
+    if(message){show(message);locating=false;return;}
+    // A historical record can be outside the in-memory projection. Read its
+    // exact current identity rather than falling back to an unrelated seq.
+    P.get(state.apiBase+'/api/messages/'+encodeURIComponent(target)+'/actions?round_id='+encodeURIComponent(expected || state.roundId)).then(function(data){
+      if(data.round_id!==state.roundId)throw new Error('读取期间轮次已变化');
+      show(data.message);
+    }).catch(function(e){issue('无法定位此历史消息，未修改：'+P.errorText(e));}).finally(function(){locating=false;});
   }
 
   function updateMsg(node, m) {
@@ -191,6 +233,7 @@
       });
     }
     P.syncKeyedChildren(messagesEl, state.messages, function (m) { return m.key; }, createMsg, updateMsg);
+    filterMessages();
     $('msg-count').textContent = state.messages.length ? state.messages.length + ' 条' : '';
     var added = state.messages.length - prevCount;
     if (initial) smart.scrollToBottom();
@@ -304,6 +347,7 @@
     state.viewEpoch = payload.view_epoch || ''; state.viewRevision = payload.view_revision || 0;
     state.loaded = true;
     markUpdated();
+    locateRequested();
   }
 
   function applyRemote(snap) {
@@ -334,6 +378,7 @@
     state.loaded = true;
     $('board-updated').textContent = '快照 ' + (snap.updated_at || '');
     $('poll-info').textContent = '每 ' + Math.round(state.refreshMs / 1000) + 's 轮询';
+    locateRequested();
   }
 
   function schedule() {
@@ -444,6 +489,9 @@
     P.boardLayout.bindControls($('board-width'));
     smart = P.createSmartScroll({ container: messagesEl, button: $('new-content'), threshold: 60 });
     renderStatus({});
+    var filter=P.qs('message_filter');if(filter && Array.from($('message-filter').options).some(function(o){return o.value===filter;}))$('message-filter').value=filter;
+    $('message-filter').addEventListener('change',function(){pinnedRecord='';filterMessages();var url=new URL(window.location.href);if(this.value==='all')url.searchParams.delete('message_filter');else url.searchParams.set('message_filter',this.value);window.history.replaceState(null,'',url.href);});
+    $('clear-message-location').addEventListener('click',function(){pinnedRecord='';filterMessages();});
 
     state.source = P.resolveSource() || readStore('source') || P.INLINE.dataSource || 'local';
     if (!P.qs('remote')) {
@@ -474,6 +522,7 @@
       restart(true);
     });
     $('refresh').addEventListener('click', function () { restart(false); });
+    window.addEventListener('pageshow',function(e){if(e.persisted){taskToken=P.qs('handoff') || '';resumeTask=null;locatePending=!!(P.qs('record') || taskToken);locateRequested();restart(false);}});
     $('undo-message-action').addEventListener('click', function () {
       if (undoBusy || state.source !== 'local' || !undoSlot || !undoSlot.available) return;
       var slot = undoSlot, round = state.roundId, api = state.apiBase;

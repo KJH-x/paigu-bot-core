@@ -99,6 +99,8 @@
           </button>
         </div>
         <div class="panel-body flush">
+          <div class="message-filter-bar"><label>消息范围 <select id="message-filter"><option value="all">全部</option><option value="NeedConfirm">待确认</option><option value="Rejected">已拒绝</option><option value="Error">处理失败</option><option value="manual">人工修订</option></select></label><span id="message-filter-info" class="hint" role="status"></span><button id="clear-message-location" class="small" type="button" hidden>清除定位</button></div>
+          <p id="message-location-info" class="workspace-notice warning" role="status" hidden></p>
           <div id="messages" class="messages"></div>
           <button id="new-content" class="new-content" hidden></button>
         </div>
