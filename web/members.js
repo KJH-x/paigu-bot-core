@@ -7,12 +7,15 @@
   function val(id){return $(id).value;}
   function sourceFields(config){var m=config.members;return {group_id:m.group_id,cache_path:m.cache_path,daily_pull_at:m.daily_pull_at};}
   function setSource(){var m=state.config.members;$('mb-group').value=m.group_id;$('mb-cache').value=m.cache_path;$('mb-pull').value=m.daily_pull_at;}
+  function namesDirty(){return !!state.config && JSON.stringify(collectOverrides())!==state.namesBaseline;}
+  function sourceDirty(){return !!state.config && JSON.stringify(sourceDraft())!==state.sourceBaseline;}
+  function sourceDraft(){return {group_id:val('mb-group').trim(),cache_path:val('mb-cache').trim(),daily_pull_at:val('mb-pull').trim()};}
   function controlsDisabled(nodes){var values=nodes.map(function(n){var original=n.disabled;n.disabled=true;return original;});return function(){nodes.forEach(function(n,i){n.disabled=values[i];});};}
   function scopedSave(kind){
     if(!state.config)return Promise.reject(new Error('配置尚未载入'));
     var generation=state.generation, scope=kind==='names'?'cn_overrides':'source';
     var previous=kind==='names'?state.config.members.cn_overrides:sourceFields(state.config);
-    var next=kind==='names'?collectOverrides():{group_id:val('mb-group').trim(),cache_path:val('mb-cache').trim(),daily_pull_at:val('mb-pull').trim()};
+    var next=kind==='names'?collectOverrides():sourceDraft();
     var nodes=Array.from(document.querySelectorAll(kind==='names'?'#members-body input,#members-body button,#members-cn-save':'#member-source input,#members-source-save'));
     var restore=controlsDisabled(nodes);
     return P.get('/api/config').then(function(res){
@@ -24,6 +27,7 @@
     }).then(function(res){
       if(generation!==state.generation)return;
       if(scope==='source')Object.assign(state.config.members,next);else state.config.members.cn_overrides=P.deepClone(res.config.members.cn_overrides);
+      if(kind==='names')state.namesBaseline=JSON.stringify(collectOverrides());else state.sourceBaseline=JSON.stringify(sourceDraft());
       state.revision=res.revision;setRev();banner('仅'+(kind==='names'?'称呼与别名':'成员来源设置')+'已保存；其他草稿未提交');
       return res;
     }).catch(function(e){banner('保存未完成，草稿保留：'+P.errorText(e),true);throw e;}).finally(restore);
@@ -149,7 +153,8 @@
       var config=res[0], members=res[1];
       if(members.round_id && (members.round_id!==config.config.round.round_id || members.config_revision!==config.revision))throw new Error('读取期间配置已变化，请重新读取');
       state.config=config.config;state.revision=config.revision;state.members=buildMembers(members);
-      renderMembers();setSource();setRev();$('form').classList.remove('hidden');$('loading').classList.add('hidden');
+      renderMembers();setSource();setRev();state.namesBaseline=JSON.stringify(collectOverrides());state.sourceBaseline=JSON.stringify(sourceDraft());
+      $('form').classList.remove('hidden');$('loading').classList.add('hidden');
       $('members-cn-save').disabled=!state.members.some(function(m){return !!m.user_id;});
       var sources={cache:'本机缓存',seed:'本机种子',example:'只读占位示例',empty:'暂无名单'};
       $('members-source-info').textContent='来源：'+(sources[members.source] || members.source)+' · 缓存所属群：'+(members.cached_group_id || '未记录，无法验证')+
@@ -163,6 +168,9 @@
     }).catch(function(e){banner('成员载入未完成：'+P.errorText(e),true);$('loading').textContent='载入失败，可重新读取';throw e;});
   }
   function refreshMembers(){
+    return P.protectAction(refreshMembersNow).catch(function(){});
+  }
+  function refreshMembersNow(){
     var btn=$('members-refresh');btn.disabled=true;
     return P.post('/api/members/refresh',{}).then(load).catch(function(e){banner('拉取失败，保留现有名单与草稿：'+P.errorText(e)+'。需要已连接的接收器。',true);}).finally(function(){btn.disabled=false;});
   }
@@ -190,7 +198,11 @@
   }
   function init(){
     $('api').value=P.resolveApiBase();
-    $('load').addEventListener('click',function(){load().catch(function(){});});
+    P.registerDraft({id:'members-names',label:'成员称呼与别名',isDirty:namesDirty,save:function(){return scopedSave('names');},discard:function(){
+      state.members=buildMembers({members:state.members.map(function(m){return {user_id:m.user_id,card:m.raw,nickname:m.nickname,role:m.role,resolved:m.resolved,fallback:m.fallback};})});renderMembers();state.namesBaseline=JSON.stringify(collectOverrides());
+    }});
+    P.registerDraft({id:'members-source',label:'成员数据来源',isDirty:sourceDirty,save:function(){return scopedSave('source');},discard:function(){setSource();}});
+    $('load').addEventListener('click',function(){P.protectAction(load).catch(function(){});});
     $('members-cn-save').addEventListener('click',function(){scopedSave('names').catch(function(){});});
     $('members-source-save').addEventListener('click',function(){scopedSave('source').catch(function(){});});
     $('members-body').addEventListener('input',onMembersInput);$('members-body').addEventListener('click',onMembersClick);

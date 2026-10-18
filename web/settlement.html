@@ -47,13 +47,10 @@
 
     <div id="banner" class="banner"></div>
 
-    <nav class="section-nav">
-      <a href="#sec-discount">折扣</a>
-      <a href="#sec-tier">特典</a>
-      <a href="#sec-reduce">减均</a>
-      <a href="#order">下单表</a>
-      <a href="#sec-result">结果</a>
-      <a href="#sec-plans">策略</a>
+    <nav class="section-nav" aria-label="结算工作区子项">
+      <a href="#settle" data-alias="#sec-discount,#sec-tier,#sec-reduce,#sec-pricing">规则</a>
+      <a href="#order">排包与订单</a>
+      <a href="#sec-result" data-alias="#sec-plans">结果与策略</a>
     </nav>
 
     <datalist id="item-ids"></datalist>
@@ -62,7 +59,7 @@
     <div class="layout settlement-workspace">
       <section class="panel" id="settle">
         <div class="panel-head">
-          <span>结算配置</span>
+          <h2>结算规则</h2>
           <span class="spacer"></span>
           <span id="cfg-hint" class="hint"></span>
         </div>
@@ -157,7 +154,7 @@
 
     <section class="panel" id="sec-result" style="margin-top:12px">
       <div class="panel-head">
-        <span>试算结果</span>
+        <h2>试算结果</h2>
         <span class="spacer"></span>
         <span id="result-summary" class="hint"></span>
       </div>
@@ -197,7 +194,7 @@
 
     <section class="panel" id="sec-plans" style="margin-top:12px">
       <div class="panel-head">
-        <span>两策略对比</span>
+        <h2>两策略对比</h2>
         <span class="spacer"></span>
         <button id="run-plans" class="primary">运行两策略</button>
       </div>

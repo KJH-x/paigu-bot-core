@@ -70,6 +70,10 @@ export async function verifyMessageActions(page, ctx) {
     check(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'editor does not overflow page width');
     await capture('message-actions-scroll-dark');
     await page.keyboard.press('Escape');
+    await page.locator('.draft-guard [data-choice="cancel"]').click();
+    check(await dialog.locator('.ae-action').count()>=4,'cancel leaving keeps the complete multi-action draft');
+    await page.keyboard.press('Escape');
+    await page.locator('.draft-guard [data-choice="discard"]').click();
     if (initialTheme !== 'dark') await page.locator('#theme-toggle').click();
     // A stale, still-open draft must not overwrite another successful human save.
     await row.click(); await dialog.locator('.ov-qty').first().fill('8');
@@ -81,6 +85,7 @@ export async function verifyMessageActions(page, ctx) {
     await dialog.locator('.modal-err').filter({ hasText: '草稿保留' }).waitFor();
     await capture('message-actions-conflict');
     await page.keyboard.press('Escape');
+    await page.locator('.draft-guard [data-choice="discard"]').click();
     check(await row.evaluate(n => n === document.activeElement), 'focus returns to original row');
     check(!errors.length, errors.join('; '));
   } finally {

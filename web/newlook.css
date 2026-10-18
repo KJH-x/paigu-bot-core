@@ -618,46 +618,6 @@ body[data-page="settings"] #form > .layout > .panel {
   width: 100%;
 }
 
-#sec-gateway .split > label:has(#gw-heartbeat) {
-  grid-column: span 3;
-}
-
-#sec-gateway .split > label:has(#gw-reply) {
-  grid-column: span 4;
-}
-
-#sec-gateway .split > label:has(#gw-admin-reply) {
-  grid-column: span 5;
-}
-
-#sec-display .split > label:has(#dp-refresh) {
-  grid-column: span 4;
-}
-
-#sec-display .split > label:has(#dp-source) {
-  grid-column: span 8;
-}
-
-#sec-llm .split > label:has(#llm-enabled),
-#sec-llm .split > label:has(#llm-fallback) {
-  grid-column: span 2;
-}
-
-#sec-llm .split > label:has(#llm-baseurl) {
-  grid-column: span 8;
-}
-
-#sec-llm .split > label:has(#llm-model),
-#sec-llm .split > label:has(#llm-keyenv) {
-  grid-column: span 4;
-}
-
-#sec-llm .split > label:has(#llm-timeout),
-#sec-llm .split > label:has(#llm-maxtokens),
-#sec-llm .split > label:has(#llm-temp) {
-  grid-column: span 4;
-}
-
 #sec-members .split > label:has(#mb-group) {
   grid-column: span 4;
 }

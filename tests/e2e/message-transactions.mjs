@@ -86,6 +86,7 @@ export async function verifyMessageTransactions(page,ctx) {
     check(await dialog.locator('.ov-qty').inputValue()==='8','late response does not overwrite manual edits');
     await capture('transaction-ai-stale-dark');
     await page.keyboard.press('Escape');
+    await page.locator('.draft-guard [data-choice="discard"]').click();
     check(requests===2,'only two explicit model button clicks issue requests');
     check(!errors.length,errors.join(';'));
   } finally {

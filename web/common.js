@@ -1005,7 +1005,91 @@
     return (Math.round(Number(cents) || 0) / 100).toFixed(2);
   }
 
+  var drafts = new Map(), draftGuard = null, navigating = false;
+  function registerDraft(spec) {
+    if (!spec.id || typeof spec.isDirty !== 'function') throw new Error('草稿必须有身份与状态');
+    drafts.set(spec.id, spec);
+    return function () { if (drafts.get(spec.id) === spec) drafts.delete(spec.id); };
+  }
+  function dirtyDrafts(ids) {
+    return Array.from(drafts.values()).filter(function (d) { return (!ids || ids.indexOf(d.id) >= 0) && d.isDirty(); });
+  }
+  function navigate(href) { navigating = true; global.location.assign(href); global.setTimeout(function () { navigating = false; }, 1000); }
+  function protectAction(action, options) {
+    options = options || {};
+    var pending = dirtyDrafts(options.ids);
+    if (!pending.length) return Promise.resolve().then(action).then(function () { return true; });
+    if (draftGuard) return Promise.resolve(false);
+    var dialog = document.createElement('dialog'); dialog.className = 'draft-guard';
+    dialog.setAttribute('aria-labelledby', 'draft-guard-title'); dialog.setAttribute('aria-describedby', 'draft-guard-info');
+    dialog.innerHTML = '<h2 id="draft-guard-title">先处理未保存改动</h2><p id="draft-guard-info"></p>' +
+      '<p class="draft-guard-error" role="alert"></p><div class="draft-guard-actions"><button type="button" data-choice="cancel" autofocus>继续编辑</button>' +
+      '<button type="button" data-choice="discard">放弃改动后继续</button><button type="button" data-choice="save" class="primary">保存后继续</button></div>';
+    dialog.querySelector('#draft-guard-info').textContent = pending.map(function (d) { return d.label; }).join('、') + '尚未保存。取消会留在原处；保存失败也会保留输入。';
+    var focus = document.activeElement, busy = false;
+    document.body.appendChild(dialog); draftGuard = dialog;
+    return new Promise(function (resolve, reject) {
+      function finish(proceed) {
+        dialog.close(); dialog.remove(); draftGuard = null;
+        if (focus && focus.isConnected) focus.focus({ preventScroll: true });
+        else pending.forEach(function(d){if(d.restoreFocus)d.restoreFocus();});
+        if (proceed) { try { Promise.resolve(action()).then(function () { resolve(true); }, reject); } catch (err) { reject(err); } }
+        else resolve(false);
+      }
+      dialog.addEventListener('cancel', function (e) { e.preventDefault(); if (!busy) finish(false); });
+      dialog.addEventListener('keydown',function(e){
+        if(e.key!=='Tab')return;
+        var buttons=Array.from(dialog.querySelectorAll('button')).filter(function(n){return !n.disabled;}), first=buttons[0],last=buttons[buttons.length-1];
+        if(!first){e.preventDefault();return;}
+        if(e.shiftKey && document.activeElement===first){e.preventDefault();last.focus();}
+        else if(!e.shiftKey && document.activeElement===last){e.preventDefault();first.focus();}
+      });
+      dialog.addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-choice]'); if (!b || busy) return;
+        var choice = b.dataset.choice; if (choice === 'cancel') { finish(false); return; }
+        busy = true; dialog.querySelectorAll('button').forEach(function (n) { n.disabled = true; });
+        dialog.querySelector('.draft-guard-error').textContent = choice === 'save' ? '正在保存…' : '';
+        Promise.resolve().then(async function () {
+          for (var d of pending) {
+            if (!d.isDirty()) continue;
+            if (choice === 'save') {
+              if (!d.save) throw new Error(d.label + '暂不能保存，请继续编辑');
+              await d.save();
+              if (d.isDirty()) throw new Error(d.label + '仍有未保存改动，请核对');
+            } else {
+              if (!d.discard) throw new Error(d.label + '暂不能放弃，请继续编辑');
+              await d.discard();
+            }
+          }
+          finish(true);
+        }).catch(function (err) {
+          busy = false; dialog.querySelectorAll('button').forEach(function (n) { n.disabled = false; });
+          dialog.querySelector('.draft-guard-error').textContent = '未离开，草稿保留：' + errorText(err);
+          dialog.querySelector('[data-choice="cancel"]').focus();
+        });
+      });
+      dialog.showModal();
+    });
+  }
+  global.addEventListener('beforeunload', function (e) {
+    if (!navigating && dirtyDrafts().length) { e.preventDefault(); e.returnValue = ''; }
+  });
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === '_blank' || a.hasAttribute('download')) return;
+    var url = new URL(a.href), current = new URL(global.location.href);
+    if (!/^https?:$/.test(url.protocol)) return;
+    var sameWorkspace = url.origin === current.origin && url.search === current.search &&
+      (url.pathname === current.pathname || url.pathname.split('/').pop().replace(/\.html$/, '') === document.body.dataset.page);
+    if (sameWorkspace || !dirtyDrafts().length) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    protectAction(function () { navigate(url.href); }).catch(function (err) { toast(errorText(err), 'bad'); });
+  }, true);
+
   global.PAIGU = {    DEFAULT_API: DEFAULT_API,
+    registerDraft: registerDraft,
+    protectAction: protectAction,
+    navigate: navigate,
     DEFAULT_WS: DEFAULT_WS,
     INLINE: INLINE,
     EMBEDDED_MEMBERS: EMBEDDED_MEMBERS,

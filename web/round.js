@@ -106,6 +106,8 @@
       name: it.name == null ? '' : String(it.name),
       kind: normKind(it.kind, subitems),
       box_item_id: it.box_item_id || null,
+      class: it.class == null ? null : it.class,
+      __original: P.deepClone(it),
       aliases: aliases,
       unit_price_cents: P.num(it.unit_price_cents, 0),
       max_quantity: (it.max_quantity == null || it.max_quantity === '') ? null : P.num(it.max_quantity, null),
@@ -117,16 +119,16 @@
   function serializeItem(it) {
     var meta = kindMeta(it.kind);
     var hasVar = meta.subitems;
-    var out = {
+    var out = Object.assign({}, it.__original || {}, {
       item_id: it.item_id,
       name: it.name,
       kind: it.kind,
       box_item_id: it.box_item_id || null,
-      class: hasVar ? 'A' : 'B',
+      class: it.class == null ? null : it.class,
       aliases: M.dedupe(it.aliases),
       unit_price_cents: intOr0(it.unit_price_cents),
-      max_quantity: (it.kind === 'single' && it.max_quantity != null) ? intOr0(it.max_quantity) : null
-    };
+      max_quantity: it.max_quantity == null ? null : intOr0(it.max_quantity)
+    });
     if (hasVar) {
       out.subitems = it.subitems.map(function (v) {
         return {
@@ -445,6 +447,19 @@
         : '');
     card.appendChild(grid);
 
+    if (meta.subitems) {
+      var association=document.createElement('label');association.className='field box-association';
+      var boxes=state.items.filter(function(other){return other.kind==='box' && other.item_id!==it.item_id;});
+      association.innerHTML='<span>整盒关联</span><select aria-label="'+esc(it.name || '此商品')+'的整盒关联" data-scope="item" data-f="box_item_id" data-idx="'+idx+'"><option value="">不关联</option>'+
+        boxes.map(function(other){return '<option value="'+esc(other.item_id)+'">'+esc(other.name || '未命名整盒')+'</option>';}).join('')+
+        (it.box_item_id && !boxes.some(function(other){return other.item_id===it.box_item_id;})?'<option value="'+esc(it.box_item_id)+'">原关联已不存在，请核对</option>':'')+'</select>';
+      association.querySelector('select').value=it.box_item_id || '';grid.appendChild(association);
+    }
+    var advanced=document.createElement('details');advanced.className='item-advanced';
+    advanced.innerHTML='<summary>高级权限分类</summary><label class="field"><span>覆盖阶段分类（通常使用自动推导）</span><select data-scope="item" data-f="class" data-idx="'+idx+'"><option value="">自动推导</option><option value="A">阶段受限</option><option value="B">不受阶段限制</option>'+
+      (it.class && !/^[AB]$/.test(it.class)?'<option value="'+esc(it.class)+'">保留原配置：'+esc(it.class)+'</option>':'')+'</select></label>';
+    advanced.querySelector('select').value=it.class || '';card.appendChild(advanced);
+
     var aliasRow = document.createElement('div');
     aliasRow.style.marginTop = '8px';
     aliasRow.innerHTML = '<div class="hint" style="margin-bottom:3px">商品别名</div>' +
@@ -676,6 +691,7 @@
     var it = state.items[idx];
     if (!it) return;
     var f = t.dataset.f;
+    if(t.dataset.scope==='item' && (f==='box_item_id' || f==='class')){it[f]=t.value || null;return;}
     if (t.dataset.scope === 'item' && f === 'kind') {
       it.kind = normKind(t.value, it.subitems);
       state.activeKind = it.kind;
@@ -940,11 +956,14 @@
   }
 
   function activateRound(id, mode) {
+    return P.protectAction(function(){return activateRoundNow(id,mode);}).then(function(proceeded){if(!proceeded)renderRounds();}).catch(function(){});
+  }
+  function activateRoundNow(id, mode) {
     if (!id) return;
     if (mode === 'fresh' && !window.confirm('激活并清空 ' + id + '：将重置内存排位，确认？')) { renderRounds(); return; }
     if (mode === 'replay' && !window.confirm('激活并重放 ' + id + '：将重置并自动计算重放，确认？')) { renderRounds(); return; }
     setConn('busy', '切换中…');
-    P.post('/api/rounds/' + encodeURIComponent(id) + '/activate', { mode: mode }).then(function (res) {
+    return P.post('/api/rounds/' + encodeURIComponent(id) + '/activate', { mode: mode }).then(function (res) {
       hideBanner();
       P.toast('已激活 ' + id + '（' + mode + '）', 'ok');
       setConn('ok', '已连接');
@@ -993,12 +1012,12 @@
 
   function createRound() {
     var id = val('rd-new-id').trim();
-    if (!id) { banner('请填写 round_id', true); return; }
+    if (!id) { banner('请填写轮次编号', true);return Promise.reject(new Error('请填写轮次编号')); }
     var body = { round_id: id, title: val('rd-new-title').trim() || undefined };
     var copy = val('rd-new-copy');
     if (copy) body.copy_from = copy;
     $('rd-new-btn').disabled = true;
-    P.post('/api/rounds', body).then(function () {
+    return P.post('/api/rounds', body).then(function () {
       hideBanner();
       P.toast('轮次已创建：' + id, 'ok');
       setVal('rd-new-id', '');
@@ -1007,7 +1026,8 @@
       return loadRounds();
     }).catch(function (err) {
       banner('创建轮次失败：' + P.errorText(err), true);
-    }).then(function () {
+      throw err;
+    }).finally(function () {
       $('rd-new-btn').disabled = false;
     });
   }
@@ -1038,7 +1058,9 @@
     var rd = cfg.round || {};
     setVal('rd-id', rd.round_id);
     setVal('rd-title', rd.title);
+    setVal('rd-category',rd.category || 'normal');
     setVal('rd-group', rd.group_id);
+    $('rd-group-scope').textContent='测试群：'+(cfg.gateway.test_group_id || '未设置')+'。测试轮只能绑定此群；正常轮使用正常接收群。';
     setVal('rd-priority', M.joinList(rd.priority_users));
     var win = rd.priority_window || {};
     setVal('rd-start', M.msToLocalInput(win.start_ms));
@@ -1065,6 +1087,7 @@
     cfg.round = cfg.round || {};
     cfg.round.round_id = val('rd-id').trim();
     cfg.round.title = val('rd-title');
+    cfg.round.category=val('rd-category');
     cfg.round.group_id = val('rd-group');
     cfg.round.priority_users = M.splitList(val('rd-priority'));
     var s = M.localInputToMs(val('rd-start'));
@@ -1108,6 +1131,7 @@
       state.config = cfg;
       state.revision = res && res.revision != null ? res.revision : (cfg ? cfg.revision : null);
       applyToForm(cfg || {});
+      state.draftBaseline=draftSignature();
       hideBanner();
       setRev();
       setConn('ok', '已连接');
@@ -1122,22 +1146,27 @@
   }
 
   function save() {
-    if (!state.config) { banner('尚未载入配置，无法保存。', true); return; }
+    if (!state.config) return Promise.reject(new Error('尚未载入配置，无法保存'));
     var priceInputs = document.querySelectorAll('#items input[data-f="unit_price_cents"], #items input[data-f="adjust_cents"], #items input[data-f="final"]');
-    for (var p = 0; p < priceInputs.length; p++) if (!priceInputs[p].reportValidity()) return;
+    for (var p = 0; p < priceInputs.length; p++) if (!priceInputs[p].reportValidity()) return Promise.reject(new Error('请检查金额输入'));
     var partialError = partialItemError();
-    if (partialError) { banner(partialError, true); return; }
+    if (partialError) { banner(partialError, true); return Promise.reject(new Error(partialError)); }
     var unbalanced = state.items.find(function (item) {
       return (item.subitems || []).reduce(function (total, subitem) { return total + intOr0(subitem.adjust_cents); }, 0) !== 0;
     });
-    if (unbalanced) { banner('「' + unbalanced.name + '」调价合计须为 0，请先平衡调价。', true); return; }
+    if (unbalanced) { var message='「'+unbalanced.name+'」调价合计须为 0，请先平衡调价。';banner(message,true);return Promise.reject(new Error(message)); }
     var hasConflict = paintConflicts();
     var cfg = collectConfig();
     $('save').disabled = true;
-    P.put('/api/config', { config: cfg, revision: state.revision }).then(function (res) {
+    var nodes=Array.from($('form').querySelectorAll('input,textarea,select,button')), originalDisabled=nodes.map(function(n){var d=n.disabled;n.disabled=true;return d;});
+    return P.get('/api/config').then(function(latest){
+      if(latest.config.round.round_id!==state.config.round.round_id || JSON.stringify(latest.config.round)!==JSON.stringify(state.config.round))throw new Error('轮次设置已被其他操作修改，草稿保留，请核对后重新读取');
+      latest.config.round=cfg.round;return P.put('/api/config',{config:latest.config,revision:latest.revision});
+    }).then(function (res) {
       state.config = res && res.config ? res.config : cfg;
       state.revision = res && res.revision != null ? res.revision : state.revision;
       applyToForm(state.config);
+      state.draftBaseline=draftSignature();
       if (hasConflict) {
         banner('已保存，但存在跨商品别名/子项名冲突（行内提醒），可用「校验」查看后端结果。', false);
       } else {
@@ -1155,18 +1184,14 @@
       } else {
         banner('保存失败：' + P.errorText(err), true);
       }
-    }).then(function () {
+      throw err;
+    }).finally(function () {
       $('save').disabled = false;
+      nodes.forEach(function(n,i){n.disabled=originalDisabled[i];});
     });
   }
 
-  function reloadDisk() {
-    $('reload').disabled = true;
-    P.post('/api/config/reload', {}).then(function () { return load(); })
-      .then(function () { P.toast('已从磁盘重载配置', 'ok'); })
-      .catch(function (err) { banner('从磁盘重载失败：' + P.errorText(err), true); })
-      .then(function () { $('reload').disabled = false; });
-  }
+  function draftSignature(){return JSON.stringify([collectConfig().round,state.items.map(serializeItem)]);}
 
   /* ------------------------------ 阶段时间窗 ------------------------------ */
 
@@ -1182,16 +1207,19 @@
       sel.appendChild(op);
     });
     sel.value = PHASE_OPTIONS.indexOf(p.phase) >= 0 ? p.phase : 'Phase0';
+    sel.setAttribute('aria-label','第'+(i+1)+'个阶段');
     sel.addEventListener('change', function () { state.phases[i].phase = sel.value; });
     row.appendChild(sel);
 
     var start = document.createElement('input');
     start.type = 'datetime-local';
+    start.setAttribute('aria-label','第'+(i+1)+'个阶段开始时间');
     start.value = M.msToLocalInput(p.start_ms);
     row.appendChild(start);
 
     var end = document.createElement('input');
     end.type = 'datetime-local';
+    end.setAttribute('aria-label','第'+(i+1)+'个阶段结束时间');
     end.value = M.msToLocalInput(p.end_ms);
     row.appendChild(end);
 
@@ -1246,11 +1274,12 @@
       try { window.localStorage.setItem('paigu.display.api', v); } catch (err) { /* ignore */ }
       load().catch(function () {});
     });
-    $('load').addEventListener('click', function () { load().catch(function () {}); });
-    $('reload').addEventListener('click', reloadDisk);
-    $('save').addEventListener('click', save);
+    P.registerDraft({id:'round-config',label:'轮次、阶段与商品',isDirty:function(){return !!state.config && state.draftBaseline!==draftSignature();},save:save,discard:function(){applyToForm(state.config);state.draftBaseline=draftSignature();}});
+    P.registerDraft({id:'round-new',label:'新建轮次表单',isDirty:function(){return !!(val('rd-new-id').trim() || val('rd-new-title').trim() || val('rd-new-copy'));},save:createRound,discard:function(){['rd-new-id','rd-new-title','rd-new-copy'].forEach(function(id){setVal(id,'');});}});
+    $('load').addEventListener('click', function () { P.protectAction(load).catch(function () {}); });
+    $('save').addEventListener('click', function(){save().catch(function(){});});
     $('rounds-refresh').addEventListener('click', function () { loadRounds(); });
-    $('rd-new-btn').addEventListener('click', createRound);
+    $('rd-new-btn').addEventListener('click', function(){createRound().catch(function(){});});
     $('phase-add').addEventListener('click', function () {
       var now = Date.now();
       state.phases.push({ phase: 'Phase0', start_ms: now, end_ms: now + 3600000 });

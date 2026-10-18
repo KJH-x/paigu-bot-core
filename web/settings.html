@@ -41,85 +41,81 @@
         <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
         <span class="spacer"></span>
         <button id="load" class="small">重新载入</button>
-        <button id="reload" class="small">从磁盘重载</button>
-        <button id="save" class="primary">保存配置</button>
+
 
       </div>
     </header>
 
     <div id="banner" class="banner"></div>
 
-    <nav class="section-nav">
-      <a href="#sec-gateway">接入</a>
-      <a href="#sec-display">展示</a>
-      <a href="#sec-llm">LLM</a>
-      <a href="#sec-snapshot">快照</a>
+    <nav class="section-nav" data-panels aria-label="系统设置分区">
+      <a href="#sec-gateway">接入</a><a href="#sec-llm">消息理解</a><a href="#sec-display">展示默认</a><a href="#sec-snapshot">数据维护</a>
     </nav>
-
-    <div id="form" class="hidden">
-      <div class="layout">
-        <section class="panel admin-section" id="sec-gateway">
-          <div class="panel-head"><span>NapCat 接入</span></div>
-          <div class="panel-body">
-            <label class="field"><span>监听地址</span><input id="gw-bind" /></label>
-            <div class="split">
-              <label class="field"><span>心跳间隔（秒）</span><input id="gw-heartbeat" type="number" min="1" /></label>
-              <label class="field"><span>发送回复（真实群保持关闭）</span><input id="gw-reply" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>执行管理员命令</span><input id="gw-admincmds" type="checkbox" style="width:auto" /></label>
-            </div>
-            <label class="field"><span>接收群号（逗号分隔）</span><input id="gw-whitelist" /></label>
-            <label class="field"><span>接收成员（逗号分隔；留空不限）</span><input id="gw-whitelist-members" /></label>
-            <label class="field"><span>允许的只读动作（逗号分隔）</span><input id="gw-actions" /></label>
-            <div class="row">
-              <button id="gw-reply-toggle" class="small">切换回复开关</button>
-              <button id="gw-admin-toggle" class="small">切换管理员命令</button>
-              <span class="hint">立即生效；其他字段使用顶部保存。</span>
-            </div>
+    <div id="form" class="hidden settings-panels">
+      <section class="panel admin-section" id="sec-gateway" data-settings-scope="gateway">
+        <div class="panel-head"><h2>接入</h2><span class="spacer"></span><button id="save-gateway" class="primary">保存接入设置</button></div>
+        <div class="panel-body">
+          <p class="hint">只改变接入配置，不保存其他分区。监听地址变更可能需要另行重启服务，本页不执行重启。</p>
+          <div class="split">
+            <label class="field"><span>监听地址</span><input id="gw-bind" required /></label>
+            <label class="field"><span>心跳间隔（秒）</span><input id="gw-heartbeat" type="number" min="1" required /></label>
           </div>
-        </section>
-
-        <section class="panel admin-section" id="sec-display">
-          <div class="panel-head"><span>展示设置</span></div>
-          <div class="panel-body">
-            <div class="split">
-              <label class="field"><span>刷新间隔（毫秒）</span><input id="dp-refresh" type="number" min="500" /></label>
-              <label class="field"><span>数据来源</span>
-                <select id="dp-source"><option value="local">local</option><option value="remote">remote</option></select>
-              </label>
-            </div>
-            <label class="field"><span>远程快照地址</span><input id="dp-remote" placeholder="https://…/rounds/{round_id} 或 …/current.json" /></label>
+          <label class="field"><span>正常接收群号（逗号分隔）</span><input id="gw-whitelist" /></label>
+          <label class="field"><span>接收成员（逗号分隔；留空不限）</span><input id="gw-whitelist-members" /></label>
+          <div class="split">
+            <label class="field"><span>测试群号（留空则停用测试群）</span><input id="gw-test-group" inputmode="numeric" /></label>
+            <label class="field"><span>允许测试群伪造解包</span><input id="gw-forged" type="checkbox" /></label>
           </div>
-        </section>
-      </div>
-
-      <div class="layout" style="margin-top:12px">
-        <section class="panel admin-section" id="sec-llm">
-          <div class="panel-head"><span>消息理解</span></div>
-          <div class="panel-body">
-            <div class="split">
-              <label class="field"><span>启用模型</span><input id="llm-enabled" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>失败时使用规则</span><input id="llm-fallback" type="checkbox" style="width:auto" /></label>
-              <label class="field"><span>服务地址</span><input id="llm-base" /></label>
-              <label class="field"><span>模型名称</span><input id="llm-model" /></label>
-              <label class="field"><span>密钥环境变量</span><input id="llm-keyenv" /></label>
-              <label class="field"><span>超时（秒）</span><input id="llm-timeout" type="number" min="1" /></label>
-              <label class="field"><span>最大输出长度</span><input id="llm-maxtokens" type="number" min="1" /></label>
-              <label class="field"><span>随机度</span><input id="llm-temp" type="number" step="0.05" min="0" max="2" /></label>
-            </div>
-            <label class="field"><span>提示词</span><textarea id="llm-prompt" rows="12"></textarea></label>
+          <p class="hint">测试轮只绑定测试群，正常轮只绑定正常群。伪造解包还须测试轮＋测试群，两重限制；不会为正常群启用。</p>
+          <details><summary>回复、管理员动作与权限（高风险）</summary>
+            <p class="workspace-notice warning">真实群回复应保持关闭。启用后仍受允许动作白名单限制；本页不会主动发送消息或扩大白名单。</p>
+            <label class="field"><span>允许发送回复</span><input id="gw-reply" type="checkbox" /></label>
+            <label class="field"><span>允许执行管理员命令</span><input id="gw-admincmds" type="checkbox" /></label>
+            <label class="field"><span>允许的动作（逗号分隔；通常仅保留 get_ 只读动作）</span><input id="gw-actions" /></label>
+          </details>
+          <p id="status-gateway" class="scope-status" role="status"></p>
+        </div>
+      </section>
+      <section class="panel admin-section" id="sec-llm" data-settings-scope="understanding" hidden>
+        <div class="panel-head"><h2>消息理解</h2><span class="spacer"></span><button id="save-understanding" class="primary">保存消息理解设置</button></div>
+        <div class="panel-body">
+          <p class="hint">只影响后续自动理解；已有自动结果和人工动作不批量重新交给模型。保存与权限重算不调用模型。</p>
+          <div class="split">
+            <label class="field"><span>启用模型</span><input id="llm-enabled" type="checkbox" /></label>
+            <label class="field"><span>失败时使用规则</span><input id="llm-fallback" type="checkbox" /></label>
+            <label class="field"><span>服务地址</span><input id="llm-base" type="url" required /></label>
+            <label class="field"><span>模型名称</span><input id="llm-model" required /></label>
+            <label class="field"><span>密钥环境变量名称（不是密钥）</span><input id="llm-keyenv" required /></label>
+            <label class="field"><span>超时（秒）</span><input id="llm-timeout" type="number" min="1" required /></label>
+            <label class="field"><span>最大输出长度</span><input id="llm-maxtokens" type="number" min="1" required /></label>
+            <label class="field"><span>随机度</span><input id="llm-temp" type="number" step="0.05" min="0" max="2" required /></label>
           </div>
-        </section>
-
-
-      </div>
-
-      <div class="layout" style="margin-top:12px">
-
-
-        <section class="panel admin-section" id="sec-snapshot">
-          <div class="panel-head"><span>私有备份与恢复</span></div>
+          <details><summary>高级理解与连续发言合并</summary>
+            <label class="field"><span>逐项抽取认购（实验）</span><input id="llm-segment" type="checkbox" /></label>
+            <label class="field"><span>合并相邻补充发言（实验）</span><input id="merge-enabled" type="checkbox" /></label>
+            <label class="field"><span>仅限同一发送者</span><input id="merge-same-sender" type="checkbox" /></label>
+            <p class="hint">默认不启用实验合并。排与撤是独立语义，永不因此自动合并；已有执行单元不重新分组。</p>
+            <label class="field"><span>提示词</span><textarea id="llm-prompt" rows="10"></textarea></label>
+          </details>
+          <p id="status-understanding" class="scope-status" role="status"></p>
+        </div>
+      </section>
+      <section class="panel admin-section" id="sec-display" data-settings-scope="display" hidden>
+        <div class="panel-head"><h2>展示默认</h2><span class="spacer"></span><button id="save-display" class="primary">保存展示默认</button></div>
+        <div class="panel-body">
+          <p class="hint">服务提供的默认值；展示页显式 URL 和本机来源选择优先。远程模式只读，不将快照地址当管理 API。</p>
+          <div class="split">
+            <label class="field"><span>刷新间隔（毫秒）</span><input id="dp-refresh" type="number" min="500" required /></label>
+            <label class="field"><span>默认数据来源</span><select id="dp-source"><option value="local">本机 API</option><option value="remote">远程只读快照</option></select></label>
+          </div>
+          <label class="field"><span>远程快照地址（可留空）</span><input id="dp-remote" type="url" placeholder="https://…/current" /></label>
+          <p id="status-display" class="scope-status" role="status"></p>
+        </div>
+      </section>
+        <section class="panel admin-section" id="sec-snapshot" hidden>
+          <div class="panel-head"><h2>数据维护 · 私有备份与恢复</h2></div>
           <div class="panel-body">
-            <p class="hint">完整备份含成员、原消息与管理记录，只保存到本机路径，不用于公开分享。应用仅替换当前同一轮消息与审计，保留当前配置和订单草稿。</p>
+            <div class="maintenance-action"><button id="reload" class="small">从磁盘重载服务配置</button><span class="hint">重新读取本机配置文件并确定性重算；先处理未保存草稿。</span></div><p class="hint">完整备份含成员、原消息与管理记录，只保存到本机路径，不用于公开分享。应用仅替换当前同一轮消息与审计，保留当前配置和订单草稿。</p>
             <div class="row">
               <label class="field" style="flex:1;margin:0"><span>out_dir（可选；留空用后端默认目录）</span><input id="snap-out" placeholder="例如 data/snapshots" /></label>
               <button id="snap-export" class="primary">保存完整私有备份</button>
@@ -134,7 +130,7 @@
             <div id="snap-import-result" class="hint"></div>
           </div>
         </section>
-      </div>
+
     </div>
 
     <div id="loading" class="empty">正在载入配置…</div>

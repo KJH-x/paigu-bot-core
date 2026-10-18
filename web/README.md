@@ -9,7 +9,7 @@
 | `index.html` | 入口导航 + `/api/health` 检查 |
 | `display.html` / `display.js` | 展示页：排位表 + 消息流 + who-whats + 状态 |
 | `round.html` / `round.js` | 开团页：轮次库、阶段窗口、商品目录与子项调价 |
-| `settings.html` / `settings.js` | 系统设置：gateway / LLM / display / 私有备份 |
+| `settings.html` / `settings.js` | 系统设置四个 hash 分区：接入 / 消息理解 / 展示默认各自保存，数据维护承载磁盘重载与私有备份 |
 | `members.html` / `members.js` | 成员称呼、别名及缓存来源；分别保存；LLM 建议先预览再选入草稿 |
 | `admin.html` | 兼容管理入口，保留查询与锚点转总览，不加载旧 admin.js |
 | `msglog.js` / `message-editor.js` | 排谷原文只读日志与统一动作编辑器；远程只读不请求本机私有日志 |
@@ -19,7 +19,7 @@
 | `newlook.css` | 方形视觉层：无圆角、分层边框、高对比焦点、明暗主题统一覆盖 |
 | `workbench.css` | 最后加载的桌面工作台布局：统一顶栏、宽内容区、对齐分栏与紧凑表单 |
 | `board-layout.js` / `board.css` | 排表姓名宽度模式、实际字体测量、共享盒列轨道和上下状态标记（展示/复盘最后加载） |
-| `common.js` / `shell.js` | API 与数据归一化、keyed diff、smart-scroll、工作流导航与主题切换 |
+| `common.js` / `shell.js` | API 与数据归一化、keyed diff、smart-scroll、七区导航与主题；共用草稿注册/三选离开保护、未知锚点恢复 |
 
 ## 打开方式
 

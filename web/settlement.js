@@ -868,6 +868,7 @@
       state.revision = res.revision;
       state.config = normalizeConfig(res.config);
       renderConfig();
+      state.rulesBaseline=JSON.stringify(requestConfig());state.serverRules=P.deepClone(res.config);state.savedRules=P.deepClone(state.config);
       setRev();
       setConn('ok', '配置已载入');
       hideBanner();
@@ -906,12 +907,20 @@
   function saveConfig() {
     if (state.revision == null) {
       showBanner('尚未载入配置，无法保存。', true);
-      return;
+      return Promise.reject(new Error('尚未载入结算规则'));
     }
-    P.put('/api/settlement/config', { config: requestConfig(), revision: state.revision }).then(function (res) {
+    var round=state.roundId, rules=requestConfig(), generation=state.generation;
+    var controls=Array.from($('settle').querySelectorAll('input,select,textarea,button')).concat([$('save')]), disabled=controls.map(function(n){var value=n.disabled;n.disabled=true;return value;});
+    return P.get('/api/config').then(function(latest){
+      if(latest.config.round.round_id!==round || generation!==state.generation)throw new Error('轮次已变化，规则草稿保留');
+      if(JSON.stringify(latest.config.settlement)!==JSON.stringify(state.serverRules))throw new Error('结算规则已被其他操作修改，草稿保留，请核对后重新读取');
+      Object.assign(latest.config.settlement,rules);return P.put('/api/config',{config:latest.config,revision:latest.revision});
+    }).then(function (res) {
+      if(generation!==state.generation)return;
       state.revision = res.revision;
-      state.config = normalizeConfig(res.config);
+      state.config = normalizeConfig(res.config.settlement);
       renderConfig();
+      state.rulesBaseline=JSON.stringify(requestConfig());state.serverRules=P.deepClone(res.config.settlement);state.savedRules=P.deepClone(state.config);
       setRev();
       setConn('ok', '已保存');
       hideBanner();
@@ -923,7 +932,8 @@
       } else {
         showBanner('保存失败：' + P.errorText(err), true);
       }
-    });
+      throw err;
+    }).finally(function(){controls.forEach(function(n,i){if(n.isConnected)n.disabled=disabled[i] || state.locked;});});
   }
 
   function start() {
@@ -936,8 +946,14 @@
       window.location.href = url.toString();
     });
 
-    $('load').addEventListener('click', function(){loadConfig().then(loadDraft);});
-    $('save').addEventListener('click', saveConfig);
+    P.registerDraft({id:'settlement-rules',label:'结算规则',isDirty:function(){return !!state.rulesBaseline && JSON.stringify(requestConfig())!==state.rulesBaseline;},save:saveConfig,discard:function(){state.config=P.deepClone(state.savedRules);renderConfig();}});
+    P.registerDraft({id:'settlement-order',label:'订单自动保存草稿',isDirty:function(){return state.draftEdits!==state.savedEdits;},save:saveDraft,discard:async function(){
+      if(state.draftTimer){clearTimeout(state.draftTimer);state.draftTimer=null;}state.generation++;
+      await state.draftSaveChain.catch(function(){});await loadDraft();
+      if(state.draftEdits!==state.savedEdits)throw new Error('无法重新读取已保存订单，当前输入保留');
+    }});
+    $('load').addEventListener('click', function(){P.protectAction(function(){return loadConfig().then(loadDraft);}).catch(function(){});});
+    $('save').addEventListener('click', function(){saveConfig().catch(function(){});});
     $('evaluate').addEventListener('click', function () { evaluate(true); });
     $('load-sample').addEventListener('click', loadSample);
     $('load-allocation').addEventListener('click', fromAllocation);

@@ -140,12 +140,22 @@
   }
   function applyHash(){
     var hash=window.location.hash;
+    var tabs=document.querySelector('.section-nav[data-panels]');
+    if(tabs){
+      var links=Array.from(tabs.querySelectorAll('a')), selected=links.find(function(a){return new URL(a.href).hash===hash;}) || links[0];
+      links.forEach(function(a){var panel=document.getElementById(new URL(a.href).hash.slice(1));if(panel)panel.hidden=a!==selected;});
+      if(selected && !hash)hash=new URL(selected.href).hash;
+    }
     document.querySelectorAll('.section-nav a').forEach(function(a){
-      var active=new URL(a.href).hash===hash;a.classList.toggle('active',active);
+      var active=new URL(a.href).hash===hash || (a.dataset.alias || '').split(',').indexOf(hash)>=0;a.classList.toggle('active',active);
       if(active)a.setAttribute('aria-current','location');else a.removeAttribute('aria-current');
     });
     if(!hash)return;
-    var el=document.getElementById(hash.slice(1));if(!el)return;
+    var el=document.getElementById(hash.slice(1));
+    var notice=$('unknown-anchor');if(notice)notice.remove();
+    if(!el){
+      var main=document.querySelector('main');if(main){notice=document.createElement('p');notice.id='unknown-anchor';notice.className='workspace-notice warning';notice.setAttribute('role','status');notice.textContent='原位置已调整。请使用上方工作区或页内导航继续；当前页面与数据未改变。';main.prepend(notice);}return;
+    }
     var fold=el.closest('.collapsed');
     if(fold){fold.classList.remove('collapsed');var toggle=fold.querySelector('[data-collapse]');if(toggle)toggle.setAttribute('aria-expanded','true');}
     el.scrollIntoView({block:'start'});el.classList.add('hash-focus');
@@ -424,8 +434,10 @@
         catch(err){api.value=apiBase();window.PAIGU.toast('请输入不含密钥或查询参数的 HTTP(S) API 地址','bad');return;}
         value=window.PAIGU.stripSlash(value);if(value===apiBase()){api.value=value;return;}
         var next=new URL(window.location.href);next.searchParams.set('api',value);
-        try{window.localStorage.setItem('paigu.display.api',value);}catch(err){}
-        window.location.assign(next.href);
+        window.PAIGU.protectAction(function(){
+          try{window.localStorage.setItem('paigu.display.api',value);}catch(err){}
+          window.PAIGU.navigate(next.href);
+        }).then(function(proceeded){if(!proceeded)api.value=apiBase();}).catch(function(err){api.value=apiBase();window.PAIGU.toast(window.PAIGU.errorText(err),'bad');});
       },true);
     }
     document.addEventListener('visibilitychange',function(){if(!document.hidden)fetchWorkflow();});

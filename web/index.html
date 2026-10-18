@@ -67,7 +67,8 @@
       </div>
     </div>
 
-    <div class="section-title">流程入口<span class="line"></span></div>
+    <section class="panel overview-tasks"><div class="panel-head"><h2>当前状态与处理入口</h2></div><div id="next-actions" class="panel-body" role="status"></div></section>
+    <div class="section-title">任务入口<span class="line"></span></div>
     <div class="nav-cards">
       <a class="nav-card" href="members.html">
         <span class="step-badge">1</span>
@@ -119,16 +120,12 @@
           <div id="health-detail" class="kv"></div>
         </div>
       </section>
-      <section class="panel">
-        <div class="panel-head">
-          <span>原始工作流快照</span>
-          <span class="spacer"></span>
-          <span class="hint">只读</span>
-        </div>
+      <details class="panel">
+        <summary class="panel-head">诊断详情 · 原始工作流快照（只读）</summary>
         <div class="panel-body">
           <pre id="wf-raw" class="mono hint" style="margin:0;max-height:42vh;overflow:auto">—</pre>
         </div>
-      </section>
+      </details>
     </div>
 
     <p class="hint" style="margin-top:16px">
@@ -173,18 +170,13 @@
           }
           var gw = wf.gateway || {};
           var rows = [
-            ['round_id', wf.round_id],
-            ['title', wf.title],
-            ['group_id', wf.group_id],
-            ['phase', wf.phase == null ? '阶段未配置' : (wf.phase_label || wf.phase)],
-            ['phases_configured', wf.phases_configured],
-            ['settlement_configured', wf.settlement_configured],
-            ['priority_window', wf.priority_window ? JSON.stringify(wf.priority_window) : '—'],
-            ['gateway.listening', gw.listening],
-            ['gateway.clients', gw.clients],
-            ['gateway.bound_addr', gw.bound_addr],
-            ['locked', wf.locked],
-            ['updated_at', wf.updated_at]
+            ['激活轮次', wf.title || wf.round_id],
+            ['绑定群', wf.group_id],
+            ['当前阶段', wf.phase == null ? '未配置（不作阶段限制）' : (wf.phase_label || wf.phase)],
+            ['监听地址', gw.bound_addr || '尚未监听'],
+            ['接收器', Number(gw.clients)>0?gw.clients+' 个连接':'未连接，不能实时接收消息'],
+            ['写入状态', wf.locked?'已锁定':'未锁定'],
+            ['状态读取时间', wf.updated_at]
           ];
           var html = '';
           for (var i = 0; i < rows.length; i++) {
@@ -196,6 +188,7 @@
         }
 
         function renderKpis(wf) {
+          renderTasks(wf);
           if (!wf) {
             set('kpi-version', '—');
             set('kpi-claims', '—');
@@ -216,6 +209,21 @@
           set('kpi-phase', ph);
           set('kpi-phase-inline', ph);
           renderDetail(wf);
+        }
+
+        function renderTasks(wf){
+          var tasks=[];
+          if(!wf)tasks.push(['api','API 未连接，当前状态未知','settings.html#sec-gateway','检查接入']);
+          else {
+            if(!(Number((wf.gateway || {}).clients)>0))tasks.push(['receiver','接收器未连接：没有实时新消息；已有数据仍可查看和修订','settings.html#sec-gateway','检查接收器']);
+            if(!wf.items)tasks.push(['items','当前轮没有商品目录','round.html#sec-items','配置商品']);
+            if(!wf.phases_configured)tasks.push(['phases','未设置阶段时间窗：当前不作阶段限制','round.html#sec-phases','管理阶段']);
+            if(wf.locked)tasks.push(['locked',wf.lock_error?'锁状态无法读取，已暂停写入':'当前轮已锁定，查看和复盘仍可用','settlement.html#order','核对锁定状态']);
+            tasks.push(['messages','核对当前排位与消息处理结果','display.html#messages','查看排谷']);
+          }
+          P.syncKeyedChildren($('next-actions'),tasks,function(t){return t[0];},function(){var row=document.createElement('div');row.className='overview-task';row.innerHTML='<span></span><a></a>';return row;},function(row,t){
+            var text=row.querySelector('span'),link=row.querySelector('a');if(text.textContent!==t[1])text.textContent=t[1];if(link.textContent!==t[3])link.textContent=t[3];link.href=P.pageHref(t[2]);
+          });
         }
 
         if (SHELL && SHELL.onWorkflow) SHELL.onWorkflow(renderKpis);

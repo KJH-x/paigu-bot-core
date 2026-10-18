@@ -1,165 +1,90 @@
 (function () {
   'use strict';
-
-  var P = window.PAIGU;
-  var M = window.PAIGU_MANAGE;
-  function $(id) { return document.getElementById(id); }
-
-  var state = {
-    config: null,
-    revision: null,
-    members: []
+  var P=window.PAIGU, M=window.PAIGU_MANAGE, state={config:null,revision:null,baselines:{},server:{},saving:{}};
+  function $(id){return document.getElementById(id);}
+  function banner(message,bad){var b=$('banner');b.textContent=message || '';b.className='banner'+(message?' show':'')+(bad?' bad':'');}
+  function val(id){return $(id).value;}
+  function setVal(id,value){$(id).value=value==null?'':value;}
+  function setRev(){$('rev-badge').textContent='配置 v'+(state.revision==null?'—':state.revision);}
+  function setConn(kind,text){$('conn-badge').textContent=text;$('conn-badge').className='status-badge '+kind;}
+  var fields={
+    gateway:[
+      ['gw-bind','gateway.bind','text'],['gw-heartbeat','gateway.heartbeat_secs','number'],
+      ['gw-whitelist','gateway.whitelist_groups','list'],['gw-whitelist-members','gateway.whitelist_members','list'],
+      ['gw-test-group','gateway.test_group_id','optional'],['gw-forged','gateway.accept_forged_messages','bool'],
+      ['gw-reply','gateway.reply_enabled','bool'],['gw-admincmds','gateway.admin_commands_enabled','bool'],['gw-actions','gateway.allowed_actions','list']
+    ],
+    understanding:[
+      ['llm-enabled','llm.enabled','bool'],['llm-fallback','llm.fallback_to_rules','bool'],
+      ['llm-base','llm.base_url','text'],['llm-model','llm.model','text'],['llm-keyenv','llm.api_key_env','text'],
+      ['llm-timeout','llm.timeout_secs','number'],['llm-maxtokens','llm.max_tokens','number'],['llm-temp','llm.temperature','number'],
+      ['llm-prompt','llm.prompt_template','raw'],['llm-segment','llm.segment_claims','bool'],
+      ['merge-enabled','merge.enabled','bool'],['merge-same-sender','merge.same_sender','bool']
+    ],
+    display:[['dp-refresh','display.refresh_ms','number'],['dp-source','display.data_source','text'],['dp-remote','display.remote_base_url','text']]
   };
-
-  function banner(msg, bad) {
-    var b = $('banner');
-    if (!msg) { b.className = 'banner'; b.textContent = ''; return; }
-    b.textContent = msg;
-    b.className = 'banner show' + (bad ? ' bad' : '');
+  var labels={gateway:'接入设置',understanding:'消息理解设置',display:'展示默认'};
+  function getPath(config,path){return path.split('.').reduce(function(v,k){return v && v[k];},config);}
+  function setPath(config,path,value){var parts=path.split('.'), group=parts[0];if(!config[group])config[group]={};config[group][parts[1]]=value;}
+  function fromConfig(scope,config){var out={};fields[scope].forEach(function(f){out[f[1]]=getPath(config,f[1]);});return out;}
+  function fromForm(scope){var out={};fields[scope].forEach(function(f){
+    var n=$(f[0]), value=n.value;
+    if(f[2]==='bool')value=n.checked;
+    else if(f[2]==='number')value=Number(value);
+    else if(f[2]==='list')value=M.splitList(value);
+    else if(f[2]==='optional')value=value.trim() || null;
+    else if(f[2]!=='raw')value=value.trim();
+    out[f[1]]=value;
+  });return out;}
+  function paintScope(scope,config){
+    fields[scope].forEach(function(f){var n=$(f[0]), v=getPath(config,f[1]);if(f[2]==='bool')n.checked=!!v;else n.value=f[0]==='llm-temp'?Number(Number(v).toFixed(2)):f[2]==='list'?M.joinList(v):v==null?'':v;});
+    state.baselines[scope]=JSON.stringify(fromForm(scope));state.server[scope]=P.deepClone(fromConfig(scope,config));
+    $('status-'+scope).textContent='已读取服务器值';
   }
-  function setConn(kind, text) {
-    var el = $('conn-badge');
-    el.className = 'status-badge ' + (kind || '');
-    el.innerHTML = '<span class="dot"></span>' + P.esc(text);
+  function dirty(scope){return !!state.config && JSON.stringify(fromForm(scope))!==state.baselines[scope];}
+  function restoreScope(scope){paintScope(scope,state.config);}
+  function saveScope(scope){
+    if(state.saving[scope])return state.saving[scope];
+    if(!state.config)return Promise.reject(new Error('配置尚未读取'));
+    var container=document.querySelector('[data-settings-scope="'+scope+'"]'), invalid=Array.from(container.querySelectorAll('input,textarea,select')).find(function(n){return !n.checkValidity();});
+    if(invalid){invalid.reportValidity();return Promise.reject(new Error('请先修正本分区的输入')); }
+    var next=fromForm(scope), base=state.server[scope], round=state.config.round.round_id, nodes=Array.from(container.querySelectorAll('input,textarea,select,button'));
+    var disabled=nodes.map(function(n){var d=n.disabled;n.disabled=true;return d;});$('status-'+scope).textContent='正在保存…';
+    state.saving[scope]=P.get('/api/config').then(function(res){
+      if(res.config.round.round_id!==round)throw new Error('激活轮已变化，当前草稿未提交');
+      var latest=fromConfig(scope,res.config), changed=fields[scope].filter(function(f){return JSON.stringify(latest[f[1]])!==JSON.stringify(base[f[1]]);});
+      if(changed.length)throw new Error('同分区发生冲突：'+changed.map(function(f){return $(f[0]).closest('label').querySelector('span').textContent;}).join('、')+'。草稿保留，请核对或放弃后重新读取');
+      Object.keys(next).forEach(function(path){setPath(res.config,path,next[path]);});
+      return P.put('/api/config',{config:res.config,revision:res.revision});
+    }).then(function(res){
+      state.config=res.config;state.revision=res.revision;paintScope(scope,res.config);setRev();banner('');
+      $('status-'+scope).textContent='本分区已保存；其他分区草稿未提交';P.toast(labels[scope]+'已保存','ok');
+      if(window.PAIGU_SHELL)window.PAIGU_SHELL.refresh();
+      return res;
+    }).catch(function(e){$('status-'+scope).textContent='未保存，输入保留：'+P.errorText(e);banner(labels[scope]+'保存未完成：'+P.errorText(e),true);throw e;})
+      .finally(function(){nodes.forEach(function(n,i){n.disabled=disabled[i];});delete state.saving[scope];});
+    return state.saving[scope];
   }
-  function setRev() { $('rev-badge').textContent = 'revision ' + (state.revision == null ? '—' : state.revision); }
-  function val(id) { var el = $(id); return el ? el.value : ''; }
-  function checked(id) { var el = $(id); return !!(el && el.checked); }
-  function setVal(id, v) { var el = $(id); if (el) el.value = v == null ? '' : v; }
-  function setChecked(id, v) { var el = $(id); if (el) el.checked = !!v; }
-
-  /* ------------------------------ 表单 -> 配置 ------------------------------ */
-
-  function applyToForm(cfg) {
-    var gw = cfg.gateway || {};
-    setVal('gw-bind', gw.bind);
-    setVal('gw-heartbeat', gw.heartbeat_secs);
-    setChecked('gw-reply', gw.reply_enabled);
-    setChecked('gw-admincmds', gw.admin_commands_enabled);
-    setVal('gw-whitelist', M.joinList(gw.whitelist_groups));
-    setVal('gw-whitelist-members', M.joinList(gw.whitelist_members));
-    setVal('gw-actions', M.joinList(gw.allowed_actions));
-
-    var llm = cfg.llm || {};
-    setChecked('llm-enabled', llm.enabled);
-    setChecked('llm-fallback', llm.fallback_to_rules);
-    setVal('llm-base', llm.base_url);
-    setVal('llm-model', llm.model);
-    setVal('llm-keyenv', llm.api_key_env);
-    setVal('llm-timeout', llm.timeout_secs);
-    setVal('llm-maxtokens', llm.max_tokens);
-    setVal('llm-temp', llm.temperature == null ? '' : Number(Number(llm.temperature).toFixed(2)));
-    setVal('llm-prompt', llm.prompt_template);
-
-    var dp = cfg.display || {};
-    setVal('dp-refresh', dp.refresh_ms);
-    setVal('dp-source', dp.data_source || 'local');
-    setVal('dp-remote', dp.remote_base_url);
-
-    setRev();
-    $('form').classList.remove('hidden');
-    $('loading').classList.add('hidden');
+  function load(){
+    if(state.loadPromise)return state.loadPromise;
+    setConn('','读取中…');
+    $('form').inert=true;
+    var controls=Array.from($('form').querySelectorAll('input,select,textarea,button')), disabled=controls.map(function(n){var value=n.disabled;n.disabled=true;return value;});
+    state.loadPromise=P.get('/api/config').then(function(res){
+      state.config=res.config;state.revision=res.revision;Object.keys(fields).forEach(function(scope){paintScope(scope,res.config);});
+      state.importPreflight=null;$('snap-apply').disabled=true;setRev();banner('');setConn('ok','已连接');
+      $('form').classList.remove('hidden');$('loading').classList.add('hidden');
+    }).catch(function(e){banner('读取失败，保留现有输入：'+P.errorText(e),true);setConn('bad','未连接');$('loading').textContent='读取失败，可重试';throw e;})
+      .finally(function(){$('form').inert=false;controls.forEach(function(n,i){n.disabled=disabled[i];});$('snap-apply').disabled=!state.importPreflight;delete state.loadPromise;});
+    return state.loadPromise;
   }
-
-  function collectConfig() {
-    var cfg = P.deepClone(state.config) || {};
-    cfg.gateway = cfg.gateway || {};
-    cfg.gateway.bind = val('gw-bind');
-    cfg.gateway.heartbeat_secs = P.num(val('gw-heartbeat'), cfg.gateway.heartbeat_secs);
-    cfg.gateway.reply_enabled = checked('gw-reply');
-    cfg.gateway.admin_commands_enabled = checked('gw-admincmds');
-    cfg.gateway.whitelist_groups = M.splitList(val('gw-whitelist'));
-    cfg.gateway.whitelist_members = M.splitList(val('gw-whitelist-members'));
-    cfg.gateway.allowed_actions = M.splitList(val('gw-actions'));
-
-    cfg.llm = cfg.llm || {};
-    cfg.llm.enabled = checked('llm-enabled');
-    cfg.llm.fallback_to_rules = checked('llm-fallback');
-    cfg.llm.base_url = val('llm-base');
-    cfg.llm.model = val('llm-model');
-    cfg.llm.api_key_env = val('llm-keyenv');
-    cfg.llm.timeout_secs = P.num(val('llm-timeout'), cfg.llm.timeout_secs);
-    cfg.llm.max_tokens = P.num(val('llm-maxtokens'), cfg.llm.max_tokens);
-    var temp = parseFloat(val('llm-temp'));
-    cfg.llm.temperature = isNaN(temp) ? cfg.llm.temperature : temp;
-    cfg.llm.prompt_template = val('llm-prompt');
-
-    cfg.display = cfg.display || {};
-    cfg.display.refresh_ms = P.num(val('dp-refresh'), cfg.display.refresh_ms);
-    cfg.display.data_source = val('dp-source') || 'local';
-    cfg.display.remote_base_url = val('dp-remote');
-
-    return cfg;
+  function reloadDisk(){
+    return P.protectAction(function(){
+      $('reload').disabled=true;
+      return P.post('/api/config/reload',{}).then(load).then(function(){P.toast('已从磁盘重载服务配置','ok');})
+        .catch(function(e){banner('磁盘重载未完成：'+P.errorText(e),true);throw e;}).finally(function(){$('reload').disabled=false;});
+    }).catch(function(){});
   }
-
-  function load() {
-    setConn('', '载入中…');
-    return P.get('/api/config').then(function (res) {
-      var cfg = res && res.config ? res.config : res;
-      state.config = cfg;
-      state.revision = res && res.revision != null ? res.revision : (cfg ? cfg.revision : null);
-      applyToForm(cfg || {});
-      banner('');
-      setConn('ok', '已连接');
-    }).catch(function (err) {
-      banner('无法载入配置：' + P.errorText(err) + '。请确认本地服务已在 ' + P.resolveApiBase() + ' 运行。', true);
-      setConn('bad', '未连接');
-      $('loading').textContent = '配置载入失败（API 未就绪）';
-      throw err;
-    });
-  }
-
-  function save() {
-    if (!state.config) { banner('尚未载入配置，无法保存。', true); return; }
-    var cfg = collectConfig();
-    $('save').disabled = true;
-    P.put('/api/config', { config: cfg, revision: state.revision }).then(function (res) {
-      state.config = res && res.config ? res.config : cfg;
-      state.revision = res && res.revision != null ? res.revision : state.revision;
-      applyToForm(state.config);
-      banner('');
-      P.toast('配置已保存，revision ' + state.revision, 'ok');
-    }).catch(function (err) {
-      if (err.status === 409) {
-        banner('配置冲突（HTTP 409）：服务器上的 revision 已变化，你的改动未保存。请点「重新载入」获取最新配置后重编辑。', true);
-      } else {
-        banner('保存失败：' + P.errorText(err), true);
-      }
-    }).then(function () {
-      $('save').disabled = false;
-    });
-  }
-
-  function reloadDisk() {
-    $('reload').disabled = true;
-    P.post('/api/config/reload', {}).then(function () { return load(); })
-      .then(function () { P.toast('已从磁盘重载配置', 'ok'); })
-      .catch(function (err) { banner('从磁盘重载失败：' + P.errorText(err), true); })
-      .then(function () { $('reload').disabled = false; });
-  }
-
-  function toggleGateway(kind) {
-    var key = kind === 'reply' ? 'gw-reply' : 'gw-admincmds';
-    var path = kind === 'reply' ? '/api/config/reply' : '/api/config/admin-commands';
-    var enabled = !checked(key);
-    var body = { enabled: enabled };
-    if (state.revision != null) body.revision = state.revision;
-    P.post(path, body).then(function (res) {
-      if (res && res.revision != null) state.revision = res.revision;
-      setChecked(key, res && res.enabled != null ? res.enabled : enabled);
-      setRev();
-      if (state.config && state.config.gateway) {
-        if (kind === 'reply') state.config.gateway.reply_enabled = !!(res && res.reply_enabled);
-        else state.config.gateway.admin_commands_enabled = !!(res && res.admin_commands_enabled);
-      }
-      P.toast((kind === 'reply' ? 'reply_enabled' : 'admin_commands_enabled') + ' = ' + (res && res.enabled), 'ok');
-    }).catch(function (err) {
-      if (err.status === 409) banner('热切换冲突（HTTP 409）：revision 已变化，请先「重新载入」配置。', true);
-      else banner('热切换失败：' + P.errorText(err), true);
-    });
-  }
-
-  /* ------------------------------ 快照 ------------------------------ */
   function exportSnapshot() {
     var out = val('snap-out').trim();
     var body = { format: 'file' };
@@ -182,7 +107,8 @@
     }).then(function () { $('snap-export').disabled = false; });
   }
 
-  function importSnapshot(apply) {
+  function importSnapshot(apply, protectedDrafts) {
+    if(apply && !protectedDrafts) return P.protectAction(function(){return importSnapshot(true,true);}).catch(function(e){banner(P.errorText(e),true);});
     var path = val('snap-path').trim();
     if (!path) { banner('请填写要导入的 path', true); return; }
     var preflight=state.importPreflight;
@@ -209,29 +135,22 @@
     }).then(function () { $('snap-import').disabled = false; });
   }
 
-  /* ------------------------------ 绑定 ------------------------------ */
 
-  function init() {
-    $('api').value = P.resolveApiBase();
-    $('api').addEventListener('change', function (e) {
-      var v = P.stripSlash(e.target.value) || P.DEFAULT_API;
-      e.target.value = v;
-      try { window.localStorage.setItem('paigu.display.api', v); } catch (err) { /* ignore */ }
-      load().catch(function () {});
+  function init(){
+    $('api').value=P.resolveApiBase();
+    Object.keys(fields).forEach(function(scope){
+      P.registerDraft({id:'settings-'+scope,label:labels[scope],isDirty:function(){return dirty(scope);},save:function(){return saveScope(scope);},discard:function(){restoreScope(scope);}});
+      $('save-'+scope).addEventListener('click',function(){saveScope(scope).catch(function(){});});
+      document.querySelector('[data-settings-scope="'+scope+'"]').addEventListener('input',function(){$('status-'+scope).textContent=dirty(scope)?'本分区有未保存改动':'与读取值相同';});
     });
-    $('load').addEventListener('click', function () { load().catch(function () {}); });
-    $('reload').addEventListener('click', reloadDisk);
-    $('save').addEventListener('click', save);
-    $('gw-reply-toggle').addEventListener('click', function () { toggleGateway('reply'); });
-    $('gw-admin-toggle').addEventListener('click', function () { toggleGateway('admin'); });
-    $('snap-export').addEventListener('click', exportSnapshot);
-    $('snap-import').addEventListener('click', function(){importSnapshot(false);});
-    $('snap-apply').addEventListener('click', function(){importSnapshot(true);});
+    $('load').textContent='重新读取服务器值';
+    $('load').addEventListener('click',function(){P.protectAction(load).catch(function(){});});
+    $('reload').addEventListener('click',reloadDisk);
+    $('snap-export').addEventListener('click',exportSnapshot);
+    $('snap-import').addEventListener('click',function(){importSnapshot(false);});
+    $('snap-apply').addEventListener('click',function(){importSnapshot(true);});
     $('snap-path').addEventListener('input',function(){state.importPreflight=null;$('snap-apply').disabled=true;});
-
-    load().catch(function () {});
+    load().catch(function(){});
   }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();

@@ -24,9 +24,16 @@
     var beforeFocus = document.activeElement, closed = false, saving = false, context, actions = [], treatment = 'replace', note;
     var save = modal.querySelector('.ov-ok'), error = modal.querySelector('.modal-err'), closeButton = modal.querySelector('.ov-cancel');
     var transaction = id(), lastRequest = null, picked = [], released = [], draftVersion = 0, suggestController = null;
+    var baseline = null, unregisterDraft = null, savePromise = null;
     closeButton.focus();
-    function close() { if (saving) return; closed = true; if (suggestController) suggestController.abort(); wrap.remove(); if (beforeFocus && beforeFocus.isConnected) beforeFocus.focus(); }
-    closeButton.addEventListener('click', close);
+    function draftSignature(){return JSON.stringify([treatment,treatment==='replace'?actions:[],note?note.value:'',picked.map(recordVersion),released.map(recordVersion)]);}
+    function close(force) {
+      if(saving || closed)return;
+      if(force!==true && unregisterDraft){P.protectAction(function(){close(true);},{ids:['message-editor']}).catch(function(){});return;}
+      closed=true;if(unregisterDraft)unregisterDraft();if(suggestController)suggestController.abort();wrap.remove();
+      if(beforeFocus && beforeFocus.isConnected)beforeFocus.focus({preventScroll:true});
+    }
+    closeButton.addEventListener('click', function(){close();});
     wrap.addEventListener('click', function (e) { if (e.target === wrap) close(); });
     wrap.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') { e.preventDefault(); close(); return; }
@@ -240,14 +247,18 @@
         restoreEditFocus();
       }
       drawActions(); save.disabled = false;
+      baseline=opts.convertGroup?'convert-group':draftSignature();
+      unregisterDraft=P.registerDraft({id:'message-editor',label:'消息动作与管理员解释',isDirty:function(){return !closed && baseline!==draftSignature();},save:saveDraft,discard:function(){close(true);},restoreFocus:function(){if(beforeFocus && beforeFocus.isConnected)beforeFocus.focus({preventScroll:true});}});
       var focus = modal.querySelector('.ov-item') || operation; focus.focus();
     }).catch(function (e) { if (!closed) {
       modal.querySelector('.ae-loading').textContent = '读取失败，未修改消息。';
       error.textContent = e.status === 404 || e.status === 405 ? '服务暂不支持此编辑接口，或消息已不在当前数据中。请关闭并刷新核对。' : P.errorText(e);
     } });
 
-    save.addEventListener('click', function () {
-      if (saving || !context || !context.editable) return;
+    async function saveDraft() {
+      if(saving)return savePromise;
+      if(!context || !context.editable)throw new Error('当前消息不可编辑');
+      function invalid(message){error.textContent=message;throw new Error(message);}
       var selection = { kind: treatment, note: note.value };
       if (treatment === 'replace') {
         selection.actions = actions.map(function (a) {
@@ -257,15 +268,15 @@
         });
         for (var a of selection.actions) {
           if (a.operation !== 'cancel') {
-            if (!a.items.length) { error.textContent = '排/改须至少选择一个商品项'; return; }
+            if (!a.items.length) return invalid('排/改须至少选择一个商品项');
             for (var line of a.items) {
-              if (!line.item_id) { error.textContent = '请从候选中选择商品'; return; }
-              if (!Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) { error.textContent = '数量应为 1–99 的整数'; return; }
+              if (!line.item_id) return invalid('请从候选中选择商品');
+              if (!Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) return invalid('数量应为 1–99 的整数');
             }
           }
         }
       }
-      if (picked.length && treatment !== 'replace') { error.textContent = '有关联补充时请保存完整替换动作；若要恢复整组原选择，请撤回最近事务。'; return; }
+      if (picked.length && treatment !== 'replace') return invalid('有关联补充时请保存完整替换动作；若要恢复整组原选择，请撤回最近事务。');
       var signature = JSON.stringify([selection,picked.map(recordVersion),released.map(recordVersion)]);
       if (lastRequest && lastRequest !== signature) transaction = id();
       lastRequest = signature;
@@ -273,10 +284,10 @@
       if (suggestController) suggestController.abort();
       var controls = Array.from(modal.querySelectorAll('input,select,textarea,button'));
       var disabled = controls.map(function (n) { return n.disabled; }); controls.forEach(function (n) { n.disabled = true; });
-      P.post(endpoint, { transaction_id: transaction, round_id: context.round_id, config_revision: context.config_revision, record_revision: context.message.record_revision, selection: selection, supplements: picked.map(recordVersion), release_supplements: released.map(recordVersion) }).then(function (response) {
+      savePromise=P.post(endpoint, { transaction_id: transaction, round_id: context.round_id, config_revision: context.config_revision, record_revision: context.message.record_revision, selection: selection, supplements: picked.map(recordVersion), release_supplements: released.map(recordVersion) }).then(function (response) {
         if (closed) return;
         if (opts.onSaved) opts.onSaved(response);
-        saving = false; close(); if (P.toast) P.toast(response.deduplicated ? '这笔修订已保存，当前结果已刷新' : '已保存并重算');
+        saving = false; baseline=draftSignature();close(true); if (P.toast) P.toast(response.deduplicated ? '这笔修订已保存，当前结果已刷新' : '已保存并重算');
       }).catch(function (e) {
         if (closed) return;
         saving = false; controls.forEach(function (n, i) { n.disabled = disabled[i]; }); save.disabled = false; save.textContent = '保存并重算';
@@ -284,8 +295,11 @@
         var reasons = { stale_record_revision: '此消息已被其他操作修改；本次草稿保留，请关闭后重新核对。', stale_revision: '配置已变化；本次草稿保留，请重新核对商品与权限后再保存。', round_changed: '轮次已切换，本次修改未保存。', locked: '轮次已锁定，本次修改未保存。' };
         error.textContent = reasons[code] || (e.data && e.data.message) || (typeof code === 'string' ? code : P.errorText(e));
         error.tabIndex = -1; error.focus({ preventScroll: true });
+        throw e;
       });
-    });
+      return savePromise;
+    }
+    save.addEventListener('click',function(){saveDraft().catch(function(){});});
   };
   function recordVersion(m) { return { record_id: m.record_id, record_revision: m.record_revision }; }
 })();

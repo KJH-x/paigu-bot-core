@@ -14,7 +14,7 @@ export async function verifyCorrectnessGates(page,ctx){
   try{
     await api(ctx.base,'POST','/api/rounds',{round_id:round,title:'正确性门禁',category:'test',copy_from:initial.config.round.round_id});
     await api(ctx.base,'POST',`/api/rounds/${round}/setup`,{phases:[],priority_users:[],priority_window:null,items:[
-      {item_id:'badge',name:'徽章',kind:'group',aliases:[],unit_price_cents:1000,box_item_id:'whole',subitems:[{subitem_id:'a',name:'甲',aliases:[],capacity:1,unit_price_cents:1000,adjust_cents:0}]},
+      {item_id:'badge',name:'徽章',kind:'group',class:'B',aliases:[],unit_price_cents:1000,box_item_id:'whole',subitems:[{subitem_id:'a',name:'甲',aliases:[],capacity:1,unit_price_cents:1000,adjust_cents:0}]},
       {item_id:'whole',name:'整盒占位',kind:'box',aliases:[],unit_price_cents:5000,subitems:[]},
       {item_id:'unused',name:'无人认领占位',kind:'group',aliases:[],unit_price_cents:0,subitems:[{subitem_id:'b',name:'乙',aliases:[],capacity:1,unit_price_cents:0,adjust_cents:0}]}
     ]});
@@ -26,6 +26,8 @@ export async function verifyCorrectnessGates(page,ctx){
     await page.locator('#save').click();check((await response).ok(),'round edit saves');
     const afterRound=await api(ctx.base,'GET','/api/config');
     check(afterRound.config.round.items.find(i=>i.item_id==='badge').box_item_id==='whole','unrelated round edit preserves box association');
+    check(afterRound.config.round.items.find(i=>i.item_id==='badge').class==='B','unrelated edits preserve an explicit advanced class instead of silently deriving A');
+    check(await page.getByRole('combobox',{name:'徽章的整盒关联',exact:true}).inputValue()==='whole','existing box association is editable without showing IDs as the main label');
     // The bundled example deliberately has no real IDs. Editing requires a
     // stable identity, so use an isolated cache rather than inventing one in UI.
     fs.writeFileSync(afterRound.config.members.cache_path,JSON.stringify({members:[
@@ -51,6 +53,12 @@ export async function verifyCorrectnessGates(page,ctx){
     saved=await api(ctx.base,'GET','/api/config');
     check(!saved.config.members.cn_overrides.some(m=>m.user_id===memberId&&m.cn),'restore automatic removes frozen CN');
     await capture('g0-member-single-source');
+    await page.locator('#load').click();
+    await page.locator('.draft-guard [data-choice="cancel"]').click();
+    check((await page.locator('#mb-cache').inputValue()).endsWith('unsaved-source.json'),'cancel re-reading keeps the separate source draft');
+    await page.locator('#load').click();
+    await page.locator('.draft-guard [data-choice="discard"]').click();
+    await page.waitForFunction(expected=>document.querySelector('#mb-cache').value===expected,afterRound.config.members.cache_path);
     // Two equivalent moves: native pointer drag and a named click/keyboard control.
     const line={item_id:'badge',subitem_id:'a',qty:1,unit_price_cents:1000,is_gift:false};
     const table={packages:[{package_id:'包甲',lines:[line]},{package_id:'包乙',lines:[structuredClone(line)]}]};
@@ -73,6 +81,7 @@ export async function verifyCorrectnessGates(page,ctx){
     check(JSON.stringify((await draft()).draft.order_table)===JSON.stringify(dragged),'click move and drag produce identical order table');
     response=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/settlement/lock'));
     await page.locator('#lock-order').click();check((await response).ok(),'unclaimed zero-price catalog items do not block lock');locked=true;
+    await page.locator('#unlock-order:not(.hidden)').waitFor();
     check(await page.locator('#order-table .line-handle').evaluateAll(ns=>ns.every(n=>!n.draggable)),'locked handles are not draggable');
     check(await page.locator('#order-table .line-move button').first().isDisabled(),'locked alternate move is disabled');
     d=(await draft()).draft;

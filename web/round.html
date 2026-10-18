@@ -42,7 +42,7 @@
         <span id="conn-badge" class="status-badge"><span class="dot"></span>未加载</span>
         <span class="spacer"></span>
         <button id="load" class="small">重新载入</button>
-        <button id="reload" class="small">从磁盘重载</button>
+        <a class="small" href="settings.html#sec-snapshot">数据维护</a>
         <button id="save" class="primary">保存配置</button>
 
       </div>
@@ -61,7 +61,7 @@
       <span id="sec-round" aria-hidden="true"></span>
       <section class="panel admin-section" id="sec-rounds">
         <div class="panel-head">
-          <span>轮次管理</span>
+          <h2>轮次管理</h2>
           <span class="spacer"></span>
           <span id="rounds-info" class="hint"></span>
           <button id="rounds-refresh" class="small">刷新轮次</button>
@@ -84,7 +84,7 @@
 
       <section class="panel admin-section" id="sec-round-basic" style="margin-top:12px">
         <div class="panel-head">
-          <span>当前激活轮次设置</span>
+          <h2>当前激活轮次设置</h2>
           <span class="spacer"></span>
           <span id="rd-active-info" class="hidden"></span>
         </div>
@@ -92,8 +92,10 @@
           <div class="split">
             <label class="field hidden"><span>轮次编号</span><input id="rd-id" readonly /></label>
             <label class="field"><span>轮次名称</span><input id="rd-title" /></label>
+            <label class="field"><span>轮次类别</span><select id="rd-category"><option value="normal">正常轮</option><option value="test">测试轮</option></select></label>
             <label class="field"><span>群号</span><input id="rd-group" /></label>
           </div>
+          <p id="rd-group-scope" class="hint"></p>
           <label class="field"><span>预存成员</span><input id="rd-priority" /></label>
           <div class="split">
             <label class="field"><span>优先开始</span><input id="rd-start" type="datetime-local" /></label>
@@ -105,7 +107,7 @@
 
       <section class="panel admin-section" id="sec-phases" style="margin-top:12px">
         <div class="panel-head">
-          <span>阶段管理</span>
+          <h2>阶段管理</h2>
           <span class="spacer"></span>
           <button id="phase-add" class="small">添加阶段</button>
         </div>
@@ -117,7 +119,7 @@
 
       <section class="panel admin-section" id="sec-items" style="margin-top:12px">
         <div class="panel-head">
-          <span>商品目录（种类：拼团 / 单领 / 整盒 / 特典）</span>
+          <h2>商品目录（拼团 / 单领 / 整盒 / 特典）</h2>
           <span class="spacer"></span>
           <span id="alias-llm-status" class="status-inline"></span>
           <button id="alias-llm-btn" class="small">别名 LLM 建议</button>
