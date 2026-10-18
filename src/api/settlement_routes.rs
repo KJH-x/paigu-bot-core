@@ -25,8 +25,16 @@ pub fn routes() -> Router<Arc<ApiState>> {
         .route("/api/settlement/plan", post(plan_order))
         .route("/api/settlement/from-allocation", post(from_allocation))
         .route("/api/settlement/draft", get(get_draft).put(put_draft))
+        .route("/api/settlement/status", get(get_status))
         .route("/api/settlement/lock", post(lock_draft))
         .route("/api/settlement/unlock", post(unlock_draft))
+}
+
+async fn get_status(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
+    settlement::get_status(&state)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
 }
 
 async fn get_draft(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {

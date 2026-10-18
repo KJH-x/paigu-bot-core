@@ -22,6 +22,17 @@
     draftEdits: 0,
     savedEdits: 0,
     draftConflict: false,
+    sourceToken: '',
+    currentSourceToken: '',
+    sourceConflict: false,
+    needsReview: false,
+    resultStale: false,
+    issues: [],
+    loading: true,
+    loadFailed: false,
+    saving: false,
+    reviewing: false,
+    lockPending: false,
     evaluation: 0,
     suppressSave: false,
     catalog: []
@@ -187,19 +198,19 @@
     list.forEach(function (entry, i) {
       var row = el('div', 'cfg-row');
       row.appendChild(inputEl('text', entry.item_id, 'item_id', function (v) {
-        entry.item_id = v.trim(); scheduleEval();
+        entry.item_id = v.trim(); scheduleRuleEval();
       }, 'item-ids'));
       row.appendChild(inputEl('text', entry.subitem_id || '', 'subitem_id(可空)', function (v) {
-        entry.subitem_id = v.trim() ? v.trim() : null; scheduleEval();
+        entry.subitem_id = v.trim() ? v.trim() : null; scheduleRuleEval();
       }, 'subitem-ids'));
       row.appendChild(selectEl([['AdjustBy', '原价加减'], ['SetFinal', '直设调后价']], entry.mode, function (v) {
-        entry.mode = v; scheduleEval();
+        entry.mode = v; scheduleRuleEval();
       }));
       row.appendChild(inputEl('number', entry.value ? entry.value / 100 : '', '金额(元)', function (v) {
-        entry.value = toCents(v); scheduleEval();
+        entry.value = toCents(v); scheduleRuleEval();
       }));
       row.appendChild(buttonEl('删除', 'small danger', function () {
-        state.config.pricing.splice(i, 1); renderConfig(); scheduleEval();
+        state.config.pricing.splice(i, 1); renderConfig(); scheduleRuleEval();
       }));
       host.appendChild(row);
     });
@@ -213,25 +224,25 @@
     list.forEach(function (entry, i) {
       var row = el('div', 'cfg-row');
       row.appendChild(inputEl('text', entry.rule_id, 'rule_id', function (v) {
-        entry.rule_id = v.trim(); scheduleEval();
+        entry.rule_id = v.trim(); scheduleRuleEval();
       }));
       row.appendChild(selectEl([['Threshold', '满减'], ['WholeOrder', '全单']], entry.kind, function (v) {
-        entry.kind = v; scheduleEval();
+        entry.kind = v; scheduleRuleEval();
       }));
       row.appendChild(inputEl('number', entry.amount ? entry.amount / 100 : '', '减额(元)', function (v) {
-        entry.amount = toCents(v); scheduleEval();
+        entry.amount = toCents(v); scheduleRuleEval();
       }));
       row.appendChild(inputEl('number', entry.threshold != null ? entry.threshold / 100 : '', '门槛(元,满减)', function (v) {
-        entry.threshold = v.trim() === '' ? null : toCents(v); scheduleEval();
+        entry.threshold = v.trim() === '' ? null : toCents(v); scheduleRuleEval();
       }));
       row.appendChild(inputEl('number', entry.ratio_ppm != null ? entry.ratio_ppm / 10000 : '', '折扣率(%)', function (v) {
-        entry.ratio_ppm = v.trim() === '' ? null : Math.round(parseFloat(v) * 10000); scheduleEval();
+        entry.ratio_ppm = v.trim() === '' ? null : Math.round(parseFloat(v) * 10000); scheduleRuleEval();
       }));
       row.appendChild(inputEl('number', entry.shares, '份数n(-1=全部)', function (v) {
-        entry.shares = v.trim() === '' ? -1 : intOf(v, -1); scheduleEval();
+        entry.shares = v.trim() === '' ? -1 : intOf(v, -1); scheduleRuleEval();
       }));
       row.appendChild(buttonEl('删除', 'small danger', function () {
-        state.config.discounts.splice(i, 1); renderConfig(); scheduleEval();
+        state.config.discounts.splice(i, 1); renderConfig(); scheduleRuleEval();
       }));
       labelConfigRow(row, ['规则名称', '优惠方式', '减额(元)', '门槛(元)', '折扣率（%）', '适用包数（-1 为全部）']);
       host.appendChild(row);
@@ -270,28 +281,28 @@
     list.forEach(function (entry, i) {
       var row = el('div', 'cfg-row');
       row.appendChild(inputEl('text', entry.tier_id, 'tier_id', function (v) {
-        entry.tier_id = v.trim(); scheduleEval();
+        entry.tier_id = v.trim(); scheduleRuleEval();
       }));
       row.appendChild(inputEl('number', entry.threshold ? entry.threshold / 100 : '', '门槛(元)', function (v) {
-        entry.threshold = toCents(v); scheduleEval();
+        entry.threshold = toCents(v); scheduleRuleEval();
       }));
       row.appendChild(inputEl('text', entry.gift_name, '特典名', function (v) {
-        entry.gift_name = v; scheduleEval();
+        entry.gift_name = v; scheduleRuleEval();
       }));
       row.appendChild(inputEl('number', entry.unit_price ? entry.unit_price / 100 : '', '特典价(元)', function (v) {
-        entry.unit_price = toCents(v); scheduleEval();
+        entry.unit_price = toCents(v); scheduleRuleEval();
       }));
       var claimedInput = inputEl('number', entry.claimed, '认购数 claimed', function (v) {
         entry.claimed = Math.max(0, intOf(v, 0));
         delete entry.__claimedMissing;
         refreshClaimedWarn();
-        scheduleEval();
+        scheduleRuleEval();
       });
       claimedInput.min = '0';
       claimedInput.step = '1';
       row.appendChild(claimedInput);
       row.appendChild(buttonEl('删除', 'small danger', function () {
-        state.config.gift_tiers.splice(i, 1); renderConfig(); scheduleEval();
+        state.config.gift_tiers.splice(i, 1); renderConfig(); scheduleRuleEval();
       }));
       labelConfigRow(row, ['档位名称', '门槛(元)', '特典名称', '单价(元)', '认购数量']);
       host.appendChild(row);
@@ -331,7 +342,12 @@
 
       var head = el('div', 'pkg-head');
       card.dataset.packageIndex=pi;card.tabIndex=-1;
-      head.appendChild(el('span', 'pkg-id', pkg.package_id));
+      var name = inputEl('text', pkg.package_id, '包名称', function(value){
+        var old=pkg.package_id;pkg.package_id=value;
+        if(!Object.prototype.hasOwnProperty.call(state.orderNumbers,value) && state.table.packages.filter(function(p){return p.package_id===old;}).length===0)state.orderNumbers[value]=state.orderNumbers[old] || '';
+        renderOrderNumbers();scheduleDraftSave();
+      });
+      name.className='pkg-id';name.dataset.field='package_name';name.setAttribute('aria-label','第 '+(pi+1)+' 包名称');head.appendChild(name);
       head.appendChild(el('span', 'spacer'));
       head.appendChild(buttonEl('删包', 'small danger', function () {
         state.table.packages.splice(pi, 1); renderOrderTable(); evaluate(true); scheduleDraftSave();
@@ -360,42 +376,48 @@
     var host = $('order-numbers');
     if (!host) return;
     host.innerHTML = '';
-    (state.table.packages || []).filter(function (pkg) {
-      return (pkg.lines || []).some(function (line) { return line.qty > 0; });
-    }).forEach(function (pkg) {
+    (state.table.packages || []).forEach(function (pkg,pi) {
+      if(!(pkg.lines || []).some(function(line){return line.qty>0;}))return;
       var row = el('div', 'row');
+      row.dataset.packageIndex=pi;
       row.appendChild(el('span', 'mono', pkg.package_id));
-      row.appendChild(inputEl('text', state.orderNumbers[pkg.package_id] || '', '订单号', function (value) {
+      var number=inputEl('text', state.orderNumbers[pkg.package_id] || '', '填写订单号', function (value) {
         state.orderNumbers[pkg.package_id] = value.trim();
         scheduleDraftSave();
-      }));
+      });
+      number.dataset.field='order_number';number.setAttribute('aria-label',pkg.package_id+' 的订单号');row.appendChild(number);
       host.appendChild(row);
     });
   }
 
   function applyLockState() {
+    var frozen=state.locked || state.loading || state.loadFailed || state.reviewing || state.lockPending;
     var host = $('order');
     if (host) {
       Array.prototype.forEach.call(host.querySelectorAll('input,button,select'), function (control) {
-        if (control.id !== 'unlock-order') control.disabled = !!state.locked;
+        if (control.id !== 'unlock-order' && !control.closest('#order-issues')) control.disabled = frozen;
       });
     }
-    Array.prototype.forEach.call(document.querySelectorAll('.line-handle'),function(handle){handle.draggable=!state.locked;handle.setAttribute('aria-disabled',String(!!state.locked));});
+    Array.prototype.forEach.call(document.querySelectorAll('.line-handle'),function(handle){handle.draggable=!frozen;handle.setAttribute('aria-disabled',String(!!frozen));});
     var configHost = $('settle');
     if (configHost) {
       Array.prototype.forEach.call(configHost.querySelectorAll('input,button,select'), function (control) {
-        control.disabled = !!state.locked;
+        control.disabled = frozen;
       });
     }
     $('lock-order').classList.toggle('hidden', !!state.locked);
     $('unlock-order').classList.toggle('hidden', !state.locked);
-    $('save').disabled = !!state.locked;
+    $('save').disabled = frozen;
     $('draft-status').textContent = state.locked ? '已锁定 · revision ' + state.draftRevision :
-      (state.draftConflict ? '保存冲突 · 本地草稿保留' : state.draftEdits!==state.savedEdits ? '有未保存改动' : '已保存 · revision ' + state.draftRevision);
+      (state.draftConflict ? '保存冲突 · 本地草稿保留' : state.saving ? '保存中…' : state.sourceConflict ? '来源已变化 · 输入保留' : state.draftEdits!==state.savedEdits ? '有未保存改动' : '已保存 · revision ' + state.draftRevision);
+    $('lock-order').disabled=frozen || state.needsReview || state.sourceConflict || state.draftConflict;
+    $('review-order').disabled=frozen || state.draftConflict;
+    renderReview();
   }
 
   function lineRow(pkg, line, pi, li) {
     var row = el('div', 'line' + (line.is_gift ? ' gift' : ''));
+    row.dataset.lineIndex=li;
     var handle = el('span', 'line-handle', '⠿');
     handle.draggable = !state.locked;
     handle.title = '拖到其它包';
@@ -424,6 +446,7 @@
       scheduleEval();
     });
     qty.min = '0';
+    qty.step = '1';
     row.appendChild(labelField(qty, '数量'));
 
     row.appendChild(labelField(inputEl('number', line.unit_price_cents ? line.unit_price_cents / 100 : '', '单价(元)', function (v) {
@@ -454,11 +477,97 @@
     var target=selectEl(choices,'',function(){});target.setAttribute('aria-label','移动 '+(item && item.name || line.item_id)+' 到包');
     move.appendChild(target);move.appendChild(buttonEl('移动','small',function(){if(target.value==='')return;moveLine(pi,li,intOf(target.value,-1));}));
     row.appendChild(move);
+    var fields=row.querySelectorAll('.cfg-field');['item','subitem','quantity','price'].forEach(function(field,i){var control=fields[i] && fields[i].querySelector('input,select');if(control)control.dataset.field=field;});
     return row;
   }
 
+  function applyReview(view) {
+    state.statusRequest=(state.statusRequest || 0)+1;
+    state.currentSourceToken=view.source_token || state.currentSourceToken;
+    state.needsReview=!!view.needs_review;state.resultStale=!!view.result_stale;
+    if(Array.isArray(view.issues))state.issues=view.issues;
+  }
+
+  function renderReview() {
+    if(!$('review-status'))return;
+    var changed=state.needsReview || state.sourceConflict;
+    $('order-review').classList.toggle('needs-review',changed);
+    $('review-status').textContent=state.loading ? '正在核对来源…' : state.loadFailed ? '草稿读取失败 · 尚不能写入' : state.reviewing ? '正在保留订单并重新核对…' : changed ? '上游数据已变化 · 需要重新核对' : '订单来源已核对'+(state.draftEdits===state.savedEdits && state.issues.length ? ' · 还有 '+state.issues.length+' 项订单问题' : '');
+    $('result-source').textContent=state.resultStale || changed ? '旧来源试算 · 待复核' : state.draftEdits!==state.savedEdits ? '当前输入 · 尚未保存' : '';
+    $('review-order').hidden=!changed;
+    var issues=state.draftEdits===state.savedEdits ? state.issues.slice() : [];
+    if(state.draftEdits!==state.savedEdits){
+      var numbers={},prices={};
+      state.table.packages.forEach(function(pkg,pi){
+        if(!pkg.lines.some(function(l){return l.qty>0;}))return;
+        var number=(state.orderNumbers[pkg.package_id] || '').trim();
+        if(!number || numbers[number])issues.push({code:'order_number',message:pkg.package_id+(number?'：订单号重复':'：请填写订单号'),package_index:pi,field:'order_number'});
+        numbers[number]=true;
+        pkg.lines.forEach(function(line,li){
+          if(!line.qty || line.is_gift)return;
+          var key=JSON.stringify([line.item_id,line.subitem_id]),item=state.catalog.find(function(i){return i.item_id===line.item_id;});
+          if(line.unit_price_cents<=0 || (prices[key]!=null && prices[key]!==line.unit_price_cents))issues.push({code:'price',message:pkg.package_id+'：'+(item && item.name || line.item_id)+' 标价需大于零且各包一致',package_index:pi,line_index:li,field:'price'});
+          prices[key]=line.unit_price_cents;
+        });
+      });
+    }
+    var host=$('order-issues'),signature=JSON.stringify(issues);
+    if(host.dataset.signature===signature)return;
+    host.dataset.signature=signature;host.replaceChildren();
+    issues.forEach(function(issue){var btn=buttonEl('↳ '+issue.message,'small',function(){locateIssue(issue);});btn.dataset.issue=issue.code;host.appendChild(btn);});
+  }
+
+  function locateIssue(issue) {
+    var target;
+    if(issue.field==='allocation')target=$('load-allocation');
+    else if(issue.field==='order_number')target=$('order-numbers').querySelector('[data-package-index="'+issue.package_index+'"] input');
+    else {
+      var pkg=$('order-table').querySelector('[data-package-index="'+issue.package_index+'"]');
+      var row=issue.line_index==null ? pkg : pkg && pkg.querySelector('[data-line-index="'+issue.line_index+'"]');
+      target=row && (row.querySelector('[data-field="'+issue.field+'"]') || row.querySelector('input,select') || row);
+    }
+    if(!target)return;
+    target.scrollIntoView({block:'center',behavior:'instant'});target.focus({preventScroll:true});
+    target.classList.add('order-issue-target');setTimeout(function(){target.classList.remove('order-issue-target');},1800);
+  }
+
+  function refreshStatus() {
+    if(state.loading || !state.roundId || state.statusBusy)return Promise.resolve();
+    var generation=state.generation,round=state.roundId,request=state.statusRequest=(state.statusRequest || 0)+1;
+    state.statusBusy=true;
+    return P.get('/api/settlement/status').then(function(view){
+      if(generation!==state.generation || request!==state.statusRequest)return;
+      if(view.round_id!==round){state.draftConflict=true;showBanner('当前激活轮次已切换；本页输入保留，请重新读取正确轮次后再操作。',true);applyLockState();return;}
+      if(view.revision<state.draftRevision)return;
+      if(view.revision>state.draftRevision && !state.saving)state.draftConflict=true;
+      if(view.source_token!==state.sourceToken)state.sourceConflict=true;
+      state.locked=!!view.locked;applyReview(view);applyLockState();
+    }).catch(function(){
+      if(generation===state.generation)$('review-status').textContent='来源状态暂不可用 · 锁定时仍会严格校验';
+    }).finally(function(){state.statusBusy=false;});
+  }
+
+  function recheckOrder() {
+    if(state.locked || state.loading || state.reviewing || state.draftConflict)return;
+    if(state.rulesBaseline && JSON.stringify(requestConfig())!==state.rulesBaseline){showBanner('请先保存或放弃结算规则草稿，再重新核对订单。当前订单保留。',true);$('save').focus();return;}
+    var generation=state.generation,round=state.roundId;
+    state.reviewing=true;state.evaluation++;
+    if(state.evalTimer){clearTimeout(state.evalTimer);state.evalTimer=null;}
+    applyLockState();
+    state.draftSaveChain.catch(function(){}).then(function(){return Promise.all([P.get('/api/config'),P.get('/api/settlement/status')]);}).then(function(values){
+      var cfg=values[0],view=values[1];
+      if(generation!==state.generation || cfg.config.round.round_id!==round || view.round_id!==round)throw new Error('轮次已变化，未复核其他轮次');
+      if(cfg.revision!==view.config_revision)throw new Error('读取期间配置又有变化，请重试；订单未替换');
+      if(view.revision!==state.draftRevision)throw new Error('服务器订单已被其他操作修改；输入保留，请先核对版本冲突');
+      state.config=normalizeConfig(cfg.config.settlement);state.catalog=cfg.config.round.items || [];state.revision=cfg.revision;
+      state.serverRules=P.deepClone(cfg.config.settlement);state.savedRules=P.deepClone(state.config);state.rulesBaseline=JSON.stringify(requestConfig());
+      renderConfig();setRev();applyReview(view);
+      return saveDraft(true);
+    }).then(function(){if(generation===state.generation){hideBanner();P.toast('已按当前来源重新核对；排包、标价与订单号均保留','ok');}}).catch(function(err){if(generation===state.generation)showBanner('重新核对未完成：'+P.errorText(err),true);}).finally(function(){if(generation===state.generation){state.reviewing=false;applyLockState();}});
+  }
+
   function moveLine(si, li, dst) {
-    if (state.locked || si < 0 || li < 0 || dst<0 || si === dst) return;
+    if (state.locked || state.loading || state.reviewing || state.lockPending || si < 0 || li < 0 || dst<0 || si === dst) return;
     var pkgs = state.table.packages;
     if (si >= pkgs.length || dst >= pkgs.length) return;
     var pkg = pkgs[si];
@@ -487,6 +596,10 @@
     scheduleDraftSave();
   }
 
+  function scheduleRuleEval() {
+    evaluate(false);renderReview();
+  }
+
   function scheduleEval() {
     evaluate(false);
     scheduleDraftSave();
@@ -497,17 +610,21 @@
     state.draftEdits++;
     if (state.draftTimer) clearTimeout(state.draftTimer);
     $('draft-status').textContent = '等待保存…';
+    renderReview();
     state.draftTimer = setTimeout(function () { saveDraft().catch(function(){}); }, 500);
   }
 
-  function saveDraft() {
+  function saveDraft(ackReview) {
     if (state.locked) return Promise.resolve(null);
+    if (state.loading || state.loadFailed) return Promise.reject(new Error('草稿尚未成功读取，未写入订单'));
     if (state.draftTimer) { clearTimeout(state.draftTimer); state.draftTimer = null; }
-    var generation=state.generation, round=state.roundId, base=P.resolveApiBase(), edit=state.draftEdits;
-    var payload={round_id:round,order_table:P.deepClone(state.table),selected_strategy:state.selectedStrategy,order_numbers:P.deepClone(state.orderNumbers)};
+    var generation=state.generation, round=state.roundId, base=P.resolveApiBase(), edit=state.draftEdits, knownSource=state.currentSourceToken;
+    var payload={round_id:round,source_token:ackReview ? state.currentSourceToken : state.sourceToken,ack_review:!!ackReview,order_table:P.deepClone(state.table),selected_strategy:state.selectedStrategy,order_numbers:P.deepClone(state.orderNumbers)};
     state.draftSaveChain = state.draftSaveChain.catch(function () { return null; }).then(function () {
       if(generation!==state.generation || round!==state.roundId || base!==P.resolveApiBase()) throw new Error('旧页面保存已取消，未写入其他轮次或实例');
       if(state.draftConflict) throw new Error('请先处理保存冲突，本地草稿仍保留');
+      if(state.sourceConflict && !ackReview)throw new Error('来源已变化，请先重新核对；输入保留');
+      state.saving=true;
       $('draft-status').textContent = '保存中…';
       payload.revision=state.draftRevision;
       return P.put(base+'/api/settlement/draft', payload).then(function (res) {
@@ -516,6 +633,10 @@
         if(draft.round_id!==round) throw new Error('服务返回的轮次不匹配，未套用结果');
         state.draftRevision = draft.revision || state.draftRevision;
         state.savedEdits=edit;
+        var changedDuringSave=state.currentSourceToken!==knownSource && state.currentSourceToken!==payload.source_token,currentSource=state.currentSourceToken;
+        state.sourceToken=payload.source_token;state.sourceConflict=changedDuringSave;
+        applyReview(res);
+        if(changedDuringSave){state.currentSourceToken=currentSource;state.needsReview=true;state.resultStale=true;}
         if(edit===state.draftEdits)state.result = draft.last_result || state.result;
         state.locked = !!draft.locked;
         renderResult();
@@ -523,17 +644,19 @@
         return res;
       }).catch(function (err) {
         if(generation!==state.generation)throw err;
-        state.draftConflict=true;
+        if(err.status===409 && err.data && err.data.error==='settlement_source_changed'){
+          state.sourceConflict=true;state.needsReview=true;state.resultStale=true;
+        }else if(err.status===409)state.draftConflict=true;
         $('draft-status').textContent = '保存失败';
         // A conflict must not replace the administrator's unsaved order table.
         showBanner('草稿保存失败：' + P.errorText(err), true);
         throw err;
-      });
+      }).finally(function(){if(generation===state.generation){state.saving=false;applyLockState();}});
     });
     return state.draftSaveChain;
   }
 
-  function applyDraft(draft) {
+  function applyDraft(draft,view) {
     if(draft.round_id && draft.round_id!==state.roundId)throw new Error('轮次已切换，请重新载入；未套用另一轮草稿');
     state.draftRevision = draft.revision || 0;
     state.table = draft.order_table || { packages: [] };
@@ -541,7 +664,8 @@
     state.selectedStrategy = draft.selected_strategy || null;
     state.orderNumbers = draft.order_numbers || {};
     state.locked = !!draft.locked;
-    state.savedEdits=state.draftEdits=0;state.draftConflict=false;
+    state.savedEdits=state.draftEdits=0;state.draftConflict=false;state.sourceConflict=false;
+    state.sourceToken=(view && view.source_token) || '';applyReview(view || {});
     renderOrderTable();
     renderResult();
     applyLockState();
@@ -552,29 +676,43 @@
     var generation=state.generation;
     return P.get('/api/settlement/draft').then(function (res) {
       if(generation!==state.generation)return;
-      applyDraft(res.draft || {});
+      applyDraft(res.draft || {},res);
+      state.loadFailed=false;
       $('draft-status').textContent = state.locked ? '已锁定 · revision ' + state.draftRevision : '已保存 · revision ' + state.draftRevision;
     }).catch(function (err) {
+      if(generation!==state.generation)return;
+      state.loadFailed=true;
       showBanner('结算草稿载入失败：' + P.errorText(err), true);
-    }).then(function () { if(generation===state.generation)state.suppressSave = false; });
+    }).then(function () { if(generation===state.generation){state.suppressSave = false;state.loading=false;applyLockState();} });
   }
 
   function lockOrder() {
+    if(state.lockPending || state.locked || state.loading)return;
+    if(state.rulesBaseline && JSON.stringify(requestConfig())!==state.rulesBaseline){showBanner('请先保存或放弃结算规则草稿，再锁定订单。',true);$('save').focus();return;}
+    var generation=state.generation,round=state.roundId;
+    state.lockPending=true;state.evaluation++;applyLockState();
     saveDraft().then(function () {
-      return P.post('/api/settlement/lock', { round_id:state.roundId,revision: state.draftRevision });
+      if(generation!==state.generation || round!==state.roundId)throw new Error('页面上下文已改变，未锁定其他轮次');
+      return P.post('/api/settlement/lock', { round_id:round,revision: state.draftRevision,source_token:state.sourceToken });
     }).then(function (res) {
-      applyDraft(res.draft || {});
+      if(generation!==state.generation)return;
+      applyDraft(res.draft || {},res);
       hideBanner();
       P.toast('订单已锁定并持久化', 'ok');
     }).catch(function (err) {
+      if(generation!==state.generation)return;
+      if(err.data && err.data.issues){state.issues=err.data.issues;renderReview();}
+      refreshStatus();
       showBanner('锁定失败：' + P.errorText(err), true);
-    });
+    }).finally(function(){if(generation===state.generation){state.lockPending=false;applyLockState();}});
   }
 
   function unlockOrder() {
     if (!window.confirm('确认解锁？解锁后消息、配置和下单表可继续修改。')) return;
+    var generation=state.generation;
     P.post('/api/settlement/unlock', { round_id:state.roundId,revision: state.draftRevision }).then(function (res) {
-      applyDraft(res.draft || {});
+      if(generation!==state.generation)return;
+      applyDraft(res.draft || {},res);
       hideBanner();
       P.toast('已解锁', 'ok');
     }).catch(function (err) { showBanner('解锁失败：' + P.errorText(err), true); });
@@ -753,15 +891,18 @@
       P.toast('请先生成下单表');
       return;
     }
+    var generation=state.generation,edit=state.draftEdits,rules=JSON.stringify(requestConfig());
     ['gift_max', 'discount_max'].forEach(function (s) {
       state.plans[s] = { loading: true };
       renderPlan(s);
       P.post('/api/settlement/plan', { strategy: s, order_table: state.table, config: requestConfig() })
         .then(function (res) {
-          state.plans[s] = { data: res };
+          if(generation!==state.generation || edit!==state.draftEdits || rules!==JSON.stringify(requestConfig()))return;
+          state.plans[s] = { data: res,generation:generation,edit:edit,rules:rules,source:state.sourceToken };
           renderPlan(s);
         })
         .catch(function (err) {
+          if(generation!==state.generation)return;
           var msg = err.status === 501
             ? '后端 planner 未就绪（501）：' + ((err.data && err.data.error) || '')
             : P.errorText(err);
@@ -797,6 +938,7 @@
 
     var best = res.best || { packages: [] };
     var apply = buttonEl('应用此方案', 'small primary', function () {
+      if(state.locked || st.generation!==state.generation || st.edit!==state.draftEdits || st.rules!==JSON.stringify(requestConfig()) || st.source!==state.sourceToken || state.needsReview || state.sourceConflict){showBanner('方案来源或输入已变化，请重新核对并重新运行策略；当前订单保留。',true);return;}
       if (!res.invariants_ok) { showBanner('方案未通过价格守恒校验，禁止应用。', true); return; }
       state.table = P.deepClone(best);
       state.selectedStrategy = res.strategy || s;
@@ -810,64 +952,38 @@
     body.appendChild(el('div', 'note', '方案由 T5 planner（DFS/回溯）产出；包名为自动生成，可在表内继续拖拽调整。'));
   }
 
-  function loadSample() {
-    state.catalog = state.catalog.filter(function (item) { return item.item_id !== 'item_a' && item.item_id !== 'item_b'; }).concat([
-      {item_id:'item_a',name:'示例商品 A',subitems:[{subitem_id:'v1',name:'款式一'},{subitem_id:'v2',name:'款式二'}]},
-      {item_id:'item_b',name:'示例商品 B',subitems:[]}
-    ]);
-    state.config = normalizeConfig({
-      pricing: [{ item_id: 'item_a', subitem_id: null, mode: 'AdjustBy', value: 1000 }],
-      discounts: [{ rule_id: 'd_whole', kind: 'WholeOrder', amount: 0, threshold: null, ratio_ppm: 100000, shares: -1 }],
-      scope_mode: 'ExcludeGift',
-      gift_tiers: [
-        { tier_id: 't0', threshold: 0, gift_name: '特典-基础', unit_price: 1000, claimed: 3 },
-        { tier_id: 't300', threshold: 30000, gift_name: '特典-满300', unit_price: 3000, claimed: 2 },
-        { tier_id: 't500', threshold: 50000, gift_name: '特典-满500', unit_price: 5000, claimed: 1 }
-      ],
-      reduce_average: { include_gift_price: false }
-    });
-    state.table = {
-      packages: [
-        { package_id: '示例用户01#p1', lines: [{ item_id: 'item_a', subitem_id: 'v1', qty: 1, unit_price_cents: 50100, is_gift: false }] },
-        { package_id: '示例用户02#p2', lines: [{ item_id: 'item_a', subitem_id: 'v2', qty: 1, unit_price_cents: 30000, is_gift: false }] },
-        { package_id: '示例用户03#p3', lines: [{ item_id: 'item_b', subitem_id: null, qty: 2, unit_price_cents: 15000, is_gift: false }] }
-      ]
-    };
-    renderConfig();
-    renderOrderTable();
-    evaluate(true);
-    scheduleDraftSave();
-    P.toast('已载入占位示例', 'ok');
-  }
-
   function fromAllocation() {
+    if(state.locked || state.loading)return;
+    if(state.table.packages.length && !window.confirm('将重新生成排包，替换当前手工排包；保留已有订单号。是否继续？'))return;
+    var generation=state.generation,round=state.roundId,edit=state.draftEdits;
     P.post('/api/settlement/from-allocation', {}).then(function (res) {
+      if(generation!==state.generation || round!==state.roundId || edit!==state.draftEdits)throw new Error('等待生成时输入或轮次已变化，当前草稿保留');
+      if(res.round_id!==round)throw new Error('当前轮次已切换，未套用其他轮次排位');
       if (res.empty || !res.order_table || !res.order_table.packages.length) {
-        showBanner('当前排位为空，无法生成下单表。可先用模拟器产生排位，或载入占位示例。', true);
+        showBanner('当前排位为空，未替换订单。请先在排谷页核对当前轮的排位。', true);
         return;
       }
-      state.table = res.order_table;
-      renderOrderTable();
-      evaluate(true);
-      scheduleDraftSave();
-      P.toast('已从当前排位生成 ' + state.table.packages.length + ' 个包', 'ok');
-    }).catch(function (err) {
-      showBanner('生成失败：' + P.errorText(err), true);
-    });
+      state.currentSourceToken=state.sourceToken=res.source_token;state.sourceConflict=false;
+      state.table = res.order_table;state.selectedStrategy=null;
+      renderOrderTable();evaluate(true);scheduleDraftSave();
+      P.toast('已从当前排位生成 ' + state.table.packages.length + ' 个包；已有订单号保留，请核对', 'ok');
+    }).catch(function (err) { if(generation===state.generation)showBanner('生成失败：' + P.errorText(err), true); });
   }
 
   function loadConfig() {
     var generation=++state.generation;
+    state.loading=true;applyLockState();
     if(state.draftTimer){clearTimeout(state.draftTimer);state.draftTimer=null;}
     if(state.evalTimer){clearTimeout(state.evalTimer);state.evalTimer=null;}
     setConn('busy', '载入中…');
-    return P.get('/api/settlement/config').then(function (res) {
+    return P.get('/api/config').then(function (res) {
+      res={config:res.config.settlement,revision:res.revision,round_id:res.config.round.round_id,items:res.config.round.items};
       if(generation!==state.generation)return;
       if(state.roundId && state.roundId!==res.round_id){state.table={packages:[]};state.orderNumbers={};state.draftRevision=0;renderOrderTable();}
-      state.roundId=res.round_id || '';
+      state.roundId=res.round_id || '';state.catalog=res.items || [];
       state.revision = res.revision;
       state.config = normalizeConfig(res.config);
-      renderConfig();
+      renderConfig();applyLockState();
       state.rulesBaseline=JSON.stringify(requestConfig());state.serverRules=P.deepClone(res.config);state.savedRules=P.deepClone(state.config);
       setRev();
       setConn('ok', '配置已载入');
@@ -877,31 +993,6 @@
       setConn('bad', '配置载入失败');
       showBanner('结算配置载入失败：' + P.errorText(err), true);
     });
-  }
-
-  function loadMeta() {
-    P.get('/api/config').then(function (res) {
-      var cfg = res && res.config ? res.config : res;
-      var items = (cfg && cfg.round && cfg.round.items) || [];
-      state.catalog = items;
-      var itemList = $('item-ids');
-      var varList = $('subitem-ids');
-      itemList.innerHTML = '';
-      varList.innerHTML = '';
-      items.forEach(function (it) {
-        var o = document.createElement('option');
-        o.value = it.item_id;
-        if (it.name) o.label = it.name;
-        itemList.appendChild(o);
-        (it.subitems || []).forEach(function (v) {
-          var ov = document.createElement('option');
-          ov.value = v.subitem_id;
-          if (v.name) ov.label = v.name;
-          varList.appendChild(ov);
-        });
-      });
-      renderOrderTable();
-    }).catch(function () { /* 可选数据 */ });
   }
 
   function saveConfig() {
@@ -923,6 +1014,7 @@
       state.rulesBaseline=JSON.stringify(requestConfig());state.serverRules=P.deepClone(res.config.settlement);state.savedRules=P.deepClone(state.config);
       setRev();
       setConn('ok', '已保存');
+      refreshStatus();
       hideBanner();
       P.toast('结算配置已保存', 'ok');
     }).catch(function (err) {
@@ -955,7 +1047,7 @@
     $('load').addEventListener('click', function(){P.protectAction(function(){return loadConfig().then(loadDraft);}).catch(function(){});});
     $('save').addEventListener('click', function(){saveConfig().catch(function(){});});
     $('evaluate').addEventListener('click', function () { evaluate(true); });
-    $('load-sample').addEventListener('click', loadSample);
+    $('review-order').addEventListener('click', recheckOrder);
     $('load-allocation').addEventListener('click', fromAllocation);
     $('pkg-add').addEventListener('click', addPackage);
     $('run-plans').addEventListener('click', runPlans);
@@ -980,16 +1072,16 @@
       renderConfig();
     });
     $('scope-mode').addEventListener('change', function (e) {
-      state.config.scope_mode = e.target.value; scheduleEval();
+      state.config.scope_mode = e.target.value; scheduleRuleEval();
     });
     $('reduce-include').addEventListener('change', function (e) {
-      state.config.reduce_average.include_gift_price = e.target.checked; scheduleEval();
+      state.config.reduce_average.include_gift_price = e.target.checked; scheduleRuleEval();
     });
 
     renderConfig();
     renderOrderTable();
-    loadMeta();
     loadConfig().then(loadDraft);
+    if(window.PAIGU_SHELL)PAIGU_SHELL.onWorkflow(function(){refreshStatus();});
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

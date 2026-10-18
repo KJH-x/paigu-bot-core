@@ -30,6 +30,7 @@ pub enum ServiceError {
     /// 乐观并发：`revision` 不一致 → 409 `stale_revision`。
     StaleRevision(u64),
     Conflict(Value),
+    Validation(Value),
     Unprocessable(String),
     Locked(String),
     Upstream(String),
@@ -43,6 +44,7 @@ impl ServiceError {
             ServiceError::NotFound(message) => api_not_found(message),
             ServiceError::StaleRevision(revision) => api_stale_revision(revision),
             ServiceError::Conflict(value) => (StatusCode::CONFLICT, Json(value)),
+            ServiceError::Validation(value) => (StatusCode::UNPROCESSABLE_ENTITY, Json(value)),
             ServiceError::Unprocessable(message) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({ "error": message })),

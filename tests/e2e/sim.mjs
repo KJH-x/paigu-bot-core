@@ -16,6 +16,7 @@ import { verifyWorkspaceNavigation } from './workspace-navigation.mjs';
 import { verifyScopedSettings } from './scoped-settings.mjs';
 import { verifyPolicyReturn } from './message-policy-return.mjs';
 import { verifyMemberBoundaries } from './member-boundaries.mjs';
+import { verifySettlementReview } from './settlement-review.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -680,7 +681,11 @@ function buildCases() {
             await page.waitForFunction(() => document.querySelector('#wf-api')?.textContent.includes('正常'));
             if (route === 'replay') await page.waitForFunction(() => document.querySelector('#source-info')?.textContent.includes('当前激活轮次'));
             if (route === 'settlement') {
-              await page.click('#load-sample');
+              const view=await api(ctx.base,'GET','/api/settlement/draft');
+              const cfg=(await api(ctx.base,'GET','/api/config')).config;
+              const item=cfg.round.items[0],variant=item.subitems[0];
+              await api(ctx.base,'PUT','/api/settlement/draft',{round_id:view.round_id,revision:view.revision,source_token:view.source_token,order_table:{packages:[{package_id:'占位包',lines:[{item_id:item.item_id,subitem_id:variant.subitem_id,qty:1,unit_price_cents:1234,is_gift:false}]}]},order_numbers:{'占位包':'ORDER-01'}});
+              await page.reload();
               await page.waitForSelector('#order-table .pkg');
               await page.waitForFunction(() => document.querySelector('#draft-status')?.textContent.includes('已保存'));
             }
@@ -722,6 +727,7 @@ function buildCases() {
     { name: '系统四分区、作用域冲突、三选草稿与实例维护取消', fn: verifyScopedSettings },
     { name: '权限设置携草稿返回、筛选定位、复盘到处理与版本冲突', fn: verifyPolicyReturn },
     { name: '成员请求上下文、只读建议预览、迟到保护与断连接收器', fn: verifyMemberBoundaries },
+    { name: '结算来源复核、保留订单、问题定位、独立规则与并发守卫', fn: verifySettlementReview },
     {
       name: 'remote 数据源',
       fn: async (page, ctx) => {
@@ -760,7 +766,8 @@ async function main() {
   let browser = null;
   let remote = null;
   let failures = 0;
-  const cases = buildCases();
+  const cases = buildCases().filter(testCase=>!process.env.PAIGU_E2E_FILTER || testCase.name.includes(process.env.PAIGU_E2E_FILTER));
+  if(!cases.length)throw new Error('PAIGU_E2E_FILTER did not match any case');
 
   try {
     const server = startServer(port, cfgPath);
@@ -812,7 +819,7 @@ async function main() {
         log(`PASS ${testCase.name}`);
       } catch (err) {
         failures += 1;
-        log(`FAIL ${testCase.name} ${err && err.message ? err.message : err}`);
+        log(`FAIL ${testCase.name} ${err && err.stack ? err.stack : err}`);
       }
     }
   } catch (err) {

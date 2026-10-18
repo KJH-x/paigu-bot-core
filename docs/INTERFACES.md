@@ -332,8 +332,9 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `expected_quantities` / `table_quantities` | 两侧数量统计 |
 | `POST /api/settlement/completeness` | 返回 CompletenessReport |
 | `POST /api/settlement/evaluate` | 带 allocation 时未完成排包 -> 400 拒绝计算 |
-| `GET/PUT /api/settlement/draft` | 按轮次持久化订单表、试算、策略、订单号；独立 revision |
-| `POST /api/settlement/lock` | 校验排包、价格、每包唯一订单号后持久化锁定；失败返回 409/422 |
+| `GET/PUT /api/settlement/draft` | 按轮次持久化订单表、试算、策略、订单号；独立 revision；PUT 带 round_id/revision/source_token，显式 ack_review 才更新复核基线 |
+| `GET /api/settlement/status` | 只读来源摘要、配置/草稿版本、锁态、needs_review/result_stale 和可定位 issues；不返回完整订单 |
+| `POST /api/settlement/lock` | round_id/revision/source_token 三项守卫；已复核且排包/价格/唯一订单号全部通过才持久化锁定；409 来源/版本冲突，422 含结构化 issues |
 | `POST /api/settlement/unlock` | 明确解锁并保留草稿与订单号 |
 | `POST /api/settlement/plan` | 订单表价格优先；非赠品零价、价格冲突或规划前后不守恒返回 422 |
 
@@ -447,6 +448,20 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 第八批实施合同：跨页权限设置仅传不可预测 handoff 令牌，草稿、原记录身份/版本、API/轮次和滚动/筛选保存在本标签 sessionStorage（有时限）。设置不自动添名单或激活轮；返回重新读取当前动作/权限，记录版本冲突不自动套旧草稿。远程快照/导入复盘只读，不提供可写往返。消息深链仅作读取/定位，仍经现有 record_id/轮次/版本写守卫；不新增 seq 写旁路，不调用模型。
 
 第九批成员接口实施合同：`GET /api/members` 增 `members_fingerprint`（对应一次读取的来源/群属/成员快照）。`POST /api/members/refresh` 与 `/cn-suggest` 必需 `round_id/config_revision/members_fingerprint`；缺失 400，过期 409。建议仅显式请求且模型启用时发送必要的成员标识/群名片，返回严格校验的建议和相同上下文，不保存/执行；等待期间配置或名单变化则拒绝套用。拉取只调用既有允许的 get_group_member_list；等待后在共同写锁内核对原上下文并原子写带群属/时间的私有缓存。旧数组仍可读，未知群属不伪造。此项不发送真实群消息，测试只用 mock 与占位缓存。
+
+第十批结算实施合同（2026-10-19）：草稿 GET 和新增只读 `/api/settlement/status` 返回当前 `source_token`、`needs_review/result_stale` 及可定位 `issues`。来源摘要绑定轮次/目录/权限/结算规则和实际分配，排除读取时间。草稿 PUT 必须带 `source_token`；旧来源 409 且保留本地输入与已存订单。仅显式 `ack_review:true` 在同一原子保存中将当前来源记为已复核，首份新草稿以当前来源建立基线；旧无来源草稿不伪装已复核。锁定也校验同一来源和草稿版本、完整性/价格/订单号；不能靠后台自动保存把依赖变化静默消除。重新核对保留手工排包和订单号，不自动重建、清空或改价。规则、排位变化只确定性计算，不调用模型。
+
+```rust
+// 服务层共用 MessageLog writer，先验证再原子持久化。
+DraftBody { round_id, revision, source_token, ack_review, order_table, order_numbers, selected_strategy }
+DraftRevisionBody { round_id, revision, source_token: Option<String> } // 锁定必需，解锁无需来源同代
+// SettlementDraft.schema_version = 1；新增字段缺失代表旧来源未知，不补造已复核。
+SettlementDraft { calculated_source: Option<String>, reviewed_source: Option<String>, .. }
+// 问题目标保留实际包/行下标（空包也计入），field = order_number/package_name/item/price/quantity/allocation。
+Issue { code, message, package_index, line_index, field, item_id, subitem_id }
+```
+
+草稿 GET/PUT/锁/解锁返回同一封装 `{draft,round_id,config_revision,revision,source_token,locked,needs_review,result_stale,issues}`；status 省略 draft。`source_token` 不含读取时间、投影生成时间及无关显示配置 revision，因此普通轮询不使复核过期。锁定需 reviewed_source 匹配当前来源，普通自动保存只更新 calculated_source。空包和无人认领的零价目录项不阻止锁定；实际有数量的非特典需非零且同商品同款价格一致。未知草稿版本或轮次错配拒绝读取，写/锁失败不覆盖原订单。
 
 第六批接线登记（2026-10-18，实施中）：全站工作区为总览、轮次与商品、排谷、结算与下单、复盘、成员、系统设置；新增 `/members`、`/index`、`/display` 短路由，`.html` 与 `/web/*.html` 继续兼容，根路径仍为排谷。admin 旧页转总览，保留查询和锚点；旧 settings 成员/消息锚点转唯一工作区。导航仅传白名单连接/展示上下文，绝不调用激活。成员页面沿用现有配置/成员接口，保存只合并 CN/别名，不替换其他分区；消息修改统一进入排谷动作编辑器。完成状态以验收记录为准。
 

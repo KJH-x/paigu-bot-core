@@ -34,6 +34,8 @@ mod boundary_tests;
 #[cfg(test)]
 mod member_tests;
 #[cfg(test)]
+mod settlement_tests;
+#[cfg(test)]
 mod snapshot_tests;
 #[cfg(test)]
 mod suggest_tests;

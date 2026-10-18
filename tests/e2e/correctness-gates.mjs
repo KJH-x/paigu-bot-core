@@ -9,7 +9,7 @@ async function api(base,method,route,body,status=200){
 export async function verifyCorrectnessGates(page,ctx){
   const initial=await api(ctx.base,'GET','/api/config'),round='e2e-correctness';
   const capture=async name=>{if(process.env.PAIGU_UI_CAPTURE_DIR){fs.mkdirSync(process.env.PAIGU_UI_CAPTURE_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.PAIGU_UI_CAPTURE_DIR,name+'.png')});}};
-  const draft=()=>api(ctx.base,'GET','/api/settlement/draft');
+  const draft=async()=>{const view=await api(ctx.base,'GET','/api/settlement/draft');view.draft.source_token=view.source_token;return view;};
   let locked=false;
   try{
     await api(ctx.base,'POST','/api/rounds',{round_id:round,title:'正确性门禁',category:'test',copy_from:initial.config.round.round_id});
@@ -63,7 +63,7 @@ export async function verifyCorrectnessGates(page,ctx){
     const line={item_id:'badge',subitem_id:'a',qty:1,unit_price_cents:1000,is_gift:false};
     const table={packages:[{package_id:'包甲',lines:[line]},{package_id:'包乙',lines:[structuredClone(line)]}]};
     let d=(await draft()).draft;
-    await api(ctx.base,'PUT','/api/settlement/draft',{round_id:round,revision:d.revision,order_table:table,order_numbers:{'包甲':'ORDER-01','包乙':'ORDER-02'}});
+    await api(ctx.base,'PUT','/api/settlement/draft',{round_id:round,revision:d.revision,source_token:d.source_token,order_table:table,order_numbers:{'包甲':'ORDER-01','包乙':'ORDER-02'}});
     await page.goto(`${ctx.base}/settlement.html?api=${encodeURIComponent(ctx.base)}#order`);
     await page.locator('#order-table .line-handle').first().waitFor();
     await page.locator('#order-table .line-handle').first().dragTo(page.locator('#order-table .pkg').nth(1));
@@ -72,7 +72,7 @@ export async function verifyCorrectnessGates(page,ctx){
     const dragged=(await draft()).draft.order_table;
     check(dragged.packages[1].lines[0].qty===2,'pointer drag moves full quantity');
     d=(await draft()).draft;
-    await api(ctx.base,'PUT','/api/settlement/draft',{round_id:round,revision:d.revision,order_table:table,order_numbers:{'包甲':'ORDER-01','包乙':'ORDER-02'}});
+    await api(ctx.base,'PUT','/api/settlement/draft',{round_id:round,revision:d.revision,source_token:d.source_token,order_table:table,order_numbers:{'包甲':'ORDER-01','包乙':'ORDER-02'}});
     await page.locator('#load').click();await page.waitForFunction(()=>document.querySelectorAll('#order-table .line').length===2);
     await page.locator('#order-table .line-move select').first().selectOption('1');
     await page.locator('#order-table .line-move button').first().click();
@@ -85,7 +85,7 @@ export async function verifyCorrectnessGates(page,ctx){
     check(await page.locator('#order-table .line-handle').evaluateAll(ns=>ns.every(n=>!n.draggable)),'locked handles are not draggable');
     check(await page.locator('#order-table .line-move button').first().isDisabled(),'locked alternate move is disabled');
     d=(await draft()).draft;
-    await api(ctx.base,'PUT','/api/settlement/draft',{round_id:round,revision:d.revision,order_table:table,order_numbers:d.order_numbers},423);
+    await api(ctx.base,'PUT','/api/settlement/draft',{round_id:round,revision:d.revision,source_token:d.source_token,order_table:table,order_numbers:d.order_numbers},423);
     await capture('g0-locked-order');
     await api(ctx.base,'POST','/api/settlement/unlock',{round_id:round,revision:d.revision});locked=false;
     // A preview must be explicit, stale previews must never overwrite new input.

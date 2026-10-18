@@ -46,6 +46,10 @@ pub struct SettlementDraft {
     #[serde(default)]
     pub last_result: Option<SettlementResult>,
     #[serde(default)]
+    pub calculated_source: Option<String>,
+    #[serde(default)]
+    pub reviewed_source: Option<String>,
+    #[serde(default)]
     pub selected_strategy: Option<String>,
     #[serde(default)]
     pub order_numbers: BTreeMap<String, String>,
@@ -64,6 +68,8 @@ impl SettlementDraft {
             revision: 0,
             order_table: OrderTable::default(),
             last_result: None,
+            calculated_source: None,
+            reviewed_source: None,
             selected_strategy: None,
             order_numbers: BTreeMap::new(),
             locked: false,
@@ -87,7 +93,18 @@ fn read_draft_unlocked(round_id: &str) -> Result<SettlementDraft, ServiceError> 
     }
     let raw =
         std::fs::read_to_string(path).map_err(|error| ServiceError::Internal(error.into()))?;
-    serde_json::from_str(&raw).map_err(|error| ServiceError::Internal(error.into()))
+    decode_draft(&raw, round_id)
+}
+
+fn decode_draft(raw: &str, round_id: &str) -> Result<SettlementDraft, ServiceError> {
+    let draft: SettlementDraft =
+        serde_json::from_str(raw).map_err(|error| ServiceError::Internal(error.into()))?;
+    if draft.schema_version != 1 || draft.round_id != round_id {
+        return Err(ServiceError::Unprocessable(
+            "结算草稿版本或轮次不匹配，未读取为有效草稿".into(),
+        ));
+    }
+    Ok(draft)
 }
 
 pub fn round_locked(round_id: &str) -> Result<bool, ServiceError> {
@@ -126,15 +143,32 @@ fn write_draft_checked(draft: &mut SettlementDraft, expected: u64) -> Result<(),
 }
 
 pub async fn get_draft(state: &ApiState) -> Result<Value, ServiceError> {
-    let round_id = state.cfg.get().await.round.round_id;
-    let draft = read_draft(&round_id)?;
-    Ok(json!({ "draft": draft }))
+    draft_view(state, true).await
+}
+
+pub async fn get_status(state: &ApiState) -> Result<Value, ServiceError> {
+    draft_view(state, false).await
+}
+
+async fn draft_view(state: &ApiState, include_draft: bool) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.get().await;
+    let draft = read_draft(&cfg.round.round_id)?;
+    review::response(
+        &draft,
+        &cfg,
+        &current_allocation(state).await?,
+        include_draft,
+    )
 }
 
 #[derive(Deserialize)]
 pub struct DraftBody {
     pub round_id: String,
     pub revision: u64,
+    pub source_token: String,
+    #[serde(default)]
+    pub ack_review: bool,
     pub order_table: OrderTable,
     #[serde(default)]
     pub selected_strategy: Option<String>,
@@ -155,23 +189,36 @@ pub async fn put_draft(state: &ApiState, body: DraftBody) -> Result<Value, Servi
         return Err(ServiceError::Locked("结算草稿已锁定".to_string()));
     }
     ensure_draft_revision(&draft, body.revision)?;
+    let allocation = current_allocation(state).await?;
+    let token = review::source_token(&cfg, &allocation)?;
+    review::ensure_source(&body.source_token, &token)?;
+    if body.ack_review
+        || (draft.revision == 0
+            && draft.order_table.packages.is_empty()
+            && draft.last_result.is_none())
+    {
+        draft.reviewed_source = Some(token.clone());
+    }
     let result = evaluate(
         &merge_catalog_pricing(cfg.settlement.clone(), &cfg.round),
         &body.order_table,
     );
     draft.order_table = body.order_table;
     draft.last_result = Some(result);
+    draft.calculated_source = Some(token);
     draft.selected_strategy = body.selected_strategy;
     draft.order_numbers = body.order_numbers;
     draft.updated_at_ms = crate::services::messages::now_ms();
     write_draft_checked(&mut draft, body.revision)?;
-    Ok(json!({ "draft": draft }))
+    review::response(&draft, &cfg, &allocation, true)
 }
 
 #[derive(Deserialize)]
 pub struct DraftRevisionBody {
     pub round_id: String,
     pub revision: u64,
+    #[serde(default)]
+    pub source_token: Option<String>,
 }
 
 pub async fn lock_draft(state: &ApiState, body: DraftRevisionBody) -> Result<Value, ServiceError> {
@@ -182,47 +229,31 @@ pub async fn lock_draft(state: &ApiState, body: DraftRevisionBody) -> Result<Val
     }
     let mut draft = read_draft(&cfg.round.round_id)?;
     ensure_draft_revision(&draft, body.revision)?;
+    let allocation = current_allocation(state).await?;
+    let token = review::source_token(&cfg, &allocation)?;
+    let expected = body
+        .source_token
+        .as_deref()
+        .ok_or_else(|| ServiceError::BadRequest("锁定需要当前来源 source_token".into()))?;
+    review::ensure_source(expected, &token)?;
     if draft.locked {
-        return Ok(json!({ "draft": draft }));
+        return review::response(&draft, &cfg, &allocation, true);
     }
-    let nonempty: Vec<_> = draft
-        .order_table
-        .packages
-        .iter()
-        .filter(|package| package.lines.iter().any(|line| line.qty > 0))
-        .collect();
-    if nonempty.is_empty() {
-        return Err(ServiceError::Unprocessable(
-            "没有可锁定的订单包".to_string(),
+    if draft.reviewed_source.as_deref() != Some(&token) {
+        return Err(ServiceError::Conflict(
+            json!({"error":"settlement_review_required","message":"上游数据已变化，请保留当前订单并重新核对后锁定","needs_review":true,"source_token":token}),
         ));
     }
-    let mut unique = BTreeSet::new();
-    let mut package_ids = BTreeSet::new();
-    for package in &nonempty {
-        if package.package_id.trim().is_empty() || !package_ids.insert(package.package_id.clone()) {
-            return Err(ServiceError::Unprocessable(
-                "订单包名称不能为空且必须唯一".to_string(),
-            ));
-        }
-        let number = draft
-            .order_numbers
-            .get(&package.package_id)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                ServiceError::Unprocessable(format!("订单包 {} 缺少订单号", package.package_id))
-            })?;
-        if !unique.insert(number.to_string()) {
-            return Err(ServiceError::Unprocessable(format!("订单号重复：{number}")));
-        }
-    }
-    let allocation = current_allocation(state).await?;
-    let completeness = check_completeness(&draft.order_table, &allocation);
-    if !completeness.complete {
-        return Err(ServiceError::Unprocessable(format!(
-            "排包未完成：{}",
-            completeness.messages.join("；")
-        )));
+    let issues = review::issues(
+        &draft.order_table,
+        &draft.order_numbers,
+        &allocation,
+        &cfg.round,
+    );
+    if !issues.is_empty() {
+        return Err(ServiceError::Validation(
+            json!({"error":"settlement_invalid","message":"订单尚有待处理问题，请按清单定位修正","issues":issues}),
+        ));
     }
     let prices = prices_from_order_table(&draft.order_table)?;
     validate_prices_for_allocation(&allocation, &prices)?;
@@ -230,6 +261,7 @@ pub async fn lock_draft(state: &ApiState, body: DraftRevisionBody) -> Result<Val
         &merge_catalog_pricing(cfg.settlement.clone(), &cfg.round),
         &draft.order_table,
     ));
+    draft.calculated_source = Some(token);
     draft.locked = true;
     let now = crate::services::messages::now_ms();
     draft.locked_at_ms = Some(now);
@@ -237,7 +269,7 @@ pub async fn lock_draft(state: &ApiState, body: DraftRevisionBody) -> Result<Val
     write_draft_checked(&mut draft, body.revision)?;
     state.pipeline.restore_settlement_lock(true).await;
     state.pipeline.set_locked_locked(&cfg, true).await?;
-    Ok(json!({ "draft": draft }))
+    review::response(&draft, &cfg, &allocation, true)
 }
 
 pub async fn unlock_draft(
@@ -257,7 +289,7 @@ pub async fn unlock_draft(
     draft.updated_at_ms = crate::services::messages::now_ms();
     write_draft_checked(&mut draft, body.revision)?;
     state.pipeline.set_locked_locked(&cfg, false).await?;
-    Ok(json!({ "draft": draft }))
+    review::response(&draft, &cfg, &current_allocation(state).await?, true)
 }
 
 fn ensure_draft_revision(draft: &SettlementDraft, expected: u64) -> Result<(), ServiceError> {
@@ -586,18 +618,24 @@ pub async fn from_allocation(
     state: &ApiState,
     body: FromAllocationBody,
 ) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.get().await;
+    let allocation = current_allocation(state).await?;
+    let token = review::source_token(&cfg, &allocation)?;
     let (version, board) = state.pipeline.board().await;
     if board.is_null() {
         return Ok(json!({
             "order_table": OrderTable::default(),
             "version": version,
             "empty": true,
+            "round_id": cfg.round.round_id,
+            "source_token": token,
         }));
     }
     let snapshot: AllocationSnapshot =
         serde_json::from_value(board).map_err(|e| ServiceError::Internal(e.into()))?;
     let prices = if body.prices.is_empty() {
-        state.cfg.get().await.round.to_unit_prices()
+        cfg.round.to_unit_prices()
     } else {
         body.prices
     };
@@ -607,6 +645,8 @@ pub async fn from_allocation(
         "order_table": order_table,
         "version": version,
         "empty": empty,
+        "round_id": cfg.round.round_id,
+        "source_token": token,
     }))
 }
 
@@ -673,165 +713,7 @@ pub fn order_table_to_allocation(table: &OrderTable) -> AllocationSnapshot {
     }
 }
 
+mod review;
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::settlement::{GiftTier, Line, Package};
-
-    #[test]
-    fn parse_strategy_accepts_known_values() {
-        assert!(matches!(
-            parse_strategy("gift_max"),
-            Ok(planner::Strategy::GiftMax)
-        ));
-        assert!(matches!(
-            parse_strategy("discount_max"),
-            Ok(planner::Strategy::DiscountMax)
-        ));
-        assert!(parse_strategy("nope").is_err());
-    }
-
-    #[test]
-    fn order_table_to_allocation_groups_lines_by_item() {
-        let table = OrderTable::new(vec![
-            Package::new("p1", vec![Line::new("a", 2, 100).subitem("v1")]),
-            Package::new("p2", vec![Line::new("a", 1, 100).subitem("v1")]),
-        ]);
-        let allocation = order_table_to_allocation(&table);
-        assert_eq!(allocation.item_allocations.len(), 1);
-        let item = &allocation.item_allocations[0];
-        assert_eq!(item.singles.len(), 2);
-        let total: u32 = item.singles.iter().map(|s| s.quantity).sum();
-        assert_eq!(total, 3);
-    }
-
-    #[test]
-    fn synthesized_allocation_feeds_planner() {
-        let mut config = SettlementConfig::default();
-        config.gift_tiers.push(GiftTier {
-            tier_id: "t100".to_string(),
-            threshold: 100,
-            gift_name: "占位特典".to_string(),
-            unit_price: 10,
-            claimed: 10,
-        });
-        let table = OrderTable::new(vec![
-            Package::new("p1", vec![Line::new("a", 1, 50)]),
-            Package::new("p2", vec![Line::new("a", 1, 50)]),
-        ]);
-        let request = PlanRequest {
-            config,
-            allocation: order_table_to_allocation(&table),
-            strategy: planner::Strategy::GiftMax,
-            limits: PlanLimits::default(),
-            prices: vec![],
-        };
-        let result = planner::plan(&request);
-        let hits: u32 = result
-            .best_result
-            .packages
-            .iter()
-            .map(|p| p.gift_count)
-            .sum();
-        assert!(hits >= 1);
-    }
-
-    fn round_with_adjust(adjust_cents: i64) -> RoundSettings {
-        use crate::settings::{ItemConfig, RoundSettings, SubitemConfig};
-        RoundSettings {
-            round_id: "r".to_string(),
-            title: "t".to_string(),
-            group_id: "g".to_string(),
-            priority_users: vec![],
-            priority_window: None,
-            phases: vec![],
-            items: vec![ItemConfig {
-                item_id: "a".to_string(),
-                name: "A".to_string(),
-                kind: "group".to_string(),
-                class: None,
-                aliases: vec![],
-                unit_price_cents: 5000,
-                max_quantity: None,
-                box_item_id: None,
-                subitems: vec![SubitemConfig {
-                    subitem_id: "v1".to_string(),
-                    name: "甲".to_string(),
-                    unit_price_cents: 5000,
-                    adjust_cents,
-                    capacity: None,
-                    aliases: vec![],
-                }],
-            }],
-            category: crate::round::RoundCategory::Normal,
-        }
-    }
-
-    #[test]
-    fn merge_catalog_adjust_sets_adjusted_price_only() {
-        let merged = merge_catalog_pricing(SettlementConfig::default(), &round_with_adjust(-500));
-        assert_eq!(merged.pricing.len(), 1);
-        assert!(matches!(merged.pricing[0].mode, PricingMode::AdjustBy));
-        assert_eq!(merged.pricing[0].value, -500);
-
-        let table = OrderTable::new(vec![Package::new(
-            "p1",
-            vec![Line::new("a", 1, 5000).subitem("v1")],
-        )]);
-        let result = evaluate(&merged, &table);
-        assert_eq!(result.lines[0].unit_price_cents, 5000, "标价 A 口径不变");
-        assert_eq!(result.packages[0].gross_cents, 5000, "毛额以 A 计");
-        assert_eq!(
-            result.packages[0].adjusted_cents, 4500,
-            "调后价 = C = A + B"
-        );
-    }
-
-    #[test]
-    fn explicit_pricing_wins_over_catalog_adjust() {
-        let mut base = SettlementConfig::default();
-        base.pricing.push(PricingEntry {
-            item_id: "a".to_string(),
-            subitem_id: Some("v1".to_string()),
-            mode: PricingMode::SetFinal,
-            value: 6000,
-        });
-        let merged = merge_catalog_pricing(base, &round_with_adjust(-500));
-        assert_eq!(merged.pricing.len(), 1, "已存在的显式定价保留、不追加");
-        assert_eq!(merged.pricing[0].value, 6000);
-    }
-
-    #[test]
-    fn order_table_prices_reject_zero_and_conflicts() {
-        let zero = OrderTable::new(vec![Package::new("p1", vec![Line::new("a", 1, 0)])]);
-        assert!(matches!(
-            prices_from_order_table(&zero),
-            Err(ServiceError::Unprocessable(_))
-        ));
-
-        let conflict = OrderTable::new(vec![
-            Package::new("p1", vec![Line::new("a", 1, 100)]),
-            Package::new("p2", vec![Line::new("a", 1, 200)]),
-        ]);
-        assert!(matches!(
-            prices_from_order_table(&conflict),
-            Err(ServiceError::Unprocessable(_))
-        ));
-    }
-
-    #[test]
-    fn plan_invariant_accepts_repack_and_rejects_price_loss() {
-        let source = OrderTable::new(vec![
-            Package::new("p1", vec![Line::new("a", 1, 100)]),
-            Package::new("p2", vec![Line::new("a", 2, 100)]),
-        ]);
-        let repacked = OrderTable::new(vec![Package::new("p3", vec![Line::new("a", 3, 100)])]);
-        assert!(ensure_plan_invariants(&source, &repacked).is_ok());
-
-        let zeroed = OrderTable::new(vec![Package::new("p3", vec![Line::new("a", 3, 0)])]);
-        assert!(matches!(
-            ensure_plan_invariants(&source, &zeroed),
-            Err(ServiceError::Unprocessable(_))
-        ));
-    }
-}
+mod tests;
