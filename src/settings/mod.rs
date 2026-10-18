@@ -453,8 +453,13 @@ fn is_id_like(s: &str) -> bool {
 }
 
 /// 成员缓存（`members.cache_path`）→ `user_id -> 展示名`（`card` 优先，回退 `nickname`）。
-/// 按文件 mtime 缓存，避免每条消息读盘。
-type MemberNameCache = Mutex<Option<(SystemTime, HashMap<String, String>)>>;
+/// 按路径与文件 mtime 缓存；文件消失时清空，避免跨来源复用。
+struct CachedMemberNames {
+    path: PathBuf,
+    modified: Option<SystemTime>,
+    names: HashMap<String, String>,
+}
+type MemberNameCache = Mutex<Option<CachedMemberNames>>;
 
 fn member_name_map() -> &'static MemberNameCache {
     static CACHE: OnceLock<MemberNameCache> = OnceLock::new();
@@ -466,7 +471,10 @@ fn load_member_name_map(path: &str) -> HashMap<String, String> {
     let Ok(raw) = std::fs::read_to_string(path) else {
         return map;
     };
-    let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&raw) else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return map;
+    };
+    let Some(list) = value.get("members").unwrap_or(&value).as_array() else {
         return map;
     };
     for entry in list {
@@ -503,16 +511,19 @@ fn with_member_map<T>(cfg: &AppConfig, f: impl FnOnce(&HashMap<String, String>) 
     }
     let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
     let mut guard = member_name_map().lock().ok()?;
-    let stale = match (&*guard, mtime) {
-        (Some((cached, _)), Some(m)) => *cached != m,
-        (None, _) => true,
-        (Some(_), None) => false,
-    };
+    let key = PathBuf::from(path);
+    let stale = guard
+        .as_ref()
+        .is_none_or(|cached| cached.path != key || cached.modified != mtime);
     if stale {
         let map = load_member_name_map(path);
-        *guard = Some((mtime.unwrap_or(SystemTime::UNIX_EPOCH), map));
+        *guard = Some(CachedMemberNames {
+            path: key,
+            modified: mtime,
+            names: map,
+        });
     }
-    guard.as_ref().map(|(_, map)| f(map))
+    guard.as_ref().map(|cached| f(&cached.names))
 }
 
 /// 反查展示名：`user_id -> 成员名`（缓存）。

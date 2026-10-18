@@ -283,6 +283,37 @@ fn round_id_validation_rejects_paths() {
     assert!(!rounds::is_valid_round_id("a/b"));
 }
 
+#[test]
+fn member_cache_path_and_missing_file_cannot_reuse_another_group_name_map() {
+    let dir = std::env::temp_dir().join(format!("paigu-member-map-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first.json");
+    let second = dir.join("second.json");
+    std::fs::write(&first, r#"[{"user_id":1,"card":"成员01 备注"}]"#).unwrap();
+    std::fs::write(
+        &second,
+        r#"{"group_id":"123456789","members":[{"user_id":1,"card":"成员02（备注）"}]}"#,
+    )
+    .unwrap();
+    let stamp = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1000);
+    for path in [&first, &second] {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(stamp))
+            .unwrap();
+    }
+    let mut cfg = default_config();
+    cfg.members.cache_path = first.display().to_string();
+    assert_eq!(member_display_name(&cfg, "1").as_deref(), Some("成员01"));
+    cfg.members.cache_path = second.display().to_string();
+    assert_eq!(member_display_name(&cfg, "1").as_deref(), Some("成员02"));
+    std::fs::remove_file(&second).unwrap();
+    assert_eq!(member_display_name(&cfg, "1"), None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[tokio::test]
 async fn reload_bumps_revision() {
     let path = std::env::temp_dir().join(format!(

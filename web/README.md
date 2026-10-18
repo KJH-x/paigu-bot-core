@@ -70,7 +70,7 @@ API 未就绪时页面不崩：展示页显示「API 未就绪…自动重试」
 - 「从磁盘重载」= `POST /api/config/reload`。
 - 商品编辑器：items / subitems 增删改（`item_id/name/kind/aliases`，subitem `subitem_id/name/capacity/aliases`）。
 - 时段窗口：`datetime-local` ↔ `priority_window.start_ms/end_ms`（本地时区，end 独占）。
-- 「拉取群成员」= `POST /api/members/refresh`，再 `GET /api/members` 渲染；昵称按 POLICY §2 去括号备注展示。
+- 「拉取群成员」携带读取时的轮次、配置版本和名单指纹，等待后仍须同源同版本才原子写缓存；断开/过期保留旧名单。称呼建议也校验三项，先预览选择后填入本地草稿，不自动保存；停用模型时不会外发。来源设置变更后明确显示旧列表并停用拉取/建议，重新读取后再操作。
 
 ## 测试注入（HTTP，仅测试轮）
 

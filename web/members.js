@@ -27,7 +27,11 @@
     }).then(function(res){
       if(generation!==state.generation)return;
       if(scope==='source')Object.assign(state.config.members,next);else state.config.members.cn_overrides=P.deepClone(res.config.members.cn_overrides);
-      if(kind==='names')state.namesBaseline=JSON.stringify(collectOverrides());else state.sourceBaseline=JSON.stringify(sourceDraft());
+      if(kind==='names')state.namesBaseline=JSON.stringify(next);else {
+        state.sourceBaseline=JSON.stringify(next);state.fingerprint=null;$('members-cn-llm').disabled=true;$('members-refresh').disabled=true;
+        $('members-refresh').title='来源已变化，请先重新读取；不会自动拉取或丢弃称呼草稿';
+        $('members-source-info').textContent='来源设置已变更，当前表格仍为上次读取的名单。请先重新读取服务器值；不会自动拉取或丢弃称呼草稿。';$('members-source-info').classList.add('warning');
+      }
       state.revision=res.revision;setRev();banner('仅'+(kind==='names'?'称呼与别名':'成员来源设置')+'已保存；其他草稿未提交');
       return res;
     }).catch(function(e){banner('保存未完成，草稿保留：'+P.errorText(e),true);throw e;}).finally(restore);
@@ -147,12 +151,15 @@
 
 
   function load(){
+    if(state.loadPromise)return state.loadPromise;
     var generation=++state.generation;
-    return Promise.all([P.get('/api/config'),P.get('/api/members')]).then(function(res){
+    var controls=Array.from($('form').querySelectorAll('input,select,textarea,button')), disabled=controls.map(function(n){var original=n.disabled;n.disabled=true;return original;});
+    $('form').inert=true;
+    state.loadPromise=Promise.all([P.get('/api/config'),P.get('/api/members')]).then(function(res){
       if(generation!==state.generation)return;
       var config=res[0], members=res[1];
       if(members.round_id && (members.round_id!==config.config.round.round_id || members.config_revision!==config.revision))throw new Error('读取期间配置已变化，请重新读取');
-      state.config=config.config;state.revision=config.revision;state.members=buildMembers(members);
+      state.config=config.config;state.revision=config.revision;state.fingerprint=members.members_fingerprint;state.members=buildMembers(members);
       renderMembers();setSource();setRev();state.namesBaseline=JSON.stringify(collectOverrides());state.sourceBaseline=JSON.stringify(sourceDraft());
       $('form').classList.remove('hidden');$('loading').classList.add('hidden');
       $('members-cn-save').disabled=!state.members.some(function(m){return !!m.user_id;});
@@ -165,23 +172,31 @@
       $('members-cn-llm').disabled=!state.config.llm.enabled;
       $('members-cn-llm').title=state.config.llm.enabled?'仅主动点击才请求模型，先预览，不覆盖草稿':'模型未启用，仍可手工编辑称呼';
       $('conn-badge').textContent='已读取成员';$('conn-badge').className='status-badge ok';banner('');
-    }).catch(function(e){banner('成员载入未完成：'+P.errorText(e),true);$('loading').textContent='载入失败，可重新读取';throw e;});
+    }).catch(function(e){banner('成员载入未完成：'+P.errorText(e),true);$('loading').textContent='载入失败，可重新读取';throw e;}).finally(function(){
+      $('form').inert=false;controls.forEach(function(n,i){if(n.isConnected)n.disabled=disabled[i];});
+      if(state.config){$('members-cn-save').disabled=!state.members.some(function(m){return !!m.user_id;});$('members-cn-llm').disabled=!state.config.llm.enabled || !state.fingerprint;$('members-refresh').disabled=!state.fingerprint;$('members-refresh').title=state.fingerprint?'只读请求接收器成员列表，不发送群消息':'请先重新读取成员来源';}
+      delete state.loadPromise;
+    });
+    return state.loadPromise;
   }
   function refreshMembers(){
     return P.protectAction(refreshMembersNow).catch(function(){});
   }
   function refreshMembersNow(){
     var btn=$('members-refresh');btn.disabled=true;
-    return P.post('/api/members/refresh',{}).then(load).catch(function(e){banner('拉取失败，保留现有名单与草稿：'+P.errorText(e)+'。需要已连接的接收器。',true);}).finally(function(){btn.disabled=false;});
+    return P.post('/api/members/refresh',memberContext()).then(load).catch(function(e){banner('拉取失败，保留现有名单与草稿：'+P.errorText(e)+'。需要已连接的接收器；名单或配置变更后请先重新读取。',true);}).finally(function(){btn.disabled=false;});
   }
+  function memberContext(){return {round_id:state.config.round.round_id,config_revision:state.revision,members_fingerprint:state.fingerprint || ''};}
   function suggest(){
     var btn=$('members-cn-llm'), generation=state.generation;
     var baseline=state.members.map(function(m){return {user_id:m.user_id,cn:m.cn,cnTouched:m.cnTouched,raw:m.raw};});
     btn.disabled=true;
     $('members-ai-info').textContent='请求中；只发送有标识的群名片和成员标识，不发送聊天或 NC 原事件。服务：'+state.config.llm.base_url;
     $('member-suggestions').hidden=false;
-    P.post('/api/members/cn-suggest',{}).then(function(res){
+    var context=memberContext();
+    P.post('/api/members/cn-suggest',context,{timeout:65000}).then(function(res){
       if(generation!==state.generation)return;
+      if(res.round_id!==context.round_id || res.config_revision!==context.config_revision || res.members_fingerprint!==context.members_fingerprint || state.revision!==context.config_revision)throw new Error('请求上下文已变化，旧建议未套用');
       state.suggestions=(res.suggestions || []).map(function(s){return Object.assign({},s,{before:baseline.find(function(m){return m.user_id===s.user_id;})});}).filter(function(s){return s.before;});
       $('members-ai-body').innerHTML=state.suggestions.map(function(s,i){return '<tr><td><input type="checkbox" aria-label="采用 '+P.esc(s.before.raw)+' 的建议" data-suggestion="'+i+'" '+(!s.before.cnTouched?'checked':'')+' /></td><td>'+P.esc(s.before.raw)+'</td><td>'+P.esc(s.before.cn)+'</td><td>'+P.esc(s.cn)+'</td></tr>';}).join('');
       $('members-ai-info').textContent='建议 '+state.suggestions.length+' 条，尚未修改草稿。人工称呼默认不勾选；请求后编辑过的称呼也不会被覆盖。';

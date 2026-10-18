@@ -32,6 +32,7 @@ pub enum ServiceError {
     Conflict(Value),
     Unprocessable(String),
     Locked(String),
+    Upstream(String),
     Internal(anyhow::Error),
 }
 
@@ -51,6 +52,9 @@ impl ServiceError {
                 Json(json!({ "error": "locked", "message": message })),
             ),
             ServiceError::Internal(error) => api_internal(error),
+            ServiceError::Upstream(message) => {
+                (StatusCode::BAD_GATEWAY, Json(json!({"error":message})))
+            }
         }
     }
 }

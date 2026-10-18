@@ -147,7 +147,7 @@
       if(selected && !hash)hash=new URL(selected.href).hash;
     }
     document.querySelectorAll('.section-nav a').forEach(function(a){
-      var active=new URL(a.href).hash===hash || (a.dataset.alias || '').split(',').indexOf(hash)>=0;a.classList.toggle('active',active);
+      var active=new URL(a.href).hash===hash || !!hash && (a.dataset.alias || '').split(',').indexOf(hash)>=0;a.classList.toggle('active',active);
       if(active)a.setAttribute('aria-current','location');else a.removeAttribute('aria-current');
     });
     if(!hash)return;

@@ -356,8 +356,9 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 
 - **触发**：`GET /api/members`；每日 `daily_pull_at`；`POST /api/members/refresh`。
 - **处理**：
-  - `GET /api/members` 读取顺序：`data/members.seed.json`（gitignored，真实名单）→ `data/members.example.json`（入库占位）→ 空数组；`source` 为 `seed|example|empty`（`src/api/member_routes.rs:39-58`）。路径可用 `PAIGU_MEMBERS_SEED_PATH` / `PAIGU_MEMBERS_EXAMPLE_PATH` 覆盖（`:15-25`）。
-  - 拉取：`gateway.send_action("get_group_member_list")`（只读）→ 校验 `status=="ok"` 且 `data` 非空 → 写 `members.cache_path`（默认 `data/members.json`）（`src/api/member_routes.rs:60-89`）。
+  - `GET /api/members` 读取顺序：配置缓存 → seed（gitignored）→ example（入库占位）→ 空；返回来源、缓存群属/时间、轮次/配置版本与名单指纹。数组及 `{group_id,refreshed_at_ms,members}` 包装均可读；数值成员标识归一为字符串，群名片优先。路径可用 `PAIGU_MEMBERS_SEED_PATH` / `PAIGU_MEMBERS_EXAMPLE_PATH` 覆盖。
+  - 显式拉取须带当前 `round_id/config_revision/members_fingerprint`。仅请求允许的 `get_group_member_list` 只读动作；等待后再核对同一上下文、校验完整成员数组，在共同写锁内原子写入带群属/时间的私有缓存。过期、坏响应、写入失败保留旧缓存；未连接返回 502，不伪装刷新成功。
+  - 显式称呼建议使用同样三项守卫；模型关闭或上下文过期不外发。只发送必要标识/群名片；严格拒绝未知/重复成员、额外字段及无效称呼，等待期间配置或名单变化也拒绝套用。结果仅预览→管理员选择填入草稿→显式保存；人工称呼默认不勾选，请求期间改过的输入不被覆盖。
   - 调度：`run` 启动时 spawn 循环，每日在 `daily_pull_at` 调 `refresh_members_from_gateway`，失败仅告警（`src/main.rs:142-157`）。
 - **实测 `GET /api/members`（example 兜底，占位名）**：
 ```json
@@ -369,7 +370,7 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
   ]
 }
 ```
-- **拉取失败**：`POST /api/members/refresh` → `502 {"error":"gateway_action_failed: ..."}` 或 `no connected client`（`src/api/member_routes.rs:91-101`；`src/gateway/ws_server.rs:88`）。
+- **失败**：缺请求守卫 400，过期 409，接收器失败 502；建议模型停用/无效响应 422。页面保留现有名单与输入，不自动再问模型或清空数据。
 - **前端兜底**：API 不可用时 `web/common.js` 使用内置占位子集（`成员01`…`成员05`，`web/common.js:759-769`）。
 
 ### F9 展示页（5s 增量 / keyed diff / 不打断 / local-remote）
@@ -456,8 +457,9 @@ NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
 | POST | `/api/sim/messages` | 裸数组 或 `{messages:[…]}`（每项同上） | `{ok, round_id, category, count, summary, results, board, version}` | `400 {error:"not_a_test_round"}` |
 | POST | `/api/sim/identity` | `{user_id, nickname, is_admin?, priority?}` | `{ok, identity, identities}` | — |
 | POST | `/api/sim/reset` | `{}` | `{ok, version}` | — |
-| GET | `/api/members` | — | `{members, source:"seed"\|"example"\|"empty"}` | — |
-| POST | `/api/members/refresh` | `{}` | `{members, source:"gateway"}` | `502 {error}` |
+| GET | `/api/members` | — | `{members,source,round_id,config_revision,members_fingerprint,cached_group_id,cache_updated_at_ms}` | — |
+| POST | `/api/members/refresh` | `{round_id,config_revision,members_fingerprint}` | `{members,source:"gateway",…}` | `400/409/502` |
+| POST | `/api/members/cn-suggest` | 同上 | `{suggestions,executed:false,…}` | `400/409/422` |
 | GET | `/api/replay`、`/api/replay/*` | — | — | `501 {error:"not_implemented"}` |
 | GET | `/` | — | `display.html` | — |
 | GET | `/admin` | — | `admin.html` | — |
@@ -504,8 +506,10 @@ curl -X PUT http://127.0.0.1:21081/api/config \
   -H "Content-Type: application/json" \
   -d '{"config":{...},"revision":1}'
 
-# 拉取群成员（只读；需 NapCat 已连接）
-curl -X POST http://127.0.0.1:21081/api/members/refresh
+# 拉取群成员（只读；需先 GET /api/members，取其三项守卫原值）
+curl -X POST http://127.0.0.1:21081/api/members/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"round_id":"占位轮","config_revision":1,"members_fingerprint":"用当前 GET 返回值替换"}'
 
 # 重置模拟会话
 curl -X POST http://127.0.0.1:21081/api/sim/reset -H "Content-Type: application/json" -d '{}'

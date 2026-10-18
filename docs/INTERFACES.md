@@ -105,8 +105,9 @@
 | POST | `/api/sim/messages` | 裸数组 或 `{messages:[…]}`（每项同上，`timestamp` 逐条出现） | `{ok,round_id,category,count,summary,results,board,version}` | `400 {error:"not_a_test_round"}`；逐条 `Dropped`（**不整批拒绝**） | 脚本/测试（**仅测试轮**） | `sim_routes.rs` |
 | POST | `/api/sim/identity` | `{user_id,nickname,is_admin?,priority?}` | `{ok,identity,identities}` | — | 脚本/测试 | `sim_routes.rs` |
 | POST | `/api/sim/reset` | `{}` | `{ok,version}` | — | 手动重置 | `sim_routes.rs` |
-| GET | `/api/members` | — | `{members,source:"seed"\|"example"\|"empty"}` | — | admin/sim | `member_routes.rs:51,55` |
-| POST | `/api/members/refresh` | `{}` | `{members,source:"gateway"}` | `502 {error}` | admin | `member_routes.rs:52,91` |
+| GET | `/api/members` | — | `{members,source,round_id,config_revision,members_fingerprint,cached_group_id,cache_updated_at_ms}` | — | 成员 / 只读展示 | `services/members.rs` |
+| POST | `/api/members/refresh` | `{round_id,config_revision,members_fingerprint}` | `{members,source:"gateway",round_id,config_revision,members_fingerprint,cached_group_id,cache_updated_at_ms}` | `400` 缺字段；`409` 过期；`502` 接收器失败 | 成员显式拉取 | `member_routes.rs` / `services/members.rs` |
+| POST | `/api/members/cn-suggest` | 同上三项守卫 | `{suggestions,source,round_id,config_revision,members_fingerprint,executed:false}` | `400` 缺字段；`409` 过期；`422` 模型关闭/无效结果 | 成员显式预览 | `member_routes.rs` / `services/members.rs` |
 | GET | `/api/replay`、`/api/replay/*` | 见 §8 | `ReplayResult` / diff | — | replay 页 | `src/api/replay_routes.rs`（**已实现**，Wave 1–4） |
 | GET | `/` `/admin` `/replay` | — | 静态 HTML | 404 | 浏览器 | `api/mod.rs` |
 | GET | `/web/*` + fallback | — | 静态文件 | 404 | 浏览器 | `api/mod.rs:76-77` |
@@ -444,6 +445,8 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 第七批实施中：前端共用草稿注册与离开保护不新增 HTTP 接口。系统接入、消息理解（含 merge/segment_claims）、展示默认使用最新完整配置的白名单字段合并提交；对同一区域基线冲突保留草稿，不覆盖其他区或未知字段。内页切换仅改变可见分区，不提交；重新读取、磁盘重载、切页/实例与破坏性应用先处理草稿。此段是接线合同，逐项验证结果另记台账。
 
 第八批实施合同：跨页权限设置仅传不可预测 handoff 令牌，草稿、原记录身份/版本、API/轮次和滚动/筛选保存在本标签 sessionStorage（有时限）。设置不自动添名单或激活轮；返回重新读取当前动作/权限，记录版本冲突不自动套旧草稿。远程快照/导入复盘只读，不提供可写往返。消息深链仅作读取/定位，仍经现有 record_id/轮次/版本写守卫；不新增 seq 写旁路，不调用模型。
+
+第九批成员接口实施合同：`GET /api/members` 增 `members_fingerprint`（对应一次读取的来源/群属/成员快照）。`POST /api/members/refresh` 与 `/cn-suggest` 必需 `round_id/config_revision/members_fingerprint`；缺失 400，过期 409。建议仅显式请求且模型启用时发送必要的成员标识/群名片，返回严格校验的建议和相同上下文，不保存/执行；等待期间配置或名单变化则拒绝套用。拉取只调用既有允许的 get_group_member_list；等待后在共同写锁内核对原上下文并原子写带群属/时间的私有缓存。旧数组仍可读，未知群属不伪造。此项不发送真实群消息，测试只用 mock 与占位缓存。
 
 第六批接线登记（2026-10-18，实施中）：全站工作区为总览、轮次与商品、排谷、结算与下单、复盘、成员、系统设置；新增 `/members`、`/index`、`/display` 短路由，`.html` 与 `/web/*.html` 继续兼容，根路径仍为排谷。admin 旧页转总览，保留查询和锚点；旧 settings 成员/消息锚点转唯一工作区。导航仅传白名单连接/展示上下文，绝不调用激活。成员页面沿用现有配置/成员接口，保存只合并 CN/别名，不替换其他分区；消息修改统一进入排谷动作编辑器。完成状态以验收记录为准。
 

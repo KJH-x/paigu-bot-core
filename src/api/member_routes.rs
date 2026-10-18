@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::services::members;
 use crate::services::ServiceError;
@@ -22,8 +22,13 @@ async fn get_members(State(state): State<Arc<ApiState>>) -> Json<Value> {
     Json(members::get_members(&state).await)
 }
 
-async fn suggest_cn(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
-    let value = members::suggest_cn(&state)
+async fn suggest_cn(
+    State(state): State<Arc<ApiState>>,
+    body: Result<Json<members::MemberContext>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Json(context) =
+        body.map_err(|_| super::api_bad_request("成员请求须提供轮次、配置版本和名单指纹"))?;
+    let value = members::suggest_cn(&state, context)
         .await
         .map_err(ServiceError::into_api)?;
     Ok(Json(value))
@@ -36,12 +41,12 @@ pub async fn refresh_members_from_gateway(state: &ApiState) -> anyhow::Result<Va
 
 async fn refresh_members(
     State(state): State<Arc<ApiState>>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    match refresh_members_from_gateway(&state).await {
-        Ok(data) => Ok(Json(json!({ "members": data, "source": "gateway" }))),
-        Err(error) => Err((
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": error.to_string() })),
-        )),
-    }
+    body: Result<Json<members::MemberContext>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Json(context) =
+        body.map_err(|_| super::api_bad_request("成员请求须提供轮次、配置版本和名单指纹"))?;
+    members::refresh_members(&state, context)
+        .await
+        .map(Json)
+        .map_err(ServiceError::into_api)
 }
