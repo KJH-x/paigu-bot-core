@@ -4,6 +4,7 @@
 //! 对外 HTTP 契约（路径、方法、请求体字段、响应体字段、状态码）保持不变。
 
 pub mod aliases;
+pub mod configuration;
 pub mod display;
 pub mod members;
 pub mod message_actions;

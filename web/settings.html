@@ -146,7 +146,7 @@
             </div>
             <div class="table-scroll" style="max-height:40vh;margin-top:8px">
               <table class="grid cn-table">
-                <thead><tr><th>user_id</th><th>群名片</th><th>昵称（清洗后，可编辑）</th><th>CN</th><th>别名</th><th>角色</th><th>操作</th></tr></thead>
+                <thead><tr><th>成员标识</th><th>群名片</th><th>自动清洗（预览）</th><th>最终称呼（CN）</th><th>别名</th><th>角色</th><th>跟随状态</th></tr></thead>
                 <tbody id="members-body"></tbody>
               </table>
               <div id="members-empty" class="empty">尚未加载成员列表</div>
@@ -176,18 +176,19 @@
         </section>
 
         <section class="panel admin-section" id="sec-snapshot">
-          <div class="panel-head"><span>快照导出 / 导入</span></div>
+          <div class="panel-head"><span>私有备份与恢复</span></div>
           <div class="panel-body">
+            <p class="hint">完整备份含成员、原消息与管理记录，只保存到本机路径，不用于公开分享。应用仅替换当前同一轮消息与审计，保留当前配置和订单草稿。</p>
             <div class="row">
               <label class="field" style="flex:1;margin:0"><span>out_dir（可选；留空用后端默认目录）</span><input id="snap-out" placeholder="例如 data/snapshots" /></label>
-              <button id="snap-export" class="primary">导出快照（format=file）</button>
+              <button id="snap-export" class="primary">保存完整私有备份</button>
             </div>
             <div class="hint" id="snap-export-info"></div>
             <hr style="border:none;border-top:1px solid var(--border);margin:10px 0" />
             <label class="field"><span>path（.snapshot.json 文件或目录）</span><input id="snap-path" placeholder="上一步导出返回的路径" /></label>
             <div class="row">
-              <label class="row tight"><input id="snap-apply" type="checkbox" style="width:auto" /><span>apply（写回消息日志并复算）</span></label>
-              <button id="snap-import" class="small">导入快照</button>
+              <button id="snap-import" class="small">预检备份</button>
+              <button id="snap-apply" class="danger" disabled>应用已预检备份</button>
             </div>
             <div id="snap-import-result" class="hint"></div>
           </div>

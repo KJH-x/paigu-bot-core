@@ -330,17 +330,22 @@ async fn raw_edit_and_delete_cannot_destroy_a_saved_automatic_baseline() {
         .unwrap()
         .remove(0);
     let input: crate::services::messages::UpdateInput =
-        serde_json::from_value(serde_json::json!({"text":"改原文","record_revision":1})).unwrap();
+        serde_json::from_value(serde_json::json!({"text":"改原文","record_revision":1,"round_id":cfg.round.round_id,"config_revision":cfg.revision})).unwrap();
     assert!(
         crate::services::messages::update_message(&state, &record.record_id, input)
             .await
             .is_err()
     );
-    assert!(
-        crate::services::messages::delete_message(&state, &record.record_id, Some(1), None)
-            .await
-            .is_err()
-    );
+    assert!(crate::services::messages::delete_message(
+        &state,
+        &record.record_id,
+        &cfg.round.round_id,
+        cfg.revision,
+        1,
+        None
+    )
+    .await
+    .is_err());
     let after = state
         .messages
         .read_all(&cfg.round.round_id)
@@ -397,7 +402,7 @@ async fn empty_override_stays_effective_and_automatic_claim_identity_is_stable()
 async fn lock_history_does_not_revoke_earlier_claims_or_reactivate_locked_messages() {
     let (state, _) = fixture(false, "{}").await;
     state.pipeline.process(incoming("排 徽章 甲 1", 1000)).await;
-    state.pipeline.set_locked(true).await;
+    state.pipeline.set_locked(true).await.unwrap();
     assert_eq!(
         state
             .pipeline
@@ -406,7 +411,7 @@ async fn lock_history_does_not_revoke_earlier_claims_or_reactivate_locked_messag
             .status,
         "Rejected"
     );
-    state.pipeline.set_locked(false).await;
+    state.pipeline.set_locked(false).await.unwrap();
     let result = state.pipeline.recompute().await.unwrap();
     assert_eq!(quantity(&result.board), 1);
     assert_eq!(result.outcomes[0].status, "Applied");
@@ -543,7 +548,7 @@ async fn locked_messages_are_group_boundaries_and_cannot_swallow_earlier_claims(
     let revision = cfg.revision;
     state.cfg.put(cfg, revision).await.unwrap();
     state.pipeline.ingest(incoming("排 徽章 甲 1", 1000)).await;
-    state.pipeline.set_locked(true).await;
+    state.pipeline.set_locked(true).await.unwrap();
     assert_eq!(
         state
             .pipeline
@@ -552,7 +557,7 @@ async fn locked_messages_are_group_boundaries_and_cannot_swallow_earlier_claims(
             .status,
         "Rejected"
     );
-    state.pipeline.set_locked(false).await;
+    state.pipeline.set_locked(false).await.unwrap();
     let result = state.pipeline.recompute().await.unwrap();
     assert_eq!(quantity(&result.board), 1);
     assert_eq!(result.outcomes[0].status, "Applied");

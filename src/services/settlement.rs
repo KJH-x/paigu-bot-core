@@ -108,14 +108,10 @@ fn write_draft_unlocked(draft: &SettlementDraft) -> Result<(), ServiceError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| ServiceError::Internal(error.into()))?;
     }
-    let temp = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4()));
     let raw =
         serde_json::to_vec_pretty(draft).map_err(|error| ServiceError::Internal(error.into()))?;
-    std::fs::write(&temp, raw).map_err(|error| ServiceError::Internal(error.into()))?;
-    if path.exists() {
-        std::fs::remove_file(&path).map_err(|error| ServiceError::Internal(error.into()))?;
-    }
-    std::fs::rename(temp, path).map_err(|error| ServiceError::Internal(error.into()))?;
+    crate::persistence::atomic_write(&path, &raw)
+        .map_err(|error| ServiceError::Internal(error.into()))?;
     Ok(())
 }
 
@@ -137,6 +133,7 @@ pub async fn get_draft(state: &ApiState) -> Result<Value, ServiceError> {
 
 #[derive(Deserialize)]
 pub struct DraftBody {
+    pub round_id: String,
     pub revision: u64,
     pub order_table: OrderTable,
     #[serde(default)]
@@ -146,14 +143,20 @@ pub struct DraftBody {
 }
 
 pub async fn put_draft(state: &ApiState, body: DraftBody) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     let cfg = state.cfg.get().await;
+    if cfg.round.round_id != body.round_id {
+        return Err(ServiceError::Conflict(
+            json!({"error":"round_changed","message":"轮次已切换，未保存到另一轮"}),
+        ));
+    }
     let mut draft = read_draft(&cfg.round.round_id)?;
     if draft.locked || state.pipeline.is_locked().await {
         return Err(ServiceError::Locked("结算草稿已锁定".to_string()));
     }
     ensure_draft_revision(&draft, body.revision)?;
     let result = evaluate(
-        &merge_catalog_pricing(cfg.settlement, &cfg.round),
+        &merge_catalog_pricing(cfg.settlement.clone(), &cfg.round),
         &body.order_table,
     );
     draft.order_table = body.order_table;
@@ -167,11 +170,16 @@ pub async fn put_draft(state: &ApiState, body: DraftBody) -> Result<Value, Servi
 
 #[derive(Deserialize)]
 pub struct DraftRevisionBody {
+    pub round_id: String,
     pub revision: u64,
 }
 
 pub async fn lock_draft(state: &ApiState, body: DraftRevisionBody) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     let cfg = state.cfg.get().await;
+    if cfg.round.round_id != body.round_id {
+        return Err(ServiceError::Conflict(json!({"error":"round_changed"})));
+    }
     let mut draft = read_draft(&cfg.round.round_id)?;
     ensure_draft_revision(&draft, body.revision)?;
     if draft.locked {
@@ -219,7 +227,7 @@ pub async fn lock_draft(state: &ApiState, body: DraftRevisionBody) -> Result<Val
     let prices = prices_from_order_table(&draft.order_table)?;
     validate_prices_for_allocation(&allocation, &prices)?;
     draft.last_result = Some(evaluate(
-        &merge_catalog_pricing(cfg.settlement, &cfg.round),
+        &merge_catalog_pricing(cfg.settlement.clone(), &cfg.round),
         &draft.order_table,
     ));
     draft.locked = true;
@@ -227,7 +235,8 @@ pub async fn lock_draft(state: &ApiState, body: DraftRevisionBody) -> Result<Val
     draft.locked_at_ms = Some(now);
     draft.updated_at_ms = now;
     write_draft_checked(&mut draft, body.revision)?;
-    state.pipeline.set_locked(true).await;
+    state.pipeline.restore_settlement_lock(true).await;
+    state.pipeline.set_locked_locked(&cfg, true).await?;
     Ok(json!({ "draft": draft }))
 }
 
@@ -235,14 +244,19 @@ pub async fn unlock_draft(
     state: &ApiState,
     body: DraftRevisionBody,
 ) -> Result<Value, ServiceError> {
-    let round_id = state.cfg.get().await.round.round_id;
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.get().await;
+    let round_id = cfg.round.round_id.clone();
+    if round_id != body.round_id {
+        return Err(ServiceError::Conflict(json!({"error":"round_changed"})));
+    }
     let mut draft = read_draft(&round_id)?;
     ensure_draft_revision(&draft, body.revision)?;
     draft.locked = false;
     draft.locked_at_ms = None;
     draft.updated_at_ms = crate::services::messages::now_ms();
     write_draft_checked(&mut draft, body.revision)?;
-    state.pipeline.set_locked(false).await;
+    state.pipeline.set_locked_locked(&cfg, false).await?;
     Ok(json!({ "draft": draft }))
 }
 
@@ -300,7 +314,7 @@ pub fn merge_catalog_pricing(
 
 pub async fn get_settlement_config(state: &ApiState) -> Value {
     let cfg = state.cfg.get().await;
-    json!({ "config": cfg.settlement, "revision": cfg.revision })
+    json!({ "config": cfg.settlement, "revision": cfg.revision,"round_id":cfg.round.round_id })
 }
 
 #[derive(Deserialize)]
@@ -313,6 +327,7 @@ pub async fn put_settlement_config(
     state: &ApiState,
     body: SettlementConfigBody,
 ) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     if is_locked(state).await? {
         return Err(ServiceError::Locked(
             "轮次已锁定，不能修改结算规则".to_string(),
@@ -494,7 +509,13 @@ fn validate_prices_for_allocation(
     prices: &[UnitPrice],
 ) -> Result<(), ServiceError> {
     for item in &allocation.item_allocations {
-        if item.kind == "gift" {
+        if item.kind == "gift"
+            || (!item
+                .boxes
+                .iter()
+                .any(|b| b.slots.iter().any(|s| s.user_id.is_some()))
+                && !item.singles.iter().any(|s| s.quantity > 0))
+        {
             continue;
         }
         let price = item

@@ -451,7 +451,13 @@ MP-1 核心接线已通过隔离回归，尚非完整工作流：消息日志增
 
 已实现的只读 `GET /api/messages/:record_id/actions?round_id=...` 返回 `message/config_revision/original_automatic/current_automatic/effective_source/effective_parsed/manual_note/automatic_group/current_outcome` 与 `automatic_missing/automatic_matches/automatic_history_count`。原自动为初次结果，当前自动为匹配真实执行组的最近结果；人工仍沿用受守卫的 ParseOverride 优先。此接口不写日志、不重算、不调用模型；不接受 seq 回退。实时/复盘消息附 `original_automatic` 摘要和 `manual_note`。已带产物的原文/身份/时间修改为 400，物理删除为 422；旧无产物维护入口仍保留。
 
-`PUT /api/config` 在同一轮次的业务输入变化后确定性重算（含优先名单/时段/阶段、目录、白名单、CN、合并），返回 `recomputed`，模型调用为零；重算失败响应明确 `config_saved:true`。文件热载、`config/reload`、直接 round setup 等旁路尚未统一，不宣称所有配置入口已经原子发布。消息人工选择采用统一审计日志与可重建投影，不宣称配置/快照导入等跨文件事务已完成。
+`PUT /api/config`、文件热载、`config/reload`、激活轮 setup 在共同写边界内，经同一配置服务校验；业务输入变化先准备确定性重算（优先名单/时段/阶段、目录、白名单、CN、合并），完成可恢复配置/轮次文件提交后发布，返回 `recomputed`，模型调用为零。不能用配置 PUT 静默切轮。私有 pending 未完成时新提交拒绝，显式重载/启动可恢复；损坏文件拒绝，不回退其他轮次。消息事务日志与配置/备份的恢复协议不同，不宣称物理断电认证。
+
+第五批维护守卫：旧消息 POST 必需 `round_id/revision`；PUT/reroute 必需 `round_id/config_revision/record_revision`；DELETE query 同样必需三项。仅接受稳定 record_id，不回退 seq。`GET /api/messages` 增顶层 round_id/config_revision。已有产物/人工选择的原文、身份、时间及删除保护不变。
+
+订单草稿 PUT 必需 `round_id/revision/order_table`，可附 `selected_strategy/order_numbers`；lock/unlock 必需 `round_id/revision`。跨轮 409、锁态写入 423。无人认领商品不要求订单价格，实际认领及完整性/订单号校验仍保留。
+
+私有 `snapshot/import` 默认预检，返回 `target_round_id/config_revision/preflight_token/current_messages/import_messages/applicable/effect`，不写入；应用必须显式 `apply:true` 加同轮/版本/令牌。新消息、审计或配置使旧预检失效。应用仅替换消息与审计、保留当前配置和订单草稿；原 NC 不再处理，先准备重放，完整 before/after 私有备份和可恢复双文件安装，响应含 backup_path。导出 settlement 字段包含 calculated 与完整 draft；不是公共分享格式。接口仅供本地可信管理环境，未部署。
 
 请求与代码草案见 [专项计划 §15](./PLAN-message-reprocess-2026-10-15.md#15-详细实现契约与代码草案)。目标合同如下，不将未接线端点当可用接口：
 

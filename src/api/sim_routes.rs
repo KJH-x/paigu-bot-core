@@ -281,11 +281,15 @@ async fn sim_identity(Json(body): Json<SimIdentity>) -> Json<Value> {
     Json(json!({ "ok": true, "identity": record, "identities": identity_list() }))
 }
 
-async fn sim_reset(State(state): State<Arc<ApiState>>) -> Json<Value> {
-    state.pipeline.reset().await;
+async fn sim_reset(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, ApiError> {
+    let _serial = state.pipeline.message_write_guard().await;
+    if !state.cfg.get().await.round.category.is_test() {
+        return Err(api_bad_request("仅测试轮可重置模拟状态"));
+    }
+    state.pipeline.reset_locked().await;
     clear_identities();
     let (version, _) = state.pipeline.board().await;
-    Json(json!({ "ok": true, "version": version }))
+    Ok(Json(json!({ "ok": true, "version": version })))
 }
 
 #[cfg(test)]

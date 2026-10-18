@@ -60,7 +60,7 @@ pub fn write_round(round: &RoundSettings) -> std::io::Result<PathBuf> {
     }
     let raw = serde_json::to_string_pretty(round)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(&path, raw)?;
+    crate::persistence::atomic_write(&path, raw.as_bytes())?;
     Ok(path)
 }
 

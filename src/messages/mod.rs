@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod processing;
+mod replacement;
 pub mod transactions;
 
 fn default_record_revision() -> u64 {
@@ -182,6 +183,7 @@ impl JsonlMessageStore {
         Ok(out)
     }
 
+    #[cfg(test)]
     pub(crate) async fn replace_all(&self, recs: &[MessageRecord]) -> anyhow::Result<()> {
         let _guard = Self::lock();
         Self::replace_locked(&self.path, recs)
@@ -193,13 +195,7 @@ impl JsonlMessageStore {
             buf.push_str(&serde_json::to_string(rec)?);
             buf.push('\n');
         }
-        Self::ensure_parent(path)?;
-        let temp = path.with_extension(format!("jsonl.{}.tmp", uuid::Uuid::new_v4()));
-        std::fs::write(&temp, buf)?;
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
-        std::fs::rename(temp, path)?;
+        crate::persistence::atomic_write(path, buf.as_bytes())?;
         Ok(())
     }
 
@@ -256,11 +252,15 @@ impl JsonlMessageStore {
 pub struct MessageLog {
     dir: PathBuf,
     events_dir: PathBuf,
+    writer: tokio::sync::Mutex<()>,
     #[cfg(test)]
     durable_fault: std::sync::atomic::AtomicU8,
 }
 
 impl MessageLog {
+    pub(crate) async fn write_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.writer.lock().await
+    }
     pub fn new(dir: impl Into<PathBuf>, events_dir: impl Into<PathBuf>) -> Arc<Self> {
         let dir = dir.into();
         if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -282,6 +282,7 @@ impl MessageLog {
         Arc::new(Self {
             dir,
             events_dir: events_dir.into(),
+            writer: tokio::sync::Mutex::new(()),
             #[cfg(test)]
             durable_fault: std::sync::atomic::AtomicU8::new(0),
         })
@@ -307,18 +308,23 @@ impl MessageLog {
     }
 
     pub async fn append(&self, round_id: &str, rec: &MessageRecord) -> anyhow::Result<()> {
+        self.ensure_no_replacement(round_id)?;
         self.store_for(round_id).append(rec).await
     }
 
     pub async fn read_all(&self, round_id: &str) -> anyhow::Result<Vec<MessageRecord>> {
+        self.ensure_no_replacement(round_id)?;
         self.store_for(round_id).read_all().await
     }
 
     pub async fn read_only(&self, round_id: &str) -> anyhow::Result<Vec<MessageRecord>> {
+        self.ensure_no_replacement(round_id)?;
         self.store_for(round_id).read_only().await
     }
 
+    #[cfg(test)]
     pub async fn replace_all(&self, round_id: &str, recs: &[MessageRecord]) -> anyhow::Result<()> {
+        self.ensure_no_replacement(round_id)?;
         self.store_for(round_id).replace_all(recs).await
     }
 
@@ -339,13 +345,16 @@ impl MessageLog {
     where
         F: FnMut(&mut MessageRecord) + Send,
     {
+        self.ensure_no_replacement(round_id)?;
         self.store_for(round_id).update(record_id, f).await
     }
 
     pub async fn delete(&self, round_id: &str, record_id: &str) -> anyhow::Result<bool> {
+        self.ensure_no_replacement(round_id)?;
         self.store_for(round_id).delete(record_id).await
     }
 
+    #[cfg(test)]
     pub async fn resolve_record_id(
         &self,
         round_id: &str,
@@ -372,6 +381,7 @@ impl MessageLog {
         round_id: &str,
         ev: &serde_json::Value,
     ) -> anyhow::Result<()> {
+        self.ensure_no_replacement(round_id)?;
         let path = self.event_path_for(round_id);
         let line = serde_json::to_string(ev)?;
         let _guard = JsonlMessageStore::lock();
@@ -391,6 +401,7 @@ impl MessageLog {
         round_id: &str,
         ev: &serde_json::Value,
     ) -> anyhow::Result<()> {
+        self.ensure_no_replacement(round_id)?;
         use std::io::{Read, Seek, SeekFrom, Write};
         let path = self.event_path_for(round_id);
         let _guard = JsonlMessageStore::lock();
@@ -454,6 +465,7 @@ impl MessageLog {
         &self,
         round_id: &str,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
+        self.ensure_no_replacement(round_id)?;
         let path = self.event_path_for(round_id);
         let _guard = JsonlMessageStore::lock();
         if !path.exists() {

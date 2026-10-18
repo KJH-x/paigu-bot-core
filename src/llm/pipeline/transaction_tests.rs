@@ -196,8 +196,8 @@ async fn undo_rejects_changed_policy_phase_and_corrupted_input_without_rollback(
             u.config_revision = state.cfg.put(c, rev).await.unwrap();
         }
         if case == "phase" {
-            state.pipeline.set_locked(true).await;
-            state.pipeline.set_locked(false).await;
+            state.pipeline.set_locked(true).await.unwrap();
+            state.pipeline.set_locked(false).await.unwrap();
         }
         if case == "input" {
             let mut rows = state.messages.read_all(&u.round_id).await.unwrap();

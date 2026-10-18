@@ -13,9 +13,10 @@ pub struct UndoInput {
 }
 
 fn last_manual(events: &[EventEnvelope]) -> Option<&EventEnvelope> {
-    events.iter().rev().find(
-        |e| matches!(&e.payload,DomainEvent::ParseOverride(o) if o.target_record_id.is_some()),
-    )
+    events.iter().rev().find(|e| {
+        matches!(&e.payload,DomainEvent::ParseOverride(o) if o.target_record_id.is_some())
+            || matches!(e.payload, DomainEvent::SnapshotApplied { .. })
+    })
 }
 
 pub(super) fn undo_view(events: &[EventEnvelope]) -> Value {

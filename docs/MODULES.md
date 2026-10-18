@@ -3,6 +3,8 @@
 > 配套 [DESIGN.md](./DESIGN.md) §2、[TASKS.md](./TASKS.md)。本文件汇总各模块的**职责、对外契约、文件归属**。
 > 规则：子 agent **只改自己名下的文件**；跨模块改动先在 [TASKS.md](./TASKS.md) 追加「待 A0 处理」，由 A0 统一接线。
 
+> 当前专项（2026-10-18）：主代理按 TASKS/消息计划统一接线，无子代理。`src/services/configuration.rs` 为所有配置更新/热载与确定性投影的应用边界；`src/settings/commit.rs` 为可恢复配置/轮次落盘；`src/messages/replacement.rs` 为私有备份替换恢复；`src/persistence.rs` 提供同步原子文件替换。所有运行时消息/配置/锁/导入写操作使用同一 MessageLog writer；下方历史签名以现行 INTERFACES §8.9 为准。
+
 ## 0. 冻结接口（跨模块契约，改动需 A0 同意）
 
 ### `src/bus.rs` — Gateway 与 Pipeline 的解耦边界

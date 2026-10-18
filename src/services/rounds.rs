@@ -144,6 +144,7 @@ pub async fn activate_round(
     id: &str,
     body: ActivateBody,
 ) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     let id = id.trim().to_string();
     let mode = body
         .mode
@@ -160,11 +161,43 @@ pub async fn activate_round(
         .ok_or_else(|| ServiceError::NotFound(format!("轮次不存在：{id}")))?;
     round.round_id = id.clone();
 
-    // 切换（continue）：仅更新激活轮次与配置，不动内存状态。
+    // Prepare every fallible read/replay before committing the selected round.
+    // A broken target journal must not clear the previous board or activate it.
     let mut cfg = state.cfg.get().await;
+    let previous_round = cfg.round.round_id.clone();
     let revision = cfg.revision;
     cfg.round = round;
     cfg.active_round_id = Some(id.clone());
+    if !cfg.gateway.whitelist_groups.contains(&cfg.round.group_id) {
+        return Err(ServiceError::Unprocessable(
+            "轮次群号不在接入白名单中".into(),
+        ));
+    }
+    if let Some(issue) = category_issues(&cfg.round, cfg.gateway.test_group_id.as_deref())
+        .iter()
+        .find(|i| i["level"] == "error")
+    {
+        return Err(ServiceError::Unprocessable(
+            issue["message"]
+                .as_str()
+                .unwrap_or("轮次类别与群绑定不匹配")
+                .into(),
+        ));
+    }
+    let persistent_lock = super::settlement::round_locked(&id)?;
+    cfg.revision = revision.saturating_add(1);
+    let prepared = if mode == "replay" {
+        let records = state.messages.read_only(&id).await?;
+        let result = crate::replay::session::replay(
+            &state.messages,
+            &cfg,
+            crate::replay::session::ReplayOverrides::default(),
+        )
+        .await?;
+        Some((records, result))
+    } else {
+        None
+    };
     match state.cfg.put(cfg, revision).await {
         Ok(_) => {}
         Err(crate::settings::ConfigError::StaleRevision { actual, .. }) => {
@@ -175,19 +208,27 @@ pub async fn activate_round(
 
     let mut reset = false;
     let mut replayed: Option<Value> = None;
+    state
+        .pipeline
+        .switch_round_locked(&previous_round, &id, mode != "continue")
+        .await;
     match mode.as_str() {
         "fresh" => {
-            state.pipeline.reset().await;
             reset = true;
         }
         "replay" => {
-            state.pipeline.reset().await;
             reset = true;
-            replayed = Some(replay::recompute(state).await.map_err(ServiceError::from)?);
+            let (records, result) = prepared.expect("replay prepared before config commit");
+            state.pipeline.apply_replay(&result, &records).await;
+            replay::remember_replay(&result);
+            replayed = Some(replay::replay_result_json(&result));
         }
         _ => {}
     }
-    crate::services::settlement::restore_persistent_lock(state).await?;
+    state
+        .pipeline
+        .restore_settlement_lock(persistent_lock)
+        .await;
 
     let (version, _) = state.pipeline.board().await;
     Ok(json!({
@@ -240,6 +281,7 @@ pub async fn setup_round(
     id: &str,
     body: SetupBody,
 ) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     let id = id.trim().to_string();
     if !rounds::is_valid_round_id(&id) {
         return Err(ServiceError::BadRequest(
@@ -317,7 +359,9 @@ pub async fn setup_round(
         ));
     }
 
-    rounds::write_round(&round).map_err(|e| ServiceError::Internal(e.into()))?;
+    if !is_active {
+        rounds::write_round(&round).map_err(|e| ServiceError::Internal(e.into()))?;
+    }
 
     let mut revision = cfg.revision;
     let mut applied_to_active = false;
@@ -325,16 +369,9 @@ pub async fn setup_round(
         // 同步热载：`ConfigStore::put` 会一并落盘 config 与轮次文件并递增 revision。
         let mut next = cfg.clone();
         next.round = round.clone();
-        match state.cfg.put(next, cfg.revision).await {
-            Ok(rev) => {
-                revision = rev;
-                applied_to_active = true;
-            }
-            Err(crate::settings::ConfigError::StaleRevision { actual, .. }) => {
-                return Err(ServiceError::StaleRevision(actual));
-            }
-            Err(e) => return Err(ServiceError::Internal(e.into())),
-        }
+        let saved = super::configuration::apply_locked(state, next, cfg.revision).await?;
+        revision = saved["revision"].as_u64().unwrap_or(cfg.revision);
+        applied_to_active = true;
     }
 
     Ok(json!({

@@ -98,6 +98,7 @@
       var refresh = $(opts.refresh);
       if (refresh) refresh.disabled = true;
       return P.get('/api/messages?limit=500').then(function (res) {
+        state.roundId=res.round_id;state.configRevision=res.config_revision;
         state.messages = (res && res.messages) || [];
         render();
       }).catch(function (err) {
@@ -109,12 +110,12 @@
 
     function saveMessage(tr, m) {
       var seq = m.seq;
-      var key = m.record_id || String(seq);
+      var key = m.record_id;
       var textValue = tr.querySelector('[data-field="text"]').value;
       var ts = M.localInputToMs(tr.querySelector('[data-field="timestamp_ms"]').value);
       if (!textValue.trim()) { banner('消息 text 不能为空', true); return; }
       if (ts == null) { banner('消息时间非法：请填写有效的本地时间', true); return; }
-      var body = { text: textValue, timestamp_ms: ts, record_revision: m.record_revision, recompute: true };
+      var body = { round_id:state.roundId,config_revision:state.configRevision,text: textValue, timestamp_ms: ts, record_revision: m.record_revision, recompute: true };
       P.put('/api/messages/' + encodeURIComponent(key), body).then(function (res) {
         banner('');
         var s = res && res.result && res.result.summary;
@@ -129,9 +130,9 @@
     }
 
     function deleteMessage(m) {
-      var key = m.record_id || String(m.seq);
+      var key = m.record_id;
       if (!global.confirm('确认删除消息 seq=' + m.seq + ' 并触发重算？')) return;
-      P.request('/api/messages/' + encodeURIComponent(key) + '?recompute=true&record_revision=' + encodeURIComponent(m.record_revision || 1), { method: 'DELETE' }).then(function () {
+      P.request('/api/messages/' + encodeURIComponent(key) + '?recompute=true&round_id='+encodeURIComponent(state.roundId)+'&config_revision='+state.configRevision+'&record_revision=' + encodeURIComponent(m.record_revision), { method: 'DELETE' }).then(function () {
         banner('');
         toast('消息 ' + m.seq + ' 已删除并重算', 'ok');
         return load();
@@ -144,9 +145,9 @@
     }
 
     function rerouteMessage(m) {
-      var key = m.record_id || String(m.seq);
+      var key = m.record_id;
       if (!global.confirm('按当前群与成员白名单重新判定消息 seq=' + m.seq + ' 的路由？')) return;
-      P.post('/api/messages/' + encodeURIComponent(key) + '/reroute', { record_revision: m.record_revision }).then(function (res) {
+      P.post('/api/messages/' + encodeURIComponent(key) + '/reroute', { round_id:state.roundId,config_revision:state.configRevision,record_revision: m.record_revision }).then(function (res) {
         var s = res && res.result && res.result.summary;
         banner('');
         toast('已重新路由' + (s ? '（应用 ' + s.applied + '，掉落 ' + s.dropped + '）' : ''), 'ok');

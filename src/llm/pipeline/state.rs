@@ -10,7 +10,7 @@ use crate::replay::session::ReplayResult;
 
 use super::Pipeline;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(super) struct State {
     pub(super) events: Vec<EventEnvelope>,
     pub(super) messages: Vec<MessageRecord>,
@@ -25,6 +25,7 @@ pub(super) struct State {
     pub(super) locked: bool,
 }
 
+#[derive(Clone)]
 pub(super) struct MessageRecord {
     pub(super) original_automatic: Option<crate::messages::processing::AutomaticSummary>,
     pub(super) manual_note: Option<String>,
@@ -58,9 +59,32 @@ impl MessageRecord {
 }
 
 impl Pipeline {
+    #[cfg(test)]
     pub async fn reset(&self) {
+        let _serial = self.message_write_guard().await;
+        self.reset_locked().await;
+    }
+
+    pub(crate) async fn reset_locked(&self) {
         let mut state = self.state.lock().await;
         *state = State::default();
+    }
+
+    /// Continue switches use the selected round's own in-process cache, never the
+    /// previous round's board. Replay remains an explicit, separate operation.
+    pub(crate) async fn switch_round_locked(&self, previous: &str, next: &str, fresh: bool) {
+        let mut parked = self.parked.lock().await;
+        let mut state = self.state.lock().await;
+        if previous != next {
+            parked.insert(previous.into(), state.clone());
+            *state = if fresh {
+                State::default()
+            } else {
+                parked.remove(next).unwrap_or_default()
+            };
+        } else if fresh {
+            *state = State::default();
+        }
     }
 
     pub async fn board(&self) -> (i64, Value) {
@@ -86,8 +110,18 @@ impl Pipeline {
 
     /// 锁/解锁：写 `RoundPhaseSet` 事件（事件溯源的锁=阶段），并即时更新内存缓存。
     /// `true` → 阶段覆盖为 `Settling`（锁定）；`false` → 清除覆盖。
-    pub async fn set_locked(&self, locked: bool) {
+    #[cfg(test)]
+    pub async fn set_locked(&self, locked: bool) -> anyhow::Result<()> {
+        let _serial = self.message_write_guard().await;
         let cfg = self.cfg.get().await;
+        self.set_locked_locked(&cfg, locked).await
+    }
+
+    pub(crate) async fn set_locked_locked(
+        &self,
+        cfg: &crate::settings::AppConfig,
+        locked: bool,
+    ) -> anyhow::Result<()> {
         let by = crate::domain::ids::UserId("admin".to_string());
         let event = EventEnvelope {
             event_id: crate::domain::ids::EventId(uuid::Uuid::new_v4().to_string()),
@@ -108,16 +142,11 @@ impl Pipeline {
             }),
             status: crate::domain::event::EventStatus::Active,
         };
-        if let Ok(value) = serde_json::to_value(&event) {
-            if let Err(e) = self
-                .messages
-                .append_raw_event(&cfg.round.round_id, &value)
-                .await
-            {
-                tracing::warn!("RoundPhaseSet 事件写入失败: {e}");
-            }
-        }
+        self.messages
+            .append_durable_event(&cfg.round.round_id, &serde_json::to_value(&event)?)
+            .await?;
         self.state.lock().await.locked = locked;
+        Ok(())
     }
 
     /// 将持久化日志的权威重放结果一次性应用到实时管线。

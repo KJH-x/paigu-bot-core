@@ -125,10 +125,11 @@ async fn update_message(
     Ok(Json(value))
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 struct DeleteQuery {
-    #[serde(default)]
-    record_revision: Option<u64>,
+    round_id: String,
+    config_revision: u64,
+    record_revision: u64,
     #[serde(default)]
     recompute: Option<bool>,
 }
@@ -138,9 +139,16 @@ async fn delete_message(
     Path(key): Path<String>,
     Query(query): Query<DeleteQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let value = messages::delete_message(&state, &key, query.record_revision, query.recompute)
-        .await
-        .map_err(ServiceError::into_api)?;
+    let value = messages::delete_message(
+        &state,
+        &key,
+        &query.round_id,
+        query.config_revision,
+        query.record_revision,
+        query.recompute,
+    )
+    .await
+    .map_err(ServiceError::into_api)?;
     Ok(Json(value))
 }
 

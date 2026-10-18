@@ -189,6 +189,7 @@ pub async fn replay(
 }
 
 /// 从内存消息列表重放（快照导入 / 单测复用）；不消费 `ParseOverride` 事件。
+#[cfg(test)]
 pub async fn replay_messages(
     base: &AppConfig,
     records: &[MessageRecord],

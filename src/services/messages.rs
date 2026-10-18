@@ -54,10 +54,11 @@ pub async fn list_messages(
     since: i64,
     limit: Option<usize>,
 ) -> Result<Value, ServiceError> {
-    let cfg = state.cfg.get().await;
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.read().await;
     let mut records = state
         .messages
-        .read_all(&cfg.round.round_id)
+        .read_only(&cfg.round.round_id)
         .await
         .map_err(ServiceError::from)?;
     records.sort_by_key(|r| r.seq);
@@ -71,6 +72,7 @@ pub async fn list_messages(
         .take(limit)
         .map(|record| {
             let mut view = message_view(record);
+            view["round_id"] = json!(cfg.round.round_id);
             if let Some(current) = live
                 .iter()
                 .find(|m| m["record_id"] == record.record_id && m["round_id"] == cfg.round.round_id)
@@ -93,6 +95,8 @@ pub async fn list_messages(
 
     Ok(json!({
         "messages": page,
+        "round_id": cfg.round.round_id,
+        "config_revision": cfg.revision,
         "version": version,
         "count": returned,
         "total": total,
@@ -107,6 +111,7 @@ pub async fn actions(state: &ApiState, key: &str, round_id: &str) -> Result<Valu
 
 #[derive(Deserialize)]
 pub struct CreateInput {
+    pub round_id: String,
     #[serde(default)]
     pub user_id: String,
     #[serde(default)]
@@ -127,22 +132,18 @@ pub struct CreateInput {
     pub status: Option<String>,
     #[serde(default)]
     pub detail: Option<String>,
-    #[serde(default)]
-    pub revision: Option<u64>,
+    pub revision: u64,
     #[serde(default)]
     pub recompute: Option<bool>,
 }
 
 pub async fn create_message(state: &ApiState, body: CreateInput) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     if crate::services::settlement::is_locked(state).await? {
         return Err(ServiceError::Locked("轮次已锁定，不能新增消息".to_string()));
     }
     let cfg = state.cfg.get().await;
-    if let Some(rev) = body.revision {
-        if rev != cfg.revision {
-            return Err(ServiceError::StaleRevision(cfg.revision));
-        }
-    }
+    ensure_context(&cfg, &body.round_id, body.revision)?;
 
     let rec = MessageRecord {
         record_id: new_record_id(),
@@ -177,7 +178,11 @@ pub async fn create_message(state: &ApiState, body: CreateInput) -> Result<Value
 
     let recomputed = body.recompute.unwrap_or(true);
     let result = if recomputed {
-        Some(replay::recompute(state).await.map_err(ServiceError::from)?)
+        Some(
+            replay::recompute_locked(state, &cfg)
+                .await
+                .map_err(ServiceError::from)?,
+        )
     } else {
         None
     };
@@ -191,8 +196,9 @@ pub async fn create_message(state: &ApiState, body: CreateInput) -> Result<Value
 
 #[derive(Deserialize)]
 pub struct UpdateInput {
-    #[serde(default)]
-    pub record_revision: Option<u64>,
+    pub round_id: String,
+    pub config_revision: u64,
+    pub record_revision: u64,
     #[serde(default)]
     pub user_id: Option<String>,
     #[serde(default)]
@@ -214,10 +220,12 @@ pub async fn update_message(
     key: &str,
     body: UpdateInput,
 ) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     if crate::services::settlement::is_locked(state).await? {
         return Err(ServiceError::Locked("轮次已锁定，不能修改消息".to_string()));
     }
     let cfg = state.cfg.get().await;
+    ensure_context(&cfg, &body.round_id, body.config_revision)?;
     let record_id = resolve_key(state, &cfg.round.round_id, key).await?;
 
     let mut updated: Option<MessageRecord> = None;
@@ -234,11 +242,9 @@ pub async fn update_message(
     let stored = state
         .messages
         .update(&cfg.round.round_id, &record_id, |target| {
-            if let Some(expected) = body.record_revision {
-                if expected != target.record_revision {
-                    conflict = Some(target.clone());
-                    return;
-                }
+            if body.record_revision != target.record_revision {
+                conflict = Some(target.clone());
+                return;
             }
             let mut candidate = target.clone();
             if let Some(v) = &body.user_id {
@@ -294,7 +300,11 @@ pub async fn update_message(
 
     let recomputed = body.recompute.unwrap_or(true);
     let result = if recomputed {
-        Some(replay::recompute(state).await.map_err(ServiceError::from)?)
+        Some(
+            replay::recompute_locked(state, &cfg)
+                .await
+                .map_err(ServiceError::from)?,
+        )
     } else {
         None
     };
@@ -314,13 +324,17 @@ pub async fn update_message(
 pub async fn delete_message(
     state: &ApiState,
     key: &str,
-    record_revision: Option<u64>,
+    round_id: &str,
+    config_revision: u64,
+    record_revision: u64,
     recompute: Option<bool>,
 ) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     if crate::services::settlement::is_locked(state).await? {
         return Err(ServiceError::Locked("轮次已锁定，不能删除消息".to_string()));
     }
     let cfg = state.cfg.get().await;
+    ensure_context(&cfg, round_id, config_revision)?;
     let record_id = resolve_key(state, &cfg.round.round_id, key).await?;
     let current = find_record(state, &cfg.round.round_id, &record_id).await?;
     if current.processing.is_some()
@@ -332,13 +346,11 @@ pub async fn delete_message(
             "已自动处理的消息不能删除；请使用人工忽略/拒绝保留原始记录".to_string(),
         ));
     }
-    if let Some(expected) = record_revision {
-        if expected != current.record_revision {
-            return Err(ServiceError::Conflict(json!({
-                "error": "stale_record_revision",
-                "message": message_view(&current),
-            })));
-        }
+    if record_revision != current.record_revision {
+        return Err(ServiceError::Conflict(json!({
+            "error": "stale_record_revision",
+            "message": message_view(&current),
+        })));
     }
     if !state
         .messages
@@ -351,7 +363,11 @@ pub async fn delete_message(
 
     let recomputed = recompute.unwrap_or(true);
     let result = if recomputed {
-        Some(replay::recompute(state).await.map_err(ServiceError::from)?)
+        Some(
+            replay::recompute_locked(state, &cfg)
+                .await
+                .map_err(ServiceError::from)?,
+        )
     } else {
         None
     };
@@ -363,10 +379,11 @@ pub async fn delete_message(
     }))
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 pub struct RerouteInput {
-    #[serde(default)]
-    pub record_revision: Option<u64>,
+    pub round_id: String,
+    pub config_revision: u64,
+    pub record_revision: u64,
 }
 
 pub async fn reroute_message(
@@ -374,19 +391,19 @@ pub async fn reroute_message(
     key: &str,
     body: RerouteInput,
 ) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     if crate::services::settlement::is_locked(state).await? {
         return Err(ServiceError::Locked("轮次已锁定，不能重新路由".to_string()));
     }
     let cfg = state.cfg.get().await;
+    ensure_context(&cfg, &body.round_id, body.config_revision)?;
     let record_id = resolve_key(state, &cfg.round.round_id, key).await?;
     let current = find_record(state, &cfg.round.round_id, &record_id).await?;
-    if let Some(expected) = body.record_revision {
-        if expected != current.record_revision {
-            return Err(ServiceError::Conflict(json!({
-                "error": "stale_record_revision",
-                "message": message_view(&current),
-            })));
-        }
+    if body.record_revision != current.record_revision {
+        return Err(ServiceError::Conflict(json!({
+            "error": "stale_record_revision",
+            "message": message_view(&current),
+        })));
     }
     let (identity, _) = crate::parser::normalize::clean_nickname(&current.nickname);
     let routed = if !crate::parser::policy::group_allowed(
@@ -414,26 +431,31 @@ pub async fn reroute_message(
         })
         .await
         .map_err(ServiceError::from)?;
-    let result = replay::recompute(state).await.map_err(ServiceError::from)?;
+    let result = replay::recompute_locked(state, &cfg)
+        .await
+        .map_err(ServiceError::from)?;
     let message = find_record(state, &cfg.round.round_id, &record_id).await?;
     Ok(json!({ "ok": true, "message": message_view(&message), "result": result }))
 }
 
 async fn resolve_key(state: &ApiState, round_id: &str, key: &str) -> Result<String, ServiceError> {
-    match state
-        .messages
-        .resolve_record_id(round_id, key)
-        .await
-        .map_err(ServiceError::from)?
-    {
-        Ok(record_id) => Ok(record_id),
-        Err(0) => Err(ServiceError::NotFound(format!("message {key} not found"))),
-        Err(matches) => Err(ServiceError::Conflict(json!({
-            "error": "ambiguous_legacy_seq",
-            "seq": key,
-            "matches": matches,
-        }))),
+    Ok(find_record(state, round_id, key).await?.record_id)
+}
+
+fn ensure_context(
+    cfg: &crate::settings::AppConfig,
+    round_id: &str,
+    revision: u64,
+) -> Result<(), ServiceError> {
+    if cfg.round.round_id != round_id {
+        return Err(ServiceError::Conflict(
+            json!({"error":"round_changed","message":"轮次已切换，未执行旧页面维护操作"}),
+        ));
     }
+    if cfg.revision != revision {
+        return Err(ServiceError::StaleRevision(cfg.revision));
+    }
+    Ok(())
 }
 
 async fn find_record(
@@ -443,7 +465,7 @@ async fn find_record(
 ) -> Result<MessageRecord, ServiceError> {
     state
         .messages
-        .read_all(round_id)
+        .read_only(round_id)
         .await
         .map_err(ServiceError::from)?
         .into_iter()

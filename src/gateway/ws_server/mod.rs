@@ -271,6 +271,7 @@ impl Gateway {
             }
         };
 
+        let _writer = self.messages.write_guard().await;
         let cfg = self.cfg.get().await;
         let policy = RoutePolicy {
             whitelist_groups: cfg.gateway.whitelist_groups.clone(),

@@ -42,23 +42,21 @@ pub async fn do_replay(
     state: &ApiState,
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
-    let cfg = state.cfg.get().await;
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.read().await;
     let result = session::replay(state.messages.as_ref(), &cfg, overrides).await?;
     remember_replay(&result);
     Ok(result)
 }
 
-/// 消息变更后的权威重算：写回每条消息状态，并原子替换实时管线。
-/// 复用 `Pipeline::recompute`（实时/重放同源，含合并分组）。
-pub async fn recompute(state: &ApiState) -> anyhow::Result<Value> {
+/// 消息变更后的权威重算：原消息不改写，一次发布派生投影。
+/// 调用方持有共同写锁（实时/重放同源，含合并分组）。
+pub(crate) async fn recompute_locked(
+    state: &ApiState,
+    cfg: &crate::settings::AppConfig,
+) -> anyhow::Result<Value> {
     let started = std::time::Instant::now();
-    let cfg = state.cfg.get().await;
-    let result = state.pipeline.recompute().await?;
-    let current = state.cfg.get().await;
-    anyhow::ensure!(
-        current.revision == cfg.revision && current.round.round_id == cfg.round.round_id,
-        "配置在重算期间发生变化，请重试"
-    );
+    let result = state.pipeline.recompute_locked(cfg).await?;
     remember_replay(&result);
 
     let mut counts: HashMap<&str, usize> = HashMap::new();

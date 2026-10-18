@@ -6,6 +6,7 @@
 
   var state = {
     revision: null,
+    roundId: '',
     config: defaultConfig(),
     table: { packages: [] },
     result: null,
@@ -17,6 +18,11 @@
     locked: false,
     draftTimer: null,
     draftSaveChain: Promise.resolve(),
+    generation: 0,
+    draftEdits: 0,
+    savedEdits: 0,
+    draftConflict: false,
+    evaluation: 0,
     suppressSave: false,
     catalog: []
   };
@@ -305,6 +311,7 @@
     pkgs.forEach(function (pkg, pi) {
       var card = el('div', 'pkg');
       card.addEventListener('dragover', function (e) {
+        if(state.locked)return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         card.classList.add('drop');
@@ -315,6 +322,7 @@
       card.addEventListener('drop', function (e) {
         e.preventDefault();
         card.classList.remove('drop');
+        if(state.locked)return;
         var raw = e.dataTransfer.getData('text/plain');
         if (!raw) return;
         var parts = raw.split(':');
@@ -322,6 +330,7 @@
       });
 
       var head = el('div', 'pkg-head');
+      card.dataset.packageIndex=pi;card.tabIndex=-1;
       head.appendChild(el('span', 'pkg-id', pkg.package_id));
       head.appendChild(el('span', 'spacer'));
       head.appendChild(buttonEl('删包', 'small danger', function () {
@@ -371,6 +380,7 @@
         if (control.id !== 'unlock-order') control.disabled = !!state.locked;
       });
     }
+    Array.prototype.forEach.call(document.querySelectorAll('.line-handle'),function(handle){handle.draggable=!state.locked;handle.setAttribute('aria-disabled',String(!!state.locked));});
     var configHost = $('settle');
     if (configHost) {
       Array.prototype.forEach.call(configHost.querySelectorAll('input,button,select'), function (control) {
@@ -380,15 +390,17 @@
     $('lock-order').classList.toggle('hidden', !!state.locked);
     $('unlock-order').classList.toggle('hidden', !state.locked);
     $('save').disabled = !!state.locked;
-    $('draft-status').textContent = state.locked ? '已锁定 · revision ' + state.draftRevision : '已保存 · revision ' + state.draftRevision;
+    $('draft-status').textContent = state.locked ? '已锁定 · revision ' + state.draftRevision :
+      (state.draftConflict ? '保存冲突 · 本地草稿保留' : state.draftEdits!==state.savedEdits ? '有未保存改动' : '已保存 · revision ' + state.draftRevision);
   }
 
   function lineRow(pkg, line, pi, li) {
     var row = el('div', 'line' + (line.is_gift ? ' gift' : ''));
     var handle = el('span', 'line-handle', '⠿');
-    handle.draggable = true;
+    handle.draggable = !state.locked;
     handle.title = '拖到其它包';
     handle.addEventListener('dragstart', function (e) {
+      if(state.locked){e.preventDefault();return;}
       e.dataTransfer.setData('text/plain', pi + ':' + li);
       e.dataTransfer.effectAllowed = 'move';
     });
@@ -437,11 +449,16 @@
     row.appendChild(buttonEl('删', 'small danger', function () {
       pkg.lines.splice(li, 1); renderOrderTable(); evaluate(true); scheduleDraftSave();
     }));
+    var move=el('div','line-move');
+    var choices=[['','选择目标包']].concat(state.table.packages.map(function(p,i){return [String(i),p.package_id];}).filter(function(p){return p[0]!==String(pi);}));
+    var target=selectEl(choices,'',function(){});target.setAttribute('aria-label','移动 '+(item && item.name || line.item_id)+' 到包');
+    move.appendChild(target);move.appendChild(buttonEl('移动','small',function(){if(target.value==='')return;moveLine(pi,li,intOf(target.value,-1));}));
+    row.appendChild(move);
     return row;
   }
 
   function moveLine(si, li, dst) {
-    if (si < 0 || li < 0 || si === dst) return;
+    if (state.locked || si < 0 || li < 0 || dst<0 || si === dst) return;
     var pkgs = state.table.packages;
     if (si >= pkgs.length || dst >= pkgs.length) return;
     var pkg = pkgs[si];
@@ -461,6 +478,7 @@
     renderOrderTable();
     evaluate(true);
     scheduleDraftSave();
+    var destination=$('order-table').querySelector('[data-package-index="'+dst+'"]');if(destination)destination.focus({preventScroll:true});
   }
 
   function addPackage() {
@@ -476,33 +494,38 @@
 
   function scheduleDraftSave() {
     if (state.suppressSave || state.locked) return;
+    state.draftEdits++;
     if (state.draftTimer) clearTimeout(state.draftTimer);
     $('draft-status').textContent = '等待保存…';
-    state.draftTimer = setTimeout(function () { saveDraft(); }, 500);
+    state.draftTimer = setTimeout(function () { saveDraft().catch(function(){}); }, 500);
   }
 
   function saveDraft() {
     if (state.locked) return Promise.resolve(null);
     if (state.draftTimer) { clearTimeout(state.draftTimer); state.draftTimer = null; }
+    var generation=state.generation, round=state.roundId, base=P.resolveApiBase(), edit=state.draftEdits;
+    var payload={round_id:round,order_table:P.deepClone(state.table),selected_strategy:state.selectedStrategy,order_numbers:P.deepClone(state.orderNumbers)};
     state.draftSaveChain = state.draftSaveChain.catch(function () { return null; }).then(function () {
+      if(generation!==state.generation || round!==state.roundId || base!==P.resolveApiBase()) throw new Error('旧页面保存已取消，未写入其他轮次或实例');
+      if(state.draftConflict) throw new Error('请先处理保存冲突，本地草稿仍保留');
       $('draft-status').textContent = '保存中…';
-      return P.put('/api/settlement/draft', {
-        revision: state.draftRevision,
-        order_table: P.deepClone(state.table),
-        selected_strategy: state.selectedStrategy,
-        order_numbers: P.deepClone(state.orderNumbers)
-      }).then(function (res) {
+      payload.revision=state.draftRevision;
+      return P.put(base+'/api/settlement/draft', payload).then(function (res) {
+        if(generation!==state.generation || round!==state.roundId) return res;
         var draft = res.draft || {};
+        if(draft.round_id!==round) throw new Error('服务返回的轮次不匹配，未套用结果');
         state.draftRevision = draft.revision || state.draftRevision;
-        state.result = draft.last_result || state.result;
+        state.savedEdits=edit;
+        if(edit===state.draftEdits)state.result = draft.last_result || state.result;
         state.locked = !!draft.locked;
         renderResult();
         applyLockState();
-        $('draft-status').textContent = '已保存 · revision ' + state.draftRevision;
         return res;
       }).catch(function (err) {
+        if(generation!==state.generation)throw err;
+        state.draftConflict=true;
         $('draft-status').textContent = '保存失败';
-        if (err.status === 409 && err.data && err.data.draft) applyDraft(err.data.draft);
+        // A conflict must not replace the administrator's unsaved order table.
         showBanner('草稿保存失败：' + P.errorText(err), true);
         throw err;
       });
@@ -511,12 +534,14 @@
   }
 
   function applyDraft(draft) {
+    if(draft.round_id && draft.round_id!==state.roundId)throw new Error('轮次已切换，请重新载入；未套用另一轮草稿');
     state.draftRevision = draft.revision || 0;
     state.table = draft.order_table || { packages: [] };
     state.result = draft.last_result || null;
     state.selectedStrategy = draft.selected_strategy || null;
     state.orderNumbers = draft.order_numbers || {};
     state.locked = !!draft.locked;
+    state.savedEdits=state.draftEdits=0;state.draftConflict=false;
     renderOrderTable();
     renderResult();
     applyLockState();
@@ -524,17 +549,19 @@
 
   function loadDraft() {
     state.suppressSave = true;
+    var generation=state.generation;
     return P.get('/api/settlement/draft').then(function (res) {
+      if(generation!==state.generation)return;
       applyDraft(res.draft || {});
       $('draft-status').textContent = state.locked ? '已锁定 · revision ' + state.draftRevision : '已保存 · revision ' + state.draftRevision;
     }).catch(function (err) {
       showBanner('结算草稿载入失败：' + P.errorText(err), true);
-    }).then(function () { state.suppressSave = false; });
+    }).then(function () { if(generation===state.generation)state.suppressSave = false; });
   }
 
   function lockOrder() {
     saveDraft().then(function () {
-      return P.post('/api/settlement/lock', { revision: state.draftRevision });
+      return P.post('/api/settlement/lock', { round_id:state.roundId,revision: state.draftRevision });
     }).then(function (res) {
       applyDraft(res.draft || {});
       hideBanner();
@@ -546,7 +573,7 @@
 
   function unlockOrder() {
     if (!window.confirm('确认解锁？解锁后消息、配置和下单表可继续修改。')) return;
-    P.post('/api/settlement/unlock', { revision: state.draftRevision }).then(function (res) {
+    P.post('/api/settlement/unlock', { round_id:state.roundId,revision: state.draftRevision }).then(function (res) {
       applyDraft(res.draft || {});
       hideBanner();
       P.toast('已解锁', 'ok');
@@ -555,6 +582,7 @@
 
   function evaluate(immediate) {
     if (state.evalTimer) { clearTimeout(state.evalTimer); state.evalTimer = null; }
+    var generation=state.generation, evaluation=++state.evaluation;
     var run = function () {
       if (!state.table.packages || !state.table.packages.length) {
         state.result = null; renderResult(); return;
@@ -562,12 +590,14 @@
       setConn('busy', '试算中…');
       P.post('/api/settlement/evaluate', { order_table: state.table, config: requestConfig() })
         .then(function (res) {
+          if(generation!==state.generation || evaluation!==state.evaluation)return;
           state.result = res;
           setConn('ok', '已试算');
           hideBanner();
           renderResult();
         })
         .catch(function (err) {
+          if(generation!==state.generation || evaluation!==state.evaluation)return;
           setConn('bad', '试算失败');
           showBanner('试算失败：' + P.errorText(err), true);
         });
@@ -827,8 +857,14 @@
   }
 
   function loadConfig() {
+    var generation=++state.generation;
+    if(state.draftTimer){clearTimeout(state.draftTimer);state.draftTimer=null;}
+    if(state.evalTimer){clearTimeout(state.evalTimer);state.evalTimer=null;}
     setConn('busy', '载入中…');
     return P.get('/api/settlement/config').then(function (res) {
+      if(generation!==state.generation)return;
+      if(state.roundId && state.roundId!==res.round_id){state.table={packages:[]};state.orderNumbers={};state.draftRevision=0;renderOrderTable();}
+      state.roundId=res.round_id || '';
       state.revision = res.revision;
       state.config = normalizeConfig(res.config);
       renderConfig();
@@ -836,6 +872,7 @@
       setConn('ok', '配置已载入');
       hideBanner();
     }).catch(function (err) {
+      if(generation!==state.generation)return;
       setConn('bad', '配置载入失败');
       showBanner('结算配置载入失败：' + P.errorText(err), true);
     });
@@ -899,7 +936,7 @@
       window.location.href = url.toString();
     });
 
-    $('load').addEventListener('click', loadConfig);
+    $('load').addEventListener('click', function(){loadConfig().then(loadDraft);});
     $('save').addEventListener('click', saveConfig);
     $('evaluate').addEventListener('click', function () { evaluate(true); });
     $('load-sample').addEventListener('click', loadSample);

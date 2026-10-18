@@ -24,6 +24,8 @@ fn build_bundle(
     cfg: &AppConfig,
     records: &[MessageRecord],
     result: &ReplayResult,
+    journal: Value,
+    draft: Value,
     created_at: String,
 ) -> anyhow::Result<SnapshotBundle> {
     SnapshotBundle::seal(
@@ -32,9 +34,9 @@ fn build_bundle(
         created_at,
         serde_json::to_value(cfg)?,
         serde_json::to_value(records)?,
-        serde_json::to_value(&result.events)?,
+        journal,
         serde_json::to_value(&result.board)?,
-        serde_json::to_value(&result.settlement)?,
+        json!({"calculated":result.settlement,"draft":draft}),
     )
 }
 
@@ -50,18 +52,31 @@ pub struct ExportBody {
 }
 
 pub async fn snapshot_export(state: &ApiState, body: ExportBody) -> Result<Value, ServiceError> {
-    let cfg = state.cfg.get().await;
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.read().await;
     let records = state
         .messages
-        .read_all(&cfg.round.round_id)
+        .read_only(&cfg.round.round_id)
         .await
         .map_err(ServiceError::from)?;
-    let result = session::replay_messages(&cfg, &records, body.overrides)
+    let result = session::replay(&state.messages, &cfg, body.overrides)
         .await
         .map_err(ServiceError::from)?;
 
-    let bundle = build_bundle(&cfg, &records, &result, chrono::Utc::now().to_rfc3339())
-        .map_err(ServiceError::from)?;
+    let bundle = build_bundle(
+        &cfg,
+        &records,
+        &result,
+        json!(
+            state
+                .messages
+                .read_events_strict(&cfg.round.round_id)
+                .await?
+        ),
+        super::settlement::checkpoint(&cfg.round.round_id)?,
+        chrono::Utc::now().to_rfc3339(),
+    )
+    .map_err(ServiceError::from)?;
     let base = body
         .out_dir
         .map(PathBuf::from)
@@ -98,10 +113,15 @@ pub struct ImportBody {
     pub apply: bool,
     #[serde(default)]
     pub revision: Option<u64>,
+    #[serde(default)]
+    pub round_id: Option<String>,
+    #[serde(default)]
+    pub preflight_token: Option<String>,
 }
 
 pub async fn snapshot_import(state: &ApiState, body: ImportBody) -> Result<Value, ServiceError> {
-    let cfg = state.cfg.get().await;
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.read().await;
     if let Some(rev) = body.revision {
         if rev != cfg.revision {
             return Err(ServiceError::StaleRevision(cfg.revision));
@@ -131,33 +151,118 @@ pub async fn snapshot_import(state: &ApiState, body: ImportBody) -> Result<Value
         .verify()
         .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
 
-    let mut applied = false;
-    let mut result = None;
-    if body.apply {
-        let records: Vec<MessageRecord> = serde_json::from_value(bundle.messages.clone())
-            .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-        let imported_cfg: AppConfig = serde_json::from_value(bundle.config.clone())
-            .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-        state
-            .messages
-            .replace_all(&cfg.round.round_id, &records)
-            .await
-            .map_err(ServiceError::from)?;
-        let replayed =
-            session::replay_messages(&imported_cfg, &records, ReplayOverrides::default())
-                .await
-                .map_err(ServiceError::from)?;
-        applied = true;
-        result = Some(replay_result_json(&replayed));
+    let records: Vec<MessageRecord> = serde_json::from_value(bundle.messages.clone())
+        .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+    let mut ids = std::collections::HashSet::new();
+    if records
+        .iter()
+        .any(|r| r.record_id.is_empty() || !ids.insert(&r.record_id))
+    {
+        return Err(ServiceError::BadRequest(
+            "备份消息缺少稳定身份或身份重复，未猜测迁移".into(),
+        ));
     }
-
-    Ok(json!({
-        "ok": true,
-        "verified": true,
-        "manifest": manifest,
-        "applied": applied,
-        "result": result,
-    }))
+    let imported_cfg: AppConfig = serde_json::from_value(bundle.config.clone())
+        .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+    let applicable =
+        manifest.round_id == cfg.round.round_id && imported_cfg.round.round_id == manifest.round_id;
+    let current = state.messages.read_only(&cfg.round.round_id).await?;
+    let current_events = state
+        .messages
+        .read_events_strict(&cfg.round.round_id)
+        .await?;
+    let token = crate::messages::transactions::hash(&(
+        cfg.revision,
+        &cfg.round.round_id,
+        &manifest.hash,
+        &current,
+        &current_events,
+    ))?;
+    let mut events: Vec<Value> = serde_json::from_value(bundle.events.clone())
+        .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+    let mut domain = vec![];
+    for event in &events {
+        if event.get("event_type").is_some() {
+            let envelope: crate::domain::event::EventEnvelope =
+                serde_json::from_value(event.clone())
+                    .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+            if envelope.round_id.0 != cfg.round.round_id {
+                return Err(ServiceError::BadRequest("备份事件包含其他轮次".into()));
+            }
+            domain.push(envelope);
+        }
+    }
+    let overrides = crate::parser::parsed_event::collect_parse_overrides(&domain);
+    let phase = domain
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.payload,
+                crate::domain::event::DomainEvent::RoundPhaseSet(_)
+            )
+        })
+        .max_by_key(|e| (e.effective_at, e.sequence))
+        .and_then(|e| match &e.payload {
+            crate::domain::event::DomainEvent::RoundPhaseSet(p) => p.phase,
+            _ => None,
+        });
+    let computed = session::replay_messages_with_parse(
+        &cfg,
+        &records,
+        ReplayOverrides::default(),
+        &overrides,
+        phase,
+    )
+    .await?;
+    if !body.apply {
+        return Ok(
+            json!({"ok":true,"verified":true,"applied":false,"applicable":applicable,"manifest":manifest,
+            "target_round_id":cfg.round.round_id,"config_revision":cfg.revision,"preflight_token":token,
+            "current_messages":current.len(),"import_messages":records.len(),
+            "effect":"替换当前轮消息与审计，保留当前配置和订单草稿；按当前配置确定性重算，旧完整日志留私有备份。不会重解包或发群消息。"}),
+        );
+    }
+    if !applicable || body.round_id.as_deref() != Some(&cfg.round.round_id) {
+        return Err(ServiceError::Conflict(
+            json!({"error":"round_changed","message":"仅能向预检时的同一激活轮次应用，不自动切轮"}),
+        ));
+    }
+    if body.revision != Some(cfg.revision)
+        || body.preflight_token.as_deref() != Some(token.as_str())
+    {
+        return Err(ServiceError::Conflict(
+            json!({"error":"stale_import_preflight","message":"预检后配置、消息或事件已变化，未覆盖新数据；请重新预检"}),
+        ));
+    }
+    if state.pipeline.is_locked().await || super::settlement::round_locked(&cfg.round.round_id)? {
+        return Err(ServiceError::Locked("轮次已锁定，不能应用备份".into()));
+    }
+    let audit = crate::domain::event::EventEnvelope {
+        event_id: crate::domain::ids::EventId(uuid::Uuid::new_v4().to_string()),
+        round_id: crate::domain::ids::RoundId(cfg.round.round_id.clone()),
+        group_id: cfg.round.group_id.clone(),
+        user_id: crate::domain::ids::UserId("admin".into()),
+        raw_message_id: None,
+        event_type: "snapshot_applied".into(),
+        effective_at: chrono::Utc::now(),
+        sequence: crate::messages::next_seq(),
+        status: crate::domain::event::EventStatus::Active,
+        payload: crate::domain::event::DomainEvent::SnapshotApplied {
+            transaction_id: uuid::Uuid::new_v4().to_string(),
+            manifest_hash: manifest.hash.clone(),
+            message_count: records.len(),
+        },
+    };
+    events.push(serde_json::to_value(audit).map_err(anyhow::Error::from)?);
+    let backup = state
+        .messages
+        .replace_round_durable(&cfg.round.round_id, &records, &events)
+        .await?;
+    state.pipeline.apply_replay(&computed, &records).await;
+    super::replay::remember_replay(&computed);
+    Ok(
+        json!({"ok":true,"verified":true,"applied":true,"manifest":manifest,"backup_path":backup,"result":replay_result_json(&computed)}),
+    )
 }
 
 #[cfg(test)]

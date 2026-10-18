@@ -9,6 +9,7 @@ mod gateway;
 mod llm;
 mod messages;
 mod parser;
+mod persistence;
 mod planner;
 mod replay;
 mod round;
@@ -53,7 +54,6 @@ async fn run_gateway_stack() -> Result<()> {
     let cfg_path =
         std::env::var("PAIGU_CONFIG_PATH").unwrap_or_else(|_| "config/app.json".to_string());
     let store = Arc::new(settings::ConfigStore::load(&cfg_path)?);
-    store.spawn_watch();
     let cfg = store.get().await;
 
     let messages = messages::MessageLog::from_env();
@@ -95,6 +95,17 @@ async fn run_gateway_stack() -> Result<()> {
     services::settlement::restore_persistent_lock(&state)
         .await
         .map_err(|error| anyhow::anyhow!("恢复结算锁定状态失败：{error:?}"))?;
+    let watcher_state = Arc::downgrade(&state);
+    store.spawn_watch(move || {
+        let weak = watcher_state.clone();
+        async move {
+            if let Some(state) = weak.upgrade() {
+                if let Err(error) = services::configuration::reload(&state, false).await {
+                    tracing::warn!("配置热载未应用：{error:?}");
+                }
+            }
+        }
+    });
     spawn_members_scheduler(state.clone());
     api::serve(state, port).await
 }

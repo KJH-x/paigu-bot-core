@@ -127,7 +127,10 @@ body[data-page="round"] .single-row input[type="number"] { text-align: right; }
   body[data-page="settlement"] #order > .panel-head::before { display: none; }
   body[data-page="settlement"] .cfg-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--nl-line); }
   body[data-page="settlement"] .cfg-row > button { justify-self: start; }
-  body[data-page="settlement"] .line { display: grid; grid-template-columns: 20px minmax(190px,1fr) minmax(120px,0.7fr) 72px 100px 64px 90px 36px; align-items: end; gap: 8px; }
+  body[data-page="settlement"] .line { display: grid; grid-template-columns: 20px minmax(160px,1fr) minmax(110px,0.7fr) 62px 88px 56px 76px 36px minmax(140px,0.7fr); align-items: end; gap: 8px; }
+  body[data-page="settlement"] .line-move { display:flex;gap:4px;align-items:center;min-width:0; }
+  body[data-page="settlement"] .line-move select {min-width:0;width:100%;}
+  body[data-page="settlement"] .line-handle[aria-disabled="true"] {cursor:not-allowed;opacity:.4;}
   body[data-page="settlement"] .line-handle { align-self: center; }
   body[data-page="settlement"] .gift-toggle { align-self: center; }
   body[data-page="settlement"] .line-total { align-self: center; }

@@ -18,6 +18,11 @@ pub enum DomainEvent {
     RoundOpened(RoundOpened),
     ParseOverride(ParseOverrideEvent),
     RoundPhaseSet(RoundPhaseSet),
+    SnapshotApplied {
+        transaction_id: String,
+        manifest_hash: String,
+        message_count: usize,
+    },
 }
 
 impl DomainEvent {
@@ -34,6 +39,7 @@ impl DomainEvent {
             DomainEvent::RoundOpened(_) => "round_opened",
             DomainEvent::ParseOverride(_) => "parse_override",
             DomainEvent::RoundPhaseSet(_) => "round_phase_set",
+            DomainEvent::SnapshotApplied { .. } => "snapshot_applied",
         }
     }
 }

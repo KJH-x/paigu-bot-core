@@ -7,7 +7,9 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::settings::{AppConfig, ConfigError};
+use crate::settings::AppConfig;
+#[cfg(test)]
+use crate::settings::ConfigError;
 
 use super::ApiState;
 
@@ -54,11 +56,13 @@ async fn toggle_gateway(
     apply: fn(&mut crate::settings::GatewayConfig, bool),
     key: &str,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let _serial = state.pipeline.message_write_guard().await;
     let mut config = state.cfg.get().await;
     let revision = body.revision.unwrap_or(config.revision);
     apply(&mut config.gateway, body.enabled);
-    match state.cfg.put(config, revision).await {
-        Ok(revision) => {
+    match crate::services::configuration::apply_locked(&state, config, revision).await {
+        Ok(saved) => {
+            let revision = saved["revision"].as_u64().unwrap_or(revision);
             let config = state.cfg.get().await;
             Ok(Json(json!({
                 "ok": true,
@@ -69,7 +73,7 @@ async fn toggle_gateway(
                 "revision": revision,
             })))
         }
-        Err(error) => Err(config_error_response(&error)),
+        Err(error) => Err(error.into_api()),
     }
 }
 
@@ -130,63 +134,23 @@ async fn put_config(
                 .unwrap_or("category_binding_invalid"),
         ));
     }
-    let previous = state.cfg.get().await;
-    let round_unchanged = previous.round.round_id == body.config.round.round_id;
-    let business_changed = business_inputs(&previous) != business_inputs(&body.config);
-    match state.cfg.put(body.config, body.revision).await {
-        Ok(revision) => {
-            let config = state.cfg.read().await;
-            if config.revision != revision {
-                return Err(super::api_stale_revision(config.revision));
-            }
-            let recomputed = round_unchanged && business_changed;
-            if recomputed {
-                match state.pipeline.recompute_locked(&config).await {
-                    Ok(result) => crate::services::replay::remember_replay(&result),
-                    Err(error) => {
-                        return Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({
-                                "error":"recompute_failed", "config_saved":true, "revision":revision,
-                                "message":format!("配置已保存，但重算失败；请重新载入后重试：{error}")
-                            })),
-                        ))
-                    }
-                }
-            }
-            Ok(Json(
-                json!({ "config": &*config, "revision": revision, "recomputed":recomputed }),
-            ))
-        }
-        Err(error) => Err(config_error_response(&error)),
+    if body.config.round.round_id != current_round {
+        return Err(super::api_bad_request(
+            "请通过轮次激活操作切换轮次，配置保存不能静默切轮",
+        ));
     }
+    crate::services::configuration::apply_locked(&state, body.config, body.revision)
+        .await
+        .map(Json)
+        .map_err(crate::services::ServiceError::into_api)
 }
-
-fn business_inputs(config: &AppConfig) -> Value {
-    json!([
-        config.round,
-        config.gateway.whitelist_groups,
-        config.gateway.whitelist_members,
-        config.members.cn_overrides,
-        config.merge
-    ])
+async fn reload_config(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, super::ApiError> {
+    crate::services::configuration::reload(&state, true)
+        .await
+        .map(Json)
+        .map_err(crate::services::ServiceError::into_api)
 }
-
-async fn reload_config(
-    State(state): State<Arc<ApiState>>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    match state.cfg.reload().await {
-        Ok(revision) => {
-            let config = state.cfg.get().await;
-            Ok(Json(json!({ "config": config, "revision": revision })))
-        }
-        Err(error) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": error.to_string() })),
-        )),
-    }
-}
-
+#[cfg(test)]
 fn config_error_response(error: &ConfigError) -> (StatusCode, Json<Value>) {
     match error {
         ConfigError::StaleRevision { actual, .. } => (

@@ -12,6 +12,7 @@ use crate::domain::item::{Item, ItemKind, ItemSubitem};
 use crate::domain::money::MoneyCents;
 use crate::round::{ItemClass, PhaseWindow, RoundCategory};
 
+mod commit;
 /// 轮次库（`data/rounds/<round_id>.json`）读写与激活解析（U3）。
 pub mod rounds;
 
@@ -615,6 +616,7 @@ pub struct ConfigStore {
 impl ConfigStore {
     pub fn load(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
         let path = path.into();
+        commit::recover(&path)?;
         let mut cfg = if path.exists() {
             let raw = std::fs::read_to_string(&path)
                 .with_context(|| format!("read config {}", path.display()))?;
@@ -657,6 +659,11 @@ impl ConfigStore {
 
     pub async fn put(&self, mut cfg: AppConfig, expected: u64) -> Result<u64, ConfigError> {
         let mut guard = self.inner.write().await;
+        if commit::has_pending(&self.path) {
+            return Err(ConfigError::Io(std::io::Error::other(
+                "上笔配置事务待恢复，请先重载，未覆盖新配置",
+            )));
+        }
         if guard.revision != expected {
             return Err(ConfigError::StaleRevision {
                 expected,
@@ -667,68 +674,89 @@ impl ConfigStore {
         // U3：任何改变 round 的写入都同步落盘到 data/rounds/<round_id>.json。
         if rounds::is_valid_round_id(&cfg.round.round_id) {
             cfg.active_round_id = Some(cfg.round.round_id.clone());
-            if let Err(e) = rounds::write_round(&cfg.round) {
-                tracing::warn!("轮次落盘失败: {e}");
-            }
+            // The config and round files are installed from one recoverable pending record.
         } else {
-            tracing::warn!("非法 round_id，跳过轮次落盘: {}", cfg.round.round_id);
+            return Err(ConfigError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "非法轮次标识，未提交配置",
+            )));
         }
         let revision = cfg.revision;
-        let raw = serde_json::to_string_pretty(&cfg).map_err(ConfigError::Json)?;
-        std::fs::write(&self.path, raw).map_err(ConfigError::Io)?;
+        let _raw = serde_json::to_vec(&cfg).map_err(ConfigError::Json)?;
+        commit::persist(&self.path, &cfg).map_err(|e| ConfigError::Io(std::io::Error::other(e)))?;
         *guard = cfg;
         Ok(revision)
     }
 
+    /// Read external configuration without falling back to another round or
+    /// silently creating a replacement for a missing active-round file.
+    pub(crate) fn read_candidate(&self) -> anyhow::Result<AppConfig> {
+        commit::recover(&self.path)?;
+        let mut cfg: AppConfig = serde_json::from_slice(&std::fs::read(&self.path)?)?;
+        if let Some(id) = cfg.active_round_id.as_deref() {
+            anyhow::ensure!(rounds::is_valid_round_id(id), "非法激活轮次");
+            cfg.round = rounds::read_round(id)
+                .ok_or_else(|| anyhow::anyhow!("激活轮次文件缺失或损坏，未切换为其他轮次"))?;
+            anyhow::ensure!(cfg.round.round_id == id, "轮次文件标识与激活指针不一致");
+        }
+        Ok(cfg)
+    }
+
+    #[cfg(test)]
     pub async fn reload(&self) -> anyhow::Result<u64> {
-        let raw = std::fs::read_to_string(&self.path)?;
-        let mut cfg: AppConfig = serde_json::from_str(&raw)?;
-        let mut guard = self.inner.write().await;
-        // U3：热载同样解析激活轮次（以轮次文件为准）。
-        let persist = rounds::resolve_active(&mut cfg);
-        if cfg.revision <= guard.revision {
-            cfg.revision = guard.revision + 1;
-        }
-        let revision = cfg.revision;
-        let snapshot = cfg.clone();
-        *guard = cfg;
-        drop(guard);
-        if persist {
-            if let Ok(text) = serde_json::to_string_pretty(&snapshot) {
-                let _ = std::fs::write(&self.path, text);
-            }
-        }
-        Ok(revision)
+        let cfg = self.read_candidate()?;
+        let revision = self.get().await.revision;
+        self.put(cfg, revision).await.map_err(Into::into)
     }
 
-    /// 监听文件变更并热载（notify，带 300ms 去抖）。
-    pub fn spawn_watch(self: &Arc<Self>) {
+    /// Watch parent directories so atomic file replacement does not detach the
+    /// watch. Capture the Tokio handle here, not inside the OS thread.
+    pub fn spawn_watch<F, Fut>(self: &Arc<Self>, on_change: F)
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
         use notify::{Config as NConfig, RecursiveMode, Watcher};
-        let store = self.clone();
-        let path = self.path.clone();
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let path = self
+            .path
+            .canonicalize()
+            .unwrap_or_else(|_| self.path.clone());
         std::thread::spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel();
-            let mut watcher = match notify::RecommendedWatcher::new(tx, NConfig::default()) {
-                Ok(w) => w,
-                Err(_) => return,
+            let Ok(mut watcher) = notify::RecommendedWatcher::new(tx, NConfig::default()) else {
+                return;
             };
-            if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() {
+            let parent = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            if watcher.watch(parent, RecursiveMode::NonRecursive).is_err() {
                 return;
             }
-            let mut last = std::time::Instant::now();
-            while rx.recv().is_ok() {
-                if last.elapsed() < std::time::Duration::from_millis(300) {
-                    continue;
+            let rounds = rounds::rounds_dir()
+                .canonicalize()
+                .unwrap_or_else(|_| rounds::rounds_dir());
+            let _ = watcher.watch(&rounds, RecursiveMode::NonRecursive);
+            while let Ok(event) = rx.recv() {
+                let relevant = |event: &Result<notify::Event, notify::Error>| {
+                    event.as_ref().is_ok_and(|event| {
+                        event.paths.iter().any(|p| {
+                            p == &path
+                                || (p.parent() == Some(rounds.as_path())
+                                    && p.extension().is_some_and(|e| e == "json"))
+                        })
+                    })
+                };
+                let mut changed = relevant(&event);
+                // Trailing-edge debounce runs only in this dedicated OS thread.
+                while let Ok(event) = rx.recv_timeout(std::time::Duration::from_millis(300)) {
+                    changed |= relevant(&event);
                 }
-                last = std::time::Instant::now();
-                let rt = tokio::runtime::Handle::try_current();
-                if let Ok(rt) = rt {
-                    let store = store.clone();
-                    rt.spawn(async move {
-                        if let Err(e) = store.reload().await {
-                            tracing::warn!("config reload failed: {e}");
-                        }
-                    });
+                if changed {
+                    runtime.spawn(on_change());
                 }
             }
         });

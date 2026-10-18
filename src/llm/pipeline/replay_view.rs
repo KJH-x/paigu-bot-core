@@ -11,6 +11,7 @@ use super::Pipeline;
 impl Pipeline {
     /// Read-only history of the active pipeline: use recorded events, never reparse messages.
     pub async fn replay_view(&self) -> anyhow::Result<Value> {
+        let _serial = self.message_write_guard().await;
         let cfg = self.cfg.get().await;
         let (events, messages, eligibilities, names, version, live) = {
             let state = self.state.lock().await;

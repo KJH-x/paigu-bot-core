@@ -29,7 +29,10 @@ impl Pipeline {
                         "订单已锁定；请在结算页确认并解锁。".to_string(),
                     )
                 } else {
-                    self.set_locked(false).await;
+                    let cfg = self.cfg.get().await;
+                    if let Err(error) = self.set_locked_locked(&cfg, false).await {
+                        return self.persistence_failure(ev, false, error).await;
+                    }
                     let v = self.state.lock().await.version;
                     (
                         "Applied",
@@ -39,7 +42,10 @@ impl Pipeline {
                 }
             }
             "锁位" | "锁定" | "结团" | "结束" | "lock" | "close" => {
-                self.set_locked(true).await;
+                let cfg = self.cfg.get().await;
+                if let Err(error) = self.set_locked_locked(&cfg, true).await {
+                    return self.persistence_failure(ev, false, error).await;
+                }
                 let v = self.state.lock().await.version;
                 (
                     "Applied",

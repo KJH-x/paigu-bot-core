@@ -57,8 +57,11 @@ export async function verifyAutomaticBaseline(page, ctx) {
     check(current.current_outcome.status === 'Applied', 'saved action is reevaluated after priority edit');
     check(JSON.stringify(current.original_automatic) === savedBaseline, 'current outcome must not overwrite original automatic outcome');
     check(current.effective_source === 'saved_automatic', 'priority edit does not create a human parse override');
-    await api(ctx.base, 'PUT', `/api/messages/${record.record_id}`, { record_revision: 1, text: '覆盖原文' }, 400);
-    await api(ctx.base, 'DELETE', `/api/messages/${record.record_id}?record_revision=1`, undefined, 422);
+    const guard={round_id:roundId,config_revision:current.config_revision,record_revision:1};
+    await api(ctx.base, 'PUT', `/api/messages/${record.record_id}`, { ...guard, text: '覆盖原文' }, 400);
+    await api(ctx.base, 'PUT', `/api/messages/${record.record_id}`, { ...guard, round_id:'other_round', text: '覆盖原文' }, 409);
+    await api(ctx.base, 'PUT', `/api/messages/${record.seq}`, { ...guard, text: '覆盖原文' }, 404);
+    await api(ctx.base, 'DELETE', `/api/messages/${record.record_id}?round_id=${roundId}&config_revision=${current.config_revision}&record_revision=1`, undefined, 422);
     await api(ctx.base, 'GET', `/api/messages/${record.seq}/actions?round_id=${roundId}`, undefined, 404);
     await api(ctx.base, 'GET', `/api/messages/${record.record_id}/actions?round_id=other_round`, undefined, 409);
     await page.goto(`${ctx.base}/display.html?api=${encodeURIComponent(ctx.base)}`);

@@ -30,6 +30,10 @@ mod action_tests;
 #[cfg(test)]
 mod automatic_tests;
 #[cfg(test)]
+mod boundary_tests;
+#[cfg(test)]
+mod snapshot_tests;
+#[cfg(test)]
 mod suggest_tests;
 #[cfg(test)]
 mod tests;
@@ -290,9 +294,8 @@ pub struct Pipeline {
     llm: Arc<dyn LlmClient>,
     state: Mutex<State>,
     messages: Arc<MessageLog>,
-    /// 串行化合并摄取（避免并发 `recompute` 的读改写竞态）。
-    ingest_lock: Mutex<()>,
     view_clock: Mutex<view::ViewClock>,
+    parked: Mutex<std::collections::HashMap<String, State>>,
 }
 
 impl Pipeline {
@@ -345,8 +348,8 @@ impl Pipeline {
             llm,
             state: Mutex::new(State::default()),
             messages: messages.unwrap_or_else(MessageLog::from_env),
-            ingest_lock: Mutex::new(()),
             view_clock: Mutex::new(view::ViewClock::new()),
+            parked: Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -796,11 +799,14 @@ impl Pipeline {
     pub async fn recompute(&self) -> anyhow::Result<ReplayResult> {
         let _serial = self.message_write_guard().await;
         let cfg = self.cfg.get().await;
+        self.messages
+            .recover_replacement(&cfg.round.round_id)
+            .await?;
         self.recompute_locked(&cfg).await
     }
 
     pub(crate) async fn message_write_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.ingest_lock.lock().await
+        self.messages.write_guard().await
     }
 
     /// Caller holds message_write_guard; manual writers also hold the config read guard.
