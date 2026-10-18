@@ -140,7 +140,8 @@
       showBanner('此消息缺少可编辑的本地身份，请刷新后重试。', true); return;
     }
     pinnedRecord=m.record_id;filterMessages();
-    P.openMessageEditor({ apiBase: state.apiBase, message: m, resumeTask:task || null,taskToken:task?taskToken:'',convertGroup:!!(task && task.convertGroup),captureView:captureMessageView,onSaved: function (res) {
+    var openedApi=state.apiBase;
+    P.openMessageEditor({ apiBase: openedApi, message: m,isCurrentContext:function(){return state.source==='local' && state.roundId===m.round_id && state.apiBase===openedApi;},resumeTask:task || null,taskToken:task?taskToken:'',convertGroup:!!(task && task.convertGroup),captureView:captureMessageView,onSaved: function (res) {
       if (res && res.result && res.result.messages) renderMessages(P.normalizeMessages(res.result), true, false);
       refreshUndo();
       restart(false);

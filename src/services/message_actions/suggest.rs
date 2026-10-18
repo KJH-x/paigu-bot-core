@@ -76,6 +76,14 @@ pub async fn suggest(
         }
         selected.push(json!({"role":"补充","text":candidate.unwrap()["text"]}));
     }
+    let selected_ids: std::collections::HashSet<&str> = std::iter::once(key)
+        .chain(body.supplements.iter().map(|pick| pick.record_id.as_str()))
+        .collect();
+    if !complete_units(&context, &selected_ids) {
+        return Err(ServiceError::BadRequest(
+            "须选择完整的自动执行单元再请求代填".into(),
+        ));
+    }
     let catalog: Vec<_> = cfg.round.items.iter().map(|i|json!({"item_id":i.item_id,"name":i.name,"kind":i.kind,"aliases":i.aliases,"subitems":i.subitems.iter().map(|s|json!({"subitem_id":s.subitem_id,"name":s.name,"aliases":s.aliases})).collect::<Vec<_>>()})).collect();
     let input = json!({"messages":selected,"catalog":catalog,"current":body.selection,"cancel_targets":context["cancel_targets"],"explanation":body.instruction}).to_string();
     if input.len() > 60_000 {
@@ -122,9 +130,28 @@ pub async fn suggest(
         }
     }
     // A slow response cannot be applied to changed records/configuration.
-    let latest = read(state, key, &body.round_id).await?;
+    let _serial = state.pipeline.message_write_guard().await;
+    let latest = read_locked(state, key, &body.round_id).await?;
+    if latest["locked"] == true {
+        return Err(ServiceError::Locked(
+            "代填期间轮次已锁定；旧建议未返回，草稿未改变".into(),
+        ));
+    }
     if latest["config_revision"] != body.config_revision
         || latest["message"]["record_revision"] != body.record_revision
+        || latest["automatic_group"] != context["automatic_group"]
+        || latest["cancel_targets"] != context["cancel_targets"]
+        || !complete_units(&latest, &selected_ids)
+        || body.supplements.iter().any(|pick| {
+            !latest["supplement_candidates"]
+                .as_array()
+                .is_some_and(|candidates| {
+                    candidates.iter().any(|candidate| {
+                        candidate["record_id"] == pick.record_id
+                            && candidate["record_revision"] == pick.record_revision
+                    })
+                })
+        })
     {
         return Err(ServiceError::Conflict(
             json!({"error":"draft_context_changed","message":"代填期间消息或配置变化；草稿未改变"}),
@@ -133,4 +160,30 @@ pub async fn suggest(
     Ok(
         json!({"request_id":body.request_id,"draft_version":body.draft_version,"round_id":body.round_id,"record_id":key,"config_revision":body.config_revision,"record_revision":body.record_revision,"selection":selection,"executed":false}),
     )
+}
+
+fn complete_units(context: &Value, selected: &std::collections::HashSet<&str>) -> bool {
+    let main = context["automatic_group"]["members"].as_array();
+    let units = main.into_iter().chain(
+        context["supplement_units"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_array),
+    );
+    units
+        .filter(|unit| {
+            unit.iter().any(|record| {
+                record["record_id"]
+                    .as_str()
+                    .is_some_and(|id| selected.contains(id))
+            })
+        })
+        .all(|unit| {
+            unit.iter().all(|record| {
+                record["record_id"]
+                    .as_str()
+                    .is_some_and(|id| selected.contains(id))
+            })
+        })
 }

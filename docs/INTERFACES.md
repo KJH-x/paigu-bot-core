@@ -445,6 +445,8 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 第十二批验收细化：已知申购因前序修订/忽略而不再生效时，后续精确撤销仍保持原引用，不改撤其他申购；当前结果应逐动作说明“撤销未命中”，原自动结果不覆盖。此为现行 MP-T32 的可观测性补齐，不改变原数量、撤销范围、事件执行顺序或增加模型调用；先补失败回归再统一实时/重算说明。
 
+第十二批后段代填合同：动作详情增加只读 locked 标志；已锁定时可查看原文/动作/结果但不开放修改。显式 suggest 的模型等待不占共同写锁，返回前在同一写边界重新核对主条/配置/全部选中补充版本、真实自动组、可撤目标与锁态；任何变化拒绝旧建议，不执行或改关联。前端收到建议后再只读核对记录/轮次/锁定，期间输入/切记录/取消仍用请求与草稿版本守卫，迟到响应不覆盖；保存本身仍一次、零模型。
+
 MP-T40/41 额外暴露自动同意图聚合的旁路：连续撤不同商品时解析产物含多个商品，但旧校验只取首项。新理解必须逐商品生成规范撤销事件、保留原顺序/数量，全项校验成功才给出动作，不能丢掉第二商品或部分生效；实时与重算共用准备函数。旧已冻结产物不追溯重解析，原结果仍保留，必要时由人工完整修订。
 
 撤销解析校验保留已知商品上下文：已有 resolved_item_id 不能再用跨商品同名子项 first-match 改指其他商品；未知/失效/跨轮商品提示待核对，绝不降级成“撤最近一笔”。明确撤销数量按现行 1–99 规范校验，多项有一项无效则整体不输出事件。未提供商品的原“最近一笔”语义不变。
@@ -479,7 +481,7 @@ GET actions 返回 `editable_selection/selection/catalog/cancel_targets/editable
 
 MP-1 核心接线已通过隔离回归，尚非完整工作流：消息日志增加可选 `processing.results[]`，保存理解来源、原解析/候选、权限判定前的稳定事件、原处理结果与原回复、分组成员指纹及入站手动阶段。新记录重算优先复用对应组的已存结果；旧记录没有产物时标历史基线缺失，不伪造迁移。已有产物却损坏、版本未知或组指纹不匹配则 NeedConfirm，不隐式重问模型或按新别名重解释。锁期间的拒绝消息形成分组边界，不能吞并锁前认购；未知旧历史阶段不自动补造。
 
-已实现的只读 `GET /api/messages/:record_id/actions?round_id=...` 返回 `message/config_revision/original_automatic/current_automatic/effective_source/effective_parsed/manual_note/automatic_group/current_outcome` 与 `automatic_missing/automatic_matches/automatic_history_count`。原自动为初次结果，当前自动为匹配真实执行组的最近结果；人工仍沿用受守卫的 ParseOverride 优先。此接口不写日志、不重算、不调用模型；不接受 seq 回退。实时/复盘消息附 `original_automatic` 摘要和 `manual_note`。已带产物的原文/身份/时间修改为 400，物理删除为 422；旧无产物维护入口仍保留。
+已实现的只读 `GET /api/messages/:record_id/actions?round_id=...` 返回 `message/config_revision/original_automatic/current_automatic/effective_source/effective_parsed/manual_note/automatic_group/current_outcome` 与 `automatic_missing/automatic_matches/automatic_history_count`。原自动为初次结果，当前自动为匹配真实执行组的最近结果；人工仍沿用受守卫的 ParseOverride 优先。此接口只计算只读当前视图，不写日志、不发布状态、不调用模型；不接受 seq 回退。实时/复盘消息附 `original_automatic` 摘要和 `manual_note`。已带产物的原文/身份/时间修改为 400，物理删除为 422；旧无产物维护入口仍保留。
 
 `PUT /api/config`、文件热载、`config/reload`、激活轮 setup 在共同写边界内，经同一配置服务校验；业务输入变化先准备确定性重算（优先名单/时段/阶段、目录、白名单、CN、合并），完成可恢复配置/轮次文件提交后发布，返回 `recomputed`，模型调用为零。不能用配置 PUT 静默切轮。私有 pending 未完成时新提交拒绝，显式重载/启动可恢复；损坏文件拒绝，不回退其他轮次。消息事务日志与配置/备份的恢复协议不同，不宣称物理断电认证。
 
@@ -489,10 +491,10 @@ MP-1 核心接线已通过隔离回归，尚非完整工作流：消息日志增
 
 私有 `snapshot/import` 默认预检，返回 `target_round_id/config_revision/preflight_token/current_messages/import_messages/applicable/effect`，不写入；应用必须显式 `apply:true` 加同轮/版本/令牌。新消息、审计或配置使旧预检失效。应用仅替换消息与审计、保留当前配置和订单草稿；原 NC 不再处理，先准备重放，完整 before/after 私有备份和可恢复双文件安装，响应含 backup_path。导出 settlement 字段包含 calculated 与完整 draft；不是公共分享格式。接口仅供本地可信管理环境，未部署。
 
-请求与代码草案见 [专项计划 §15](./PLAN-message-reprocess-2026-10-15.md#15-详细实现契约与代码草案)。目标合同如下，不将未接线端点当可用接口：
+请求与代码草案见 [专项计划 §15](./PLAN-message-reprocess-2026-10-15.md#15-详细实现契约与代码草案)。下列保留分批接线历史；现行合同以本节前面的完整实现/守卫段和逐项台账为准：
 
 - MP-0（第一批已实现/隔离回归）：实时消息携带 `record_id/record_revision/round_id/seq`，与落盘同源。旧 `POST /api/messages/:record_id/override` 必须提供 `round_id/record_revision/parsed`；seq 路径不回退（404），跨轮/过期保存为 409，原自动多记录组暂返回 `auto_group_requires_transaction`（409）。新人工 ParseOverride 增 `target_record_id/target_record_revision`；重放按记录覆盖优先，旧 message_id 事件仍可读。seq 仅排序，不是身份。尚无跨文件崩溃原子提交、统一旧维护入口或独立消息游标，不能将本批当作完整新工作流。
 - MP-1…4 核心（第四批已接线，统一旁路仍未整体完成）：`POST .../actions` 可附 `supplements` 与 `release_supplements`（各含 record_id/record_revision），主条 replace、补充 reject，一条私有事务日志含检查点/前后选择；完整自动组才能转换。解除补充恢复原选择。`GET/POST /api/messages/undo` 只逆转最近成功人工事务再重放当前流，保留新消息；令牌/版本/政策/阶段/日志守卫，失败不占槽。旧 `/override` 也转同一事务。原文不改，保存/重算/撤回 0 LLM。
 - 可选 `POST /api/messages/:record_id/actions/suggest`（第四批已接线）：必需 request_id/draft_version/round_id/config_revision/record_revision/selection/instruction，可附 supplements；只返回经严格业务校验的草稿及 executed:false，不保存/执行。只此显式入口请求模型；不发送全名单/NC 原事件。失败/过期保留原草稿。
-- MP-5 部分（独立投影已接线，设置往返未完成）：`GET /api/display?epoch=...&view_revision=...` 返回 `view_epoch/view_revision/config_revision/round_id/catalog` 与同代排位/消息/汇总；相同游标 message_mode=unchanged，否则 message_mode=replace/full_resync=true，完整对账。旧 since 不再作为投影游标截断历史消息；不能与领域 version 混用。前端按记录身份原位更新。
+- MP-5（独立投影与设置携草稿往返均已接线）：`GET /api/display?epoch=...&view_revision=...` 返回 `view_epoch/view_revision/config_revision/round_id/catalog` 与同代排位/消息/汇总；相同游标 message_mode=unchanged，否则 message_mode=replace/full_resync=true，完整对账。旧 since 不再作为投影游标截断历史消息；不能与领域 version 混用。前端按记录身份原位更新。
 - 排、撤分别处理、分别原位；甲排 A、没有再次加排 A 就撤 A，撤掉原认购而不自动合并。明确目标与数量条件不暗中扩大为撤所有历史单。

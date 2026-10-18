@@ -76,6 +76,10 @@ async fn compute(
 
 pub async fn read(state: &ApiState, key: &str, round_id: &str) -> Result<Value, ServiceError> {
     let _serial = state.pipeline.message_write_guard().await;
+    read_locked(state, key, round_id).await
+}
+
+async fn read_locked(state: &ApiState, key: &str, round_id: &str) -> Result<Value, ServiceError> {
     let cfg = state.cfg.read().await;
     if cfg.round.round_id != round_id {
         return Err(ServiceError::Conflict(
@@ -176,6 +180,7 @@ pub async fn read(state: &ApiState, key: &str, round_id: &str) -> Result<Value, 
             .join("；")
     });
     Ok(json!({
+        "locked":state.pipeline.is_locked().await || crate::services::settlement::round_locked(round_id)?,
         "round_id":round_id,"config_revision":cfg.revision,"message":message,
         "model_draft_available":cfg.llm.enabled,
         "original_automatic":original,"current_automatic":auto,

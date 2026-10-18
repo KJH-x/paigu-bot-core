@@ -29,6 +29,20 @@ export async function verifySettlementReview(page,ctx){
     ]});
     await api(ctx.base,'POST',`/api/rounds/${round}/activate`,{mode:'fresh'});
     await api(ctx.base,'POST','/api/sim/messages',[{user_id:'成员01',nickname:'成员01',group_id:initial.config.round.group_id,text:'排 徽章 甲 2',timestamp:Date.now()}]);
+    await page.goto(`${ctx.base}/settlement.html?api=${encodeURIComponent(ctx.base)}#order`);
+    await page.locator('#load-allocation:not(:disabled)').waitFor();
+    let generatedResponse=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/settlement/from-allocation'));
+    await page.locator('#load-allocation').click();check((await generatedResponse).ok(),'real UI generates the current allocation');await saved();
+    const numberInputs=page.locator('#order-numbers input');
+    check(await numberInputs.count()>0,'generation exposes actual package order numbers');
+    for(let i=0;i<await numberInputs.count();i++){await numberInputs.nth(i).fill('GENERATED-'+i);await saved();}
+    let lockResponse=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/settlement/lock'));
+    await page.locator('#lock-order').click();check((await lockResponse).ok(),'generated order locks despite unclaimed zero-price catalog entry');locked=true;
+    lockResponse=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/api/settlement/unlock'));
+    page.once('dialog',d=>d.accept());
+    await page.locator('#unlock-order').click();check((await lockResponse).ok(),'same UI unlocks the generated order');locked=false;
+    await page.waitForFunction(()=>document.querySelector('#unlock-order').classList.contains('hidden')&&!document.querySelector('#load-allocation').disabled);
+    await page.goto(`${ctx.base}/index.html?api=${encodeURIComponent(ctx.base)}`);
     let v=await view();
     const line={item_id:'badge',subitem_id:'a',qty:1,unit_price_cents:1000,is_gift:false};
     const table={packages:[{package_id:'空包',lines:[]},{package_id:'包甲',lines:[{...line,unit_price_cents:0}]},{package_id:'包乙',lines:[{...line,qty:2}]}]};

@@ -10,6 +10,9 @@ export async function verifyMessageTransactions(page,ctx) {
   const initial=await api(ctx.base,'GET','/api/config'),round='e2e-transactions';
   const capture=async name=>{if(process.env.PAIGU_UI_CAPTURE_DIR) await page.screenshot({path:path.join(process.env.PAIGU_UI_CAPTURE_DIR,name+'.png')});};
   const errors=[],onError=e=>errors.push(String(e));page.on('pageerror',onError);
+  const outgoing=[],receiver=new WebSocket(ctx.wsUrl);
+  receiver.addEventListener('message',event=>outgoing.push(JSON.parse(event.data)));
+  await new Promise((resolve,reject)=>{receiver.addEventListener('open',resolve,{once:true});receiver.addEventListener('error',reject,{once:true});});
   const dialog=page.getByRole('dialog',{name:'修订消息动作'});
   try {
     check(!initial.config.llm.enabled&&!initial.config.gateway.reply_enabled,'isolated model and group actions');
@@ -88,10 +91,12 @@ export async function verifyMessageTransactions(page,ctx) {
     await page.keyboard.press('Escape');
     await page.locator('.draft-guard [data-choice="discard"]').click();
     check(requests===2,'only two explicit model button clicks issue requests');
+    check(outgoing.length===0,'fake receiver captured every outbound frame: save, undo and explicit draft caused no external gateway action');
     check(!errors.length,errors.join(';'));
   } finally {
     await page.unroute(/\/api\/messages\/[^/]+\/actions\?/);await page.unroute(/\/api\/messages\/[^/]+\/actions\/suggest$/);
     page.off('pageerror',onError);
+    receiver.close();
     await api(ctx.base,'POST',`/api/rounds/${encodeURIComponent(initial.config.round.round_id)}/activate`,{mode:'fresh'});
     const c=await api(ctx.base,'GET','/api/config');c.config.merge.enabled=initial.config.merge.enabled;
     await api(ctx.base,'PUT','/api/config',{config:c.config,revision:c.revision});

@@ -85,6 +85,10 @@
         compare.appendChild(el('p', 'hint', '自动理解保留不变；当前执行结果可能因修订或权限变化而不同。'));
       } else { compare.appendChild(el('p', '', '此历史消息没有可核对的原自动基线，不会伪造或重新解析。')); }
       content.appendChild(compare);
+      if(data.locked){
+        content.appendChild(el('p','ae-warning','轮次已锁定。当前只读查看，不能修订或请求代填；解锁后请重新打开核对。'));
+        return;
+      }
       if (data.absorbed_main) {
         content.appendChild(el('p', 'ae-warning', '此条已作为补充纳入主消息，不重复执行。请在主消息修改动作或解除关联。'));
         content.appendChild(button('去主消息 #' + data.absorbed_main.seq, function () { close(); P.openMessageEditor(Object.assign({}, opts, { message: Object.assign({}, data.absorbed_main, { round_id: data.round_id }) })); }));
@@ -157,12 +161,20 @@
         if (suggestController) suggestController.abort(); suggestController = new AbortController();
         var controller = suggestController, requestId = id(), version = draftVersion;
         aiStatus.textContent = '请求中；仍可手动编辑，后来的修改不会被覆盖。';
+        var selected=picked.map(recordVersion);
         P.post(endpoint + '/suggest', { request_id: requestId, draft_version: version, round_id: data.round_id, config_revision: data.config_revision,
           record_revision: data.message.record_revision, selection: { kind: 'replace', actions: copy(actions), note: note.value },
-          supplements: picked.map(recordVersion), instruction: instruction.value }, { timeout: 65000, signal: controller.signal }).then(function (res) {
+          supplements: selected, instruction: instruction.value }, { timeout: 65000, signal: controller.signal }).then(async function (res) {
           if (closed || controller !== suggestController || controller.signal.aborted) return;
+          if (!res || typeof res!=='object' || !res.selection || res.selection.kind!=='replace' || !Array.isArray(res.selection.actions) || !res.selection.actions.length) throw new Error('返回内容不是明确的动作草稿');
           if (version !== draftVersion || res.request_id !== requestId || res.draft_version !== version || res.record_id !== data.message.record_id || res.round_id !== data.round_id) {
             aiStatus.textContent = '草稿已变化，未覆盖你的新编辑。可以重新代填。'; return;
+          }
+          var latest=await P.get(endpoint+'?round_id='+encodeURIComponent(data.round_id));
+          if(closed || controller!==suggestController || controller.signal.aborted)return;
+          if(version!==draftVersion){aiStatus.textContent='草稿已变化，未覆盖你的新编辑。可以重新代填。';return;}
+          if((opts.isCurrentContext && !opts.isCurrentContext()) || P.stripSlash(P.resolveApiBase())!==P.stripSlash(opts.apiBase) || latest.round_id!==data.round_id || latest.config_revision!==data.config_revision || latest.message.record_revision!==data.message.record_revision || latest.locked || JSON.stringify(latest.automatic_group)!==JSON.stringify(data.automatic_group) || JSON.stringify(latest.cancel_targets)!==JSON.stringify(data.cancel_targets) || selected.some(function(pick){return !(latest.supplement_candidates || []).some(function(candidate){return candidate.record_id===pick.record_id && candidate.record_revision===pick.record_revision;});})){
+            aiStatus.textContent='上下文或锁定状态已变化，旧建议未填入；当前草稿保留，请重新核对。';return;
           }
           actions = copy(res.selection.actions); treatment = 'replace'; operation.value = treatment; draftVersion++; drawActions();
           aiStatus.textContent = '已填入草稿，请核对或继续修改；尚未保存或执行。';

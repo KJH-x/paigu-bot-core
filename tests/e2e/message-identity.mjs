@@ -33,6 +33,10 @@ export async function verifyMessageIdentity(page, ctx) {
     // Ambiguous input opens the same action editor used by all other local statuses.
     const text = '排 通行证 结城理 1 撤';
     const now = Date.now();
+    const active=(await request(ctx.base,'GET','/api/config'));
+    await request(ctx.base,'POST','/api/messages',{round_id:roundId,revision:active.revision,user_id:'成员07',nickname:'成员07',text:'占位管理插入',timestamp_ms:now-2000,status:'Ignored',recompute:false});
+    const dropped=await request(ctx.base,'POST','/api/sim/messages',[{user_id:'成员08',nickname:'成员08',group_id:'999999',text:'占位非接收群消息',timestamp:now-1000}]);
+    check(dropped.results[0].status==='Dropped','actual drop and management insert consume persistent sequence numbers before the live edit');
     await send('成员03', text, now);
     await send('成员04', '排 通行证 虎狼丸 1', now + 1000);
     await request(ctx.base, 'POST', '/api/sim/messages', Array.from({ length: 35 }, (_, i) => ({
@@ -107,9 +111,24 @@ export async function verifyMessageIdentity(page, ctx) {
     const otherRound = await request(ctx.base, 'POST', endpoint, { ...lastBody, record_revision: 2, round_id: 'other_round' }, 409);
     check(otherRound.error === 'round_changed', 'do not write to a different active round');
     await request(ctx.base, 'POST', `/api/messages/${target.seq}/actions`, { ...lastBody, record_revision: 2 }, 404);
+    // Keep selection and scroll while disconnected, then cover an old row from
+    // the independent projection cursor (domain event count does not grow).
+    await handle.evaluate(n=>{const t=n.querySelector('.msg-text') || n;const range=document.createRange();range.selectNodeContents(t);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);window.__selectedMessageText=selection.toString();});
+    const selected=await page.evaluate(()=>getSelection().toString());
+    await page.route('**/api/display?*',route=>route.abort('connectionrefused'));
+    await page.locator('#refresh').click();await page.locator('#banner').filter({hasText:'API 未就绪'}).waitFor();
+    const disconnected=await request(ctx.base,'GET',endpoint+'?round_id='+roundId);
+    await request(ctx.base,'POST',endpoint,{transaction_id:'while-view-disconnected',round_id:roundId,config_revision:disconnected.config_revision,record_revision:disconnected.message.record_revision,selection:{...disconnected.editable_selection,note:'断线期间修正的解释'}});
+    check(await handle.evaluate(n=>n.isConnected),'disconnection does not clear old message nodes');
+    check(await page.evaluate(()=>getSelection().toString())===selected,'failed polling preserves selected text');
+    await page.unroute('**/api/display?*');await page.locator('#refresh').click();
+    await page.waitForFunction(id=>[...document.querySelectorAll('#messages .msg')].some(n=>n.__msg?.record_id===id&&n.__msg.record_revision===3&&n.textContent.includes('断线期间修正的解释')),target.record_id);
+    check(await handle.evaluate(n=>n.isConnected),'reconnect replaces old projection in the same message DOM');
+    check(Math.abs(await page.locator('#messages').evaluate(n=>n.scrollTop)-scrollBefore)<=1,'reconnect does not jump away from the historical position');
     await capture('message-identity-applied');
     check(!errors.length, 'browser errors: ' + errors.join('; '));
   } finally {
+    await page.unroute('**/api/display?*');
     page.off('pageerror', onError);
     await request(ctx.base, 'POST', `/api/rounds/${encodeURIComponent(originalCfg.round.round_id)}/activate`, { mode: 'fresh' });
     await page.goto(`${ctx.base}/display.html?api=${encodeURIComponent(ctx.base)}`);

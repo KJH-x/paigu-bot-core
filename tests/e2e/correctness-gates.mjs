@@ -40,6 +40,22 @@ export async function verifyCorrectnessGates(page,ctx){
     check(await page.locator('#members-body .clean').count()===0,'only final CN is editable');
     const memberId=await cn.getAttribute('data-user');
     await cn.fill('');await cn.pressSequentially('测试称呼甲');
+    check(await cn.inputValue()==='测试称呼甲','per-character input is not reset by rendering');
+    await cn.fill('');await cn.focus();
+    const cdp=await page.context().newCDPSession(page);
+    try{
+      await cdp.send('Input.imeSetComposition',{text:'中',selectionStart:1,selectionEnd:1});
+      await cdp.send('Input.imeSetComposition',{text:'中文',selectionStart:2,selectionEnd:2});
+      await cdp.send('Input.insertText',{text:'中文输入甲'});
+      check(await cn.inputValue()==='中文输入甲','actual browser IME composition is committed without losing characters or focus');
+      await cn.fill('');
+      // Controlled paste data never reads or overwrites the system clipboard.
+      await cn.evaluate(n=>{const data=new DataTransfer();data.setData('text/plain','粘贴称呼乙');n.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));});
+      await cdp.send('Input.insertText',{text:'粘贴称呼乙'});
+      check(await cn.inputValue()==='粘贴称呼乙','paste path retains the full controlled text');
+      await cn.fill('');await cn.pressSequentially('测试称呼甲');
+      check(await cn.evaluate(n=>n===document.activeElement),'clear/retype retains the same focused control');
+    }finally{await cdp.detach();}
     await page.locator('#member-source').evaluate(n=>n.open=true);
     await page.locator('#mb-cache').fill(path.join(ctx.tmpDir,'unsaved-source.json'));
     response=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().endsWith('/api/config'));

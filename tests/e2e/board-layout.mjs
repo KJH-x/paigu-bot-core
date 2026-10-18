@@ -42,6 +42,10 @@ export async function verifyBoardLayout(page, ctx) {
   const errors = [];
   const onError = error => errors.push(error.message);
   page.on('pageerror',onError);
+  async function setTheme(theme){
+    await page.evaluate(async value=>{window.PAIGU_SHELL.theme.set(value);await new Promise(requestAnimationFrame);await Promise.all(document.getAnimations().filter(a=>Number.isFinite(a.effect.getComputedTiming().endTime)).map(a=>a.finished.catch(()=>{})));},theme);
+    check(await page.locator('html').getAttribute('data-theme')===theme,'capture uses its named stable theme');
+  }
   async function capture(name) {
     if (!process.env.PAIGU_UI_CAPTURE_DIR) return;
     fs.mkdirSync(process.env.PAIGU_UI_CAPTURE_DIR,{recursive:true});
@@ -79,6 +83,7 @@ export async function verifyBoardLayout(page, ctx) {
     await page.goto(`${ctx.base}/display.html?api=${encodeURIComponent(ctx.base)}`);
     await page.waitForSelector('.board-grid .cell');
     await page.evaluate(()=>document.fonts.ready);
+    await setTheme('light');
     check(await page.locator('[data-width-mode="compact"]').getAttribute('aria-pressed')==='true','首次打开默认三字宽');
     await page.click('[data-width-mode="compact"]');
     const compact=await metrics('#board');
@@ -100,15 +105,17 @@ export async function verifyBoardLayout(page, ctx) {
     const full=await metrics('#board');
     check(!full.clipped,'全长姓名不能裁切');
     check(!full.overflow&&full.innerOverflow,'超宽排表只允许内部横向滚动');
+    const scroll=await page.locator('#board .item-section').nth(1).locator('.rows').evaluate(n=>{n.scrollLeft=n.scrollWidth;const end=n.scrollLeft;n.scrollLeft=end/2;const mid=n.scrollLeft;n.scrollLeft=0;return {end,mid,start:n.scrollLeft};});
+    check(scroll.end>scroll.mid&&scroll.mid>0&&scroll.start===0,'wide product allows real start/middle/end horizontal scrolling');
     check(full.widths[0]>full.widths[2],'不同盒列不应被同一个长名字撑宽');
     aligned(full);
     check(await page.evaluate(()=>window.testCell===document.querySelector('#board .cell')),'切换不能重建格子');
     await capture('board-full-light');
-    await page.click('#theme-toggle');
+    await setTheme('dark');
     await capture('board-full-dark');
     await page.click('[data-width-mode="compact"]');
     await capture('board-compact-dark');
-    await page.click('#theme-toggle');
+    await setTheme('light');
     liveBoard=board(true);
     liveBoard.item_allocations[0].boxes[0].slots[0].user='改名成员';
     liveVersion++;

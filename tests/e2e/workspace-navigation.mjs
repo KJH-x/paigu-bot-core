@@ -55,6 +55,22 @@ export async function verifyWorkspaceNavigation(page,ctx){
     await page.waitForFunction(()=>document.querySelector('#wf-api')?.textContent.includes('正常'));
     check(await page.locator('#api').inputValue()===ctx.base,'same-origin deployment ignores an unrelated stale stored API');
     check(await page.locator('#members-body,#msg-body').count()===0,'settings no longer owns members or message editing');
+    // Real hash navigation, reload, history and a recoverable obsolete anchor.
+    for(const hash of ['sec-gateway','sec-llm','sec-display','sec-snapshot']){
+      await page.goto(`${ctx.base}/settings.html?api=${encodeURIComponent(ctx.base)}#${hash}`);
+      await page.locator(`#${hash}`).waitFor();
+      await page.reload();await page.locator(`#${hash}`).waitFor();
+      check(await page.locator('.settings-panels > section:visible').count()===1,hash+' refresh exposes only its own panel');
+      check(await page.locator('.section-nav [aria-current="location"]').getAttribute('href')==='#'+hash,hash+' keeps selected subitem after reload');
+    }
+    await page.locator('.section-nav a[href="#sec-llm"]').click();
+    await page.locator('#sec-llm').waitFor();await page.goBack();await page.locator('#sec-snapshot').waitFor();
+    await page.goForward();await page.locator('#sec-llm').waitFor();
+    await page.goto(`${ctx.base}/settings.html?api=${encodeURIComponent(ctx.base)}#obsolete-placeholder`);
+    await page.locator('#unknown-anchor').waitFor();
+    check(await page.locator('.settings-panels > section:visible').count()===1,'unknown hash never leaves a blank settings workspace');
+    await page.locator('.section-nav a[href="#sec-display"]').click();await page.locator('#sec-display').waitFor();
+    check(await page.locator('#unknown-anchor').count()===0,'ordinary subitem navigation recovers from unknown hash');
     await page.goto(`${ctx.base}/settlement.html?api=${encodeURIComponent(ctx.base)}#order`);
     await page.waitForFunction(()=>document.querySelector('.section-nav a[aria-current="location"]')?.hash==='#order');
     check((await page.locator('#wf-stepper [aria-current="page"]').textContent()).includes('结算与下单'),'order anchor stays in its single workspace');

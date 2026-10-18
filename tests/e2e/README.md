@@ -37,6 +37,12 @@ pwsh tests/e2e/run.ps1
 
 ## 测试配置（临时，不落库）
 
+`draft-concurrency.mjs` 在真实隔离服务、关闭模型/发送的条件下，仅浏览器拦截代填响应，验证取消/连续请求乱序、切记录/轮次、并发修订、坏JSON/504/受控超时、真实订单锁定和锁后只读。`message-transactions.mjs` 连接本地假接收器捕获全部出站应用帧，保存/撤回/代填期间为0，不接入真实 NapCat。
+
+`catalog-reachability.mjs` 验证四类商品、明暗、筛选及长目录首中末实际点击/焦点/吸顶遮挡；`workspace-navigation.mjs` 补四分区直开/刷新/后退前进和未知hash恢复；`correctness-gates.mjs` 补 Chromium IME 组合输入与受控粘贴（不访问系统剪贴板）。`message-identity.mjs` 用真实管理插入＋Dropped 制造序号分歧，再验证断线期划词/旧节点保留、重连原位修订。
+
+只读表格回归：先构建，再运行 `python tests/read-only-corpus.py`（本机需有两份源工作簿和 openpyxl）。读取既有解析/夹具生成器，所有产物只写系统临时目录；仅将临时旧 variants 键转换为 subitems，不改预期排位/成员/数量，逐格比较并校验整个语料与源表哈希未变。私有输出不打印、不入库。
+
 `settlement-review.mjs` 实际点击缺订单号/重复/价格/数量问题到输入，验证规则独立保存、上游变更标记旧试算、完整保留订单、显式复核、迟到自动保存来源 409 仍保留输入、复核不绕过数量锁定、明暗截图。正式页不写演示数据；布局测试直接向隔离测试轮注入占位订单。
 
 `replay-graph.mjs` 用占位导入数据检查商品聚焦/分组、单领/等待、长混排姓名/特殊字符完整提示、键盘定位、字号下界、视区和步骤保留、旧绘图迟到守卫与零管理写入；步骤列表/列按钮可用 Space。`message-policy-return.mjs` 额外验证真实人工只改解释且事件数不变，当前轮复盘仍自动拉取新投影并保留步骤/定位。

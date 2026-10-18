@@ -86,6 +86,10 @@ export async function verifyScopedSettings(page,ctx){
     check(await page.locator('#rd-category').inputValue()==='test','round category is explicit');
     const originalCategory=await page.locator('#rd-category').inputValue();
     await page.locator('#rd-category').selectOption('normal');
+    const beforeActivation=calls.filter(url=>url.includes('/activate')).length;
+    await page.locator('#rounds-list [data-act="activate"][data-mode="continue"]').first().click();await guard('cancel');
+    check(calls.filter(url=>url.includes('/activate')).length===beforeActivation,'cancel round activation never submits the command or changes current data');
+    check(await page.locator('#rd-category').inputValue()==='normal','cancel activation preserves the unsaved round draft');
     await page.locator('#wf-stepper a[href*="settings.html"]').click();await guard('cancel');
     check(await page.locator('#rd-category').inputValue()==='normal','round draft remains on canceled leave');
     await page.locator('#rd-category').selectOption(originalCategory);
