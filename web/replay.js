@@ -22,6 +22,13 @@
     focusedKey: null,
     meta: null,
     mermaidReady: false,
+    graphItem: null,
+    graphRequest: 0,
+    graphFit: false,
+    graphMatch: null,
+    viewScroll: {},
+    graphRestoreTop: null,
+    resetColumn: true,
     wwOpen: true,
     changes: [],
     active: true,
@@ -124,8 +131,8 @@
       function () {
         var li = document.createElement('li');
         li.className = 'step-item';
-        li.innerHTML = '<span class="seq"></span><span class="who"></span>' +
-          '<span class="txt"></span><span class="status"></span>';
+        li.innerHTML = '<button class="step-open" type="button"><span class="seq"></span><span class="who"></span>' +
+          '<span class="txt"></span><span class="status"></span></button>';
         li.__seq = li.querySelector('.seq');
         li.__who = li.querySelector('.who');
         li.__txt = li.querySelector('.txt');
@@ -146,6 +153,8 @@
         li.__txt.title = text;
         li.__st.textContent = ({Applied:'已记录', Rejected:'已拒绝', Ignored:'已忽略', Duplicate:'已去重', Merged:'已合并', NeedConfirm:'待确认', Error:'错误'})[status] || status;
         li.__st.className = 'status' + (status ? ' st-' + String(status).toLowerCase() : '');
+        li.querySelector('button').setAttribute('aria-label','查看第 '+(i+1)+' 步：'+display+'，'+text);
+        if(i===state.current)li.querySelector('button').setAttribute('aria-current','step');else li.querySelector('button').removeAttribute('aria-current');
         li.onclick = function () { setPlaying(false); goToStep(i); };
       }
     );
@@ -171,18 +180,22 @@
 
   function mermaidLabel(s) {
     return String(s == null ? '' : s)
-      .replace(/"/g, '#quot;')
-      .replace(/[\[\]{}()<>|]/g, ' ')
+      .replace(/#/g, '#35;')
+      .replace(/["\[\]{}()<>|&]/g,function(character){return '#'+character.charCodeAt(0)+';';})
+      .replace(/[\r\n]/g, ' ')
       .trim();
   }
 
-  function buildMermaid() {
+  function buildMermaid(itemId) {
     var data = state.data;
     var step = (data.steps || [])[state.current];
     var changes = (step && step.changed) || [];
     var board = {};
     P.normalizeBoard({board: state.cumulative[state.current] || data.board || {}}, state.meta).forEach(function (row) {
-      board[row.key] = [].concat.apply([], row.boxes.map(function (box) { return box.slots; }));
+      board[row.key] = [].concat.apply([], row.boxes.map(function (box) { return box.slots; })).concat(
+        row.singles.map(function(entry){return {user:entry.display+' · 单领 ×'+entry.quantity,status:'filled'};}),
+        row.waiting.map(function(entry){return {user:entry.display+' · 等待 ×'+entry.quantity,status:'filled'};})
+      );
     });
 
     var changedItemIds = {};
@@ -205,7 +218,7 @@
     var itemIds = {};
     var subitemIds = {};
     var userIds = {};
-    var items = data.items || [];
+    var items = (data.items || []).filter(function(item){return item.item_id===itemId;});
 
     for (var a = 0; a < items.length; a++) {
       var item = items[a];
@@ -274,36 +287,86 @@
     return lines.join('\n');
   }
 
+  function graphItems() {
+    var items=state.data.items || [];
+    if(state.graphItem===null || (state.graphItem!=='' && !items.some(function(item){return item.item_id===state.graphItem;}))){
+      var step=(state.data.steps || [])[state.current],changed=step && step.changed && step.changed[0];
+      state.graphItem=(changed && items.some(function(item){return item.item_id===changed.item_id;}) && changed.item_id) || (items[0] && items[0].item_id) || '';
+    }
+    var select=$('graph-item'),signature=JSON.stringify(items.map(function(item){return [item.item_id,item.name];}));
+    if(select.dataset.signature!==signature){
+      select.dataset.signature=signature;select.replaceChildren();
+      [['','全部商品（分组）']].concat(items.map(function(item){return [item.item_id,item.name || item.item_id];})).forEach(function(pair){var option=document.createElement('option');option.value=pair[0];option.textContent=pair[1];select.appendChild(option);});
+    }
+    select.value=state.graphItem;
+    return state.graphItem==='' ? items : items.filter(function(item){return item.item_id===state.graphItem;});
+  }
+
+  function sizeGraph(card) {
+    var svg=card.querySelector('svg'),canvas=card.querySelector('.graph-canvas');
+    if(!svg)return;
+    var width=parseFloat(svg.getAttribute('width')) || svg.viewBox.baseVal.width;
+    var scale=state.graphFit ? Math.max(1,Math.min(1.25,canvas.clientWidth/width)) : 1;
+    svg.style.width=(width*scale)+'px';svg.style.maxWidth='none';svg.style.height='auto';
+  }
+
   function renderMermaid() {
-    var host = $('mermaid-view');
-    if (!window.mermaid) {
-      host.innerHTML = '<div class="mermaid-fallback">Mermaid CDN 不可用（离线或网络受限）。' +
-        '表格视图仍可正常使用。</div>';
-      return;
-    }
-    if (!state.mermaidReady) {
-      try { window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' }); }
-      catch (e) { /* ignore */ }
-      state.mermaidReady = true;
-    }
-    var def = buildMermaid();
-    var rid = 'mermaid-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-    host.innerHTML = '<div class="hint">渲染中…</div>';
-    try {
-      window.mermaid.render(rid, def).then(function (res) {
-        host.innerHTML = res.svg;
-      }).catch(function (err) {
-        host.innerHTML = '<div class="mermaid-fallback">Mermaid 渲染失败：' +
-          esc(err && err.message ? err.message : err) + '</div><pre class="mermaid-src">' + esc(def) + '</pre>';
+    var host=$('mermaid-view'),request=++state.graphRequest,items=graphItems(),parent=document.querySelector('.replay-content');
+    var top=state.graphRestoreTop==null ? parent.scrollTop : state.graphRestoreTop,left=parent.scrollLeft;
+    state.graphRestoreTop=null;
+    if(!window.mermaid){host.textContent='本地绘图暂不可用，仍可使用完整表格或列视图核对。';return;}
+    if(!state.mermaidReady){window.mermaid.initialize({startOnLoad:false,securityLevel:'strict'});state.mermaidReady=true;}
+    P.syncKeyedChildren(host,items,function(item){return item.item_id;},function(){
+      var card=document.createElement('section');card.className='graph-card';
+      var heading=document.createElement('h3'),title=document.createElement('b'),kind=document.createElement('span'),canvas=document.createElement('div');
+      heading.append(title,kind);canvas.className='graph-canvas';canvas.tabIndex=0;canvas.setAttribute('role','region');card.append(heading,canvas);return card;
+    },function(card,item){
+      card.dataset.item=item.item_id;card.querySelector('b').textContent=item.name || item.item_id;
+      card.querySelector('h3 span').textContent=kindLabel(item.kind);
+      var canvas=card.querySelector('.graph-canvas'),scroll=canvas.scrollLeft;
+      canvas.setAttribute('aria-label',(item.name || item.item_id)+'关系图；超宽可横向滚动');
+      canvas.setAttribute('aria-busy','true');
+      var rid='relation-'+request+'-'+Math.random().toString(36).slice(2);
+      Promise.resolve().then(function(){return window.mermaid.render(rid,buildMermaid(item.item_id));}).then(function(result){
+        if(request!==state.graphRequest || state.view!=='mermaid' || !card.isConnected)return;
+        canvas.innerHTML=result.svg;canvas.setAttribute('aria-busy','false');
+        var svg=canvas.querySelector('svg');svg.setAttribute('aria-label',(item.name || item.item_id)+'当前步骤关系图');
+        sizeGraph(card);canvas.scrollLeft=scroll;
+        if(state.graphMatch && state.graphMatch.item===item.item_id){
+          var match=Array.from(canvas.querySelectorAll('.graph-node')).find(function(node){return node.dataset.graphLabel===state.graphMatch.label;});
+          if(match)match.classList.add('located');
+        }
+        parent.scrollTop=top;parent.scrollLeft=left;
+      }).catch(function(error){
+        if(request!==state.graphRequest || !card.isConnected)return;
+        canvas.setAttribute('aria-busy','false');canvas.textContent='绘图失败：'+(error.message || error)+'；可切换表格或列视图核对。';
       });
-    } catch (err) {
-      host.innerHTML = '<div class="mermaid-fallback">Mermaid 渲染异常：' +
-        esc(err && err.message ? err.message : err) + '</div><pre class="mermaid-src">' + esc(def) + '</pre>';
-    }
+    });
+    $('graph-status').textContent=items.length+' 个商品分组 · '+(state.graphFit?'适配宽度，不缩小字号':'原始字号')+' · 定位不改变步骤';
+  }
+
+  function locateGraph() {
+    var query=$('graph-find').value.trim().toLocaleLowerCase();
+    if(!query){$('graph-status').textContent='请输入当前商品中的姓名或款式；需要跨商品时先选“全部商品”。';$('graph-find').focus();return;}
+    var matches=Array.from($('mermaid-view').querySelectorAll('.graph-node')).filter(function(node){return node.dataset.graphLabel.toLocaleLowerCase().includes(query);});
+    if(!matches.length){$('graph-status').textContent='当前商品/步骤没有匹配项；可切换商品或步骤，不会自动跳步。';return;}
+    var previous=matches.findIndex(function(node){return node.classList.contains('located');}),node=matches[(previous+1)%matches.length];
+    $('mermaid-view').querySelectorAll('.located').forEach(function(n){n.classList.remove('located');});node.classList.add('located');
+    state.graphMatch={item:node.closest('.graph-card').dataset.item,label:node.dataset.graphLabel};
+    node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});node.focus({preventScroll:true});
+    $('graph-status').textContent='匹配 '+((previous+1)%matches.length+1)+' / '+matches.length+'：'+node.dataset.graphLabel+'；复盘步骤不变';
+  }
+
+  function fitGraph(fit) {
+    state.graphFit=fit;$('mermaid-view').querySelectorAll('.graph-card').forEach(function(card){sizeGraph(card);card.querySelector('.graph-canvas').scrollLeft=0;});
+    $('graph-status').textContent=fit?'已适配宽度；不缩小字号，超宽可在图内横滚':'已恢复原始字号';
   }
 
   function renderColumn() {
     var root = $('column-view');
+    var oldWrap=state.resetColumn ? null : root.querySelector('.col-wrap');
+    var oldLeft=oldWrap ? oldWrap.scrollLeft : 0,oldTop=oldWrap ? oldWrap.scrollTop : 0;
+    state.resetColumn=false;
     var steps = state.data.steps || [];
     var items = state.data.items || [];
 
@@ -356,13 +419,13 @@
       var msg = msgBySeq(steps[j2].message_seq);
       var disp = msg ? (msg.display || msg.user) : ('#' + steps[j2].message_seq);
       var cur = (j2 === state.current) ? ' current' : '';
-      html += '<th class="colhead' + cur + '" data-idx="' + j2 + '" title="' + esc(disp) + '：' +
-        esc(msg ? msg.text : '') + '"><span class="col-seq">#' + esc(steps[j2].message_seq) +
-        '</span><span class="col-name">' + esc(disp) + '</span></th>';
+      html += '<th class="colhead' + cur + '" scope="col" data-idx="' + j2 + '" title="' + esc(disp) + '：' +
+        esc(msg ? msg.text : '') + '"><button class="column-step" type="button" aria-label="查看第 '+(j2+1)+' 步：'+esc(disp)+'"><span class="col-seq">#' + esc(steps[j2].message_seq) +
+        '</span><span class="col-name">' + esc(disp) + '</span></button></th>';
     }
     html += '</tr></thead><tbody>';
     for (var r = 0; r < rows.length; r++) {
-      html += '<tr><th class="rowhead">' + esc(rows[r].label) + '</th>';
+      html += '<tr data-row-key="'+esc(rows[r].key)+'"><th class="rowhead">' + esc(rows[r].label) + '</th>';
       for (var j3 = 0; j3 < steps.length; j3++) {
         var cell = stepCells[j3][rows[r].key];
         var user = cell && cell.user;
@@ -372,8 +435,8 @@
         var stateMark = cell && cell.status === 'locked' ? '<span class="cell-state lock-mark"></span>' :
           (cell && cell.status === 'admin_reserved' ? '<span class="cell-state reserve-mark"></span>' : '');
         if (cell && (cell.segment_id || /tail/i.test(cell.policy || ''))) stateMark += '<span class="cell-state tail-mark"></span>';
-        html += '<td class="' + cls + '" data-idx="' + j3 + '"><div class="cell ' + reasonClass + '" title="' + esc(description) + '" aria-label="' + esc(description) + '" style="--bx:' + (cell ? P.boardLayout.boxColor(cell.box_index) : 'transparent') + '">' +
-          '<span class="cell-box-mark" aria-hidden="true"></span><span class="cell-user">' + esc(user || '') + '</span><span class="cell-marks" aria-hidden="true">' + stateMark + '<span class="badge"' + (cell ? '' : ' hidden') + '></span></span></div></td>';
+        html += '<td class="' + cls + '" data-idx="' + j3 + '"><button class="column-step cell ' + reasonClass + '" type="button" title="' + esc(description) + '" aria-label="查看第 '+(j3+1)+' 步：'+esc(description)+'" style="--bx:' + (cell ? P.boardLayout.boxColor(cell.box_index) : 'transparent') + '">' +
+          '<span class="cell-box-mark" aria-hidden="true"></span><span class="cell-user">' + esc(user || '') + '</span><span class="cell-marks" aria-hidden="true">' + stateMark + '<span class="badge"' + (cell ? '' : ' hidden') + '></span></span></button></td>';
       }
       html += '</tr>';
     }
@@ -383,15 +446,19 @@
     function bind(nodes) {
       for (var n = 0; n < nodes.length; n++) {
         nodes[n].addEventListener('click', function () {
+          var index=parseInt(this.getAttribute('data-idx'),10),rowKey=this.closest('tr').dataset.rowKey;
+          var restore=this.contains(document.activeElement);
           setPlaying(false);
-          goToStep(parseInt(this.getAttribute('data-idx'), 10));
+          goToStep(index);
+          if(restore){var row=Array.from(root.querySelectorAll('tr')).find(function(node){return node.dataset.rowKey===rowKey;});var button=row && row.querySelector('[data-idx="'+index+'"] button');if(button)button.focus({preventScroll:true});}
         });
       }
     }
     bind(root.querySelectorAll('th.colhead'));
     bind(root.querySelectorAll('td.colcell'));
     var curHead = root.querySelector('th.colhead.current');
-    if (curHead && curHead.scrollIntoView) curHead.scrollIntoView({ block: 'nearest', inline: 'center' });
+    if(oldWrap){var wrap=root.querySelector('.col-wrap');wrap.scrollLeft=oldLeft;wrap.scrollTop=oldTop;}
+    else if (curHead && curHead.scrollIntoView) curHead.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
 
   function renderWhoWhats() {
@@ -481,9 +548,12 @@
   }
 
   function renderRight() {
+    var content=document.querySelector('.replay-content');content.style.setProperty('--replay-tabs-height',content.querySelector('.tabs').offsetHeight+'px');
+    if(state.view!=='mermaid')state.graphRequest++;
     $('table-view').classList.toggle('hidden', state.view !== 'table');
     $('column-view').classList.toggle('hidden', state.view !== 'column');
     $('mermaid-view').classList.toggle('hidden', state.view !== 'mermaid');
+    $('graph-tools').classList.toggle('hidden',state.view!=='mermaid');
     if (state.view === 'table') renderBoard();
     else if (state.view === 'column') renderColumn();
     else renderMermaid();
@@ -562,6 +632,8 @@
       return;
     }
     if (!Array.isArray(json.messages)) json.messages = [];
+    var sameRound=state.data && state.data.round_id===json.round_id && (state.active || state.source===source);
+    if(!sameRound){state.graphItem=null;state.graphMatch=null;state.viewScroll={};state.graphRestoreTop=0;state.resetColumn=true;$('graph-find').value='';state.graphRequest++;}
     var oldSeq = state.data && state.data.steps[state.current] && state.data.steps[state.current].message_seq;
     var atEnd = !state.data || state.current >= state.data.steps.length - 1;
     state.data = json;
@@ -572,7 +644,7 @@
       var oldIndex = json.steps.findIndex(function (step) { return step.message_seq === oldSeq; });
       if (oldIndex >= 0) state.current = oldIndex;
     }
-    state.focusedKey = null;
+    if(!preserve || !sameRound)state.focusedKey = null;
     setPlaying(false);
     buildDerived();
 
@@ -633,6 +705,8 @@
           state.active = false;
           state.requestId++;
           loadData(imported, file.name);
+          $('replay-notice').textContent='正在查看导入文件，完全只读；不会自动切换激活轮次或写入本机消息。';
+          $('replay-notice').className='hint replay-notice';
           P.toast('已载入 ' + file.name, 'ok');
         } catch (e) {
           P.toast('JSON 解析失败：' + (e && e.message ? e.message : e), 'bad');
@@ -645,11 +719,16 @@
   }
 
   function switchView(view) {
+    var content=document.querySelector('.replay-content');
+    state.viewScroll[state.view]={top:content.scrollTop,left:content.scrollLeft};
+    var position=state.viewScroll[view] || {top:0,left:0};
+    if(view==='mermaid')state.graphRestoreTop=position.top;
     state.view = view;
     $('tab-table').classList.toggle('active', view === 'table');
     $('tab-column').classList.toggle('active', view === 'column');
     $('tab-mermaid').classList.toggle('active', view === 'mermaid');
     renderRight();
+    content.scrollTop=position.top;content.scrollLeft=position.left;
   }
 
   function init() {
@@ -696,6 +775,12 @@
     $('tab-table').addEventListener('click', function () { switchView('table'); });
     $('tab-column').addEventListener('click', function () { switchView('column'); });
     $('tab-mermaid').addEventListener('click', function () { switchView('mermaid'); });
+    $('graph-item').addEventListener('change',function(){state.graphItem=this.value;state.graphMatch=null;renderMermaid();});
+    $('graph-locate').addEventListener('click',locateGraph);
+    $('graph-find').addEventListener('keydown',function(event){if(event.key==='Enter'){event.preventDefault();locateGraph();}});
+    $('graph-fit').addEventListener('click',function(){fitGraph(true);});
+    $('graph-actual').addEventListener('click',function(){fitGraph(false);});
+    window.addEventListener('resize',function(){if(state.view==='mermaid')$('mermaid-view').querySelectorAll('.graph-card').forEach(sizeGraph);});
 
     $('ww-toggle').addEventListener('click', function () {
       state.wwOpen = !state.wwOpen;
@@ -714,10 +799,10 @@
     });
 
     bindFileInput();
-    $('active-refresh').addEventListener('click', function () { state.active = true; loadDefault(); });
+    $('active-refresh').addEventListener('click', function () { state.active = true;state.expectedRound='';state.workflowStamp='';state.requestId++;$('process-message').disabled=true;setPlaying(false);loadDefault(); });
     if (window.PAIGU_SHELL) window.PAIGU_SHELL.onWorkflow(function (wf) {
       if (!wf || !state.active) return;
-      var stamp = [wf.round_id, wf.revision, wf.version, wf.messages].join('|');
+      var stamp = [wf.round_id, wf.revision, wf.version, wf.messages,wf.view_epoch,wf.view_revision].join('|');
       state.expectedRound = wf.round_id;
       if (stamp !== state.workflowStamp || !state.data) {
         var changedRound = state.data && state.data.round_id !== wf.round_id;

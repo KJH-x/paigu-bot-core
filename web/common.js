@@ -718,10 +718,10 @@
         capacity: raw.capacity != null ? raw.capacity : mm.capacity,
         boxes: boxes,
         singles: asArray(raw.singles).map(function (s) {
-          return { display: s.display_name || s.display || s.user || '', quantity: num(s.quantity, 0) };
+          return { display: s.display_name || s.display || s.user || curUserNames[String(s.user_id)] || String(s.user_id == null ? '' : s.user_id), quantity: num(s.quantity, 0) };
         }),
         waiting: asArray(raw.waiting).map(function (w) {
-          return { display: w.display_name || w.display || w.user || '', quantity: num(w.quantity, 0), priority_level: num(w.priority_level, 0) };
+          return { display: w.display_name || w.display || w.user || curUserNames[String(w.user_id)] || String(w.user_id == null ? '' : w.user_id), quantity: num(w.quantity, 0), priority_level: num(w.priority_level, 0) };
         })
       };
     }

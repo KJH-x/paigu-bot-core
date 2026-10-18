@@ -386,6 +386,9 @@ async fn projection_cursor_detects_old_note_quantity_and_policy_edits_without_ev
     let first = crate::services::display::display(&state, 0).await;
     let cursor = first["view_revision"].as_u64().unwrap();
     let epoch = first["view_epoch"].as_str().unwrap();
+    let workflow_first = crate::services::workflow::snapshot(&state).await;
+    assert_eq!(workflow_first["view_epoch"], first["view_epoch"]);
+    assert_eq!(workflow_first["view_revision"], first["view_revision"]);
     let unchanged =
         crate::services::display::display_with_cursor(&state, 999999, Some(epoch), Some(cursor))
             .await;
@@ -416,6 +419,11 @@ async fn projection_cursor_detects_old_note_quantity_and_policy_edits_without_ev
         next["view_revision"].as_u64(),
     )
     .await;
+    let workflow_note = crate::services::workflow::snapshot(&state).await;
+    assert_eq!(workflow_note["view_epoch"], note["view_epoch"]);
+    assert_eq!(workflow_note["view_revision"], note["view_revision"]);
+    assert_eq!(workflow_note["version"], workflow_first["version"]);
+    assert!(workflow_note["view_revision"].as_u64() > workflow_first["view_revision"].as_u64());
     assert!(note["view_revision"].as_u64() > next["view_revision"].as_u64());
     assert_eq!(note["board"], next["board"]);
     let unknown = crate::services::display::display_with_cursor(

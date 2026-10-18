@@ -62,6 +62,6 @@ body[data-page] .board-grid .chip-qty { font-size: 10px; font-weight: 400; line-
 body[data-page] .col-table { table-layout: fixed; }
 body[data-page] .col-table .colhead,
 body[data-page] .col-table .colcell { min-width: 0; max-width: none; padding: 0; text-align: left; }
-body[data-page] .col-table .colhead > .col-name { display: block; overflow: hidden; white-space: pre; padding: 0 3px; text-overflow: clip; font-size: 13px; font-weight: 600; letter-spacing: 0; }
+body[data-page] .col-table .colhead .col-name { display: block; overflow: hidden; white-space: pre; padding: 0 3px; text-overflow: clip; font-size: 13px; font-weight: 600; letter-spacing: 0; }
 body[data-page] .col-table .cell { border: 0; height: 26px; min-height: 26px; padding: 0 3px; }
 body[data-page] .col-table .colhead .col-seq { display: block; height: 14px; overflow: hidden; font-size: 10px; padding: 0 3px; }

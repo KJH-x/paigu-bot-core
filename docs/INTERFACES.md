@@ -388,7 +388,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/workflow` | **只读**快照：`round_id/title/group_id/phase/phase_label/phases/phase_config...`（`phases` 见 §8.7）/`phases_configured/priority_window/items/settlement_configured/members_cached/reply_enabled/admin_commands_enabled/revision/gateway/locked/version/events/messages/claims/eligibilities/updated_at` |
+| `GET /api/workflow` | **只读**快照：`round_id/title/group_id/phase/phase_label/phases/phase_config...`（`phases` 见 §8.7）/`phases_configured/priority_window/items/settlement_configured/members_cached/reply_enabled/admin_commands_enabled/revision/gateway/locked/version/events/messages/claims/eligibilities/updated_at`；另附与 display 同代的 `view_epoch/view_revision`，不把领域事件数当投影游标 |
 | `RoundPhase::{as_str,label}` | 稳定标识与中文标签（`src/round/mod.rs`），供 Stepper 使用；**Stepper 高亮 = 当前模块**（非当前阶段），阶段进度用弱标记 |
 
 ---

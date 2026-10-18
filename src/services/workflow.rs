@@ -68,6 +68,14 @@ pub async fn snapshot(state: &ApiState) -> Value {
 
     // 合并 Pipeline 侧字段（locked/version/events/messages/claims/eligibilities）
     let pipeline = state.pipeline.workflow().await;
+    let (_, board) = state.pipeline.board().await;
+    let messages = state.pipeline.messages_since(0).await;
+    let (epoch, revision, _) = state
+        .pipeline
+        .view_stamp(cfg.revision, &board, &messages)
+        .await;
+    body["view_epoch"] = json!(epoch);
+    body["view_revision"] = json!(revision);
     if let (Some(dst), Some(src)) = (body.as_object_mut(), pipeline.as_object()) {
         for (key, value) in src {
             dst.insert(key.clone(), value.clone());

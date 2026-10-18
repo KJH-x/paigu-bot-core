@@ -249,7 +249,7 @@
       var nodes = {}, order = [], edges = [], hlNodes = {}, hlEdges = {};
       function addNode(id, label, shape) {
         if (nodes[id]) return;
-        nodes[id] = { id: id, label: label, shape: shape };
+        nodes[id] = { id: id, label: label.replace(/#(\d+);/g,function(_,code){return String.fromCharCode(Number(code));}), shape: shape };
         order.push(id);
       }
       var lines = String(def == null ? '' : def).split('\n');
@@ -310,40 +310,48 @@
         }
       }
       for (i = 0; i < g.order.length; i++) { if (depth[g.order[i]] == null) depth[g.order[i]] = 0; }
-      var byDepth = {}, maxD = 0, maxCount = 1;
+      var maxD = 0;
       for (i = 0; i < g.order.length; i++) {
         var dd = depth[g.order[i]];
-        (byDepth[dd] = byDepth[dd] || []).push(g.order[i]);
         if (dd > maxD) maxD = dd;
       }
-      for (var k in byDepth) { if (byDepth[k].length > maxCount) maxCount = byDepth[k].length; }
-      var colW = 172, rowH = 54, padX = 26, padY = 22;
-      var W = padX * 2 + (maxD + 1) * colW;
-      var H = padY * 2 + maxCount * rowH;
-      var pos = {};
-      for (var kk in byDepth) {
-        var d2 = +kk, arr = byDepth[kk], total = arr.length;
-        for (var t = 0; t < total; t++) {
-          pos[arr[t]] = {
-            x: padX + d2 * colW + colW / 2,
-            y: padY + (t + (maxCount - total) / 2) * rowH + rowH / 2
-          };
-        }
+      var measure=document.createElement('canvas').getContext('2d');
+      if(measure)measure.font='13px '+getComputedStyle(document.body).fontFamily;
+      var widths={},columnWidths={},columnX={},rowH=54,padX=18,padY=18;
+      for(i=0;i<g.order.length;i++){
+        var node=g.nodes[g.order[i]],label=String(node.label),visible=Array.from(label).slice(0,24).join('')+(Array.from(label).length>24?'…':'');
+        var textWidth=measure ? measure.measureText(visible).width : visible.length*13;
+        widths[node.id]=Math.max(92,Math.ceil(textWidth+24))*(node.shape==='diamond'?1.4:1);
+        columnWidths[depth[node.id]]=Math.max(columnWidths[depth[node.id]] || 0,widths[node.id]+34);
       }
-      return { pos: pos, W: W, H: H };
+      var W=padX*2;
+      for(i=0;i<=maxD;i++){columnX[i]=W-padX;W+=columnWidths[i] || 0;}
+      var pos={},cursor=0;
+      function place(id){
+        if(pos[id])return;
+        var start=cursor,d=depth[id];
+        pos[id]={x:columnX[d]+columnWidths[d]/2,y:padY+start*rowH+rowH/2};
+        (adj[id] || []).forEach(place);
+        if(cursor===start)cursor++;
+      }
+      g.order.filter(function(id){return depth[id]===0;}).forEach(place);
+      g.order.forEach(place);
+      var H=padY*2+Math.max(cursor,1)*rowH;
+      return { pos: pos, W: W, H: H, widths: widths };
     }
 
-    function render(def) {
+    function render(def,renderId) {
       var g = parse(def);
       if (!g.order.length) {
         return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 60" width="220" height="60">' +
           '<text x="10" y="34" font-size="12" fill="currentColor">无节点</text></svg>';
       }
       var L = layout(g);
+      var marker='wf-arw-'+String(renderId).replace(/[^a-zA-Z0-9_-]/g,'');
       var p = [];
       p.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + L.W + ' ' + L.H + '" ' +
-        'width="' + L.W + '" height="' + L.H + '" style="max-width:100%;height:auto" role="img">');
-      p.push('<defs><marker id="wf-arw" markerWidth="10" markerHeight="10" refX="9" refY="3" ' +
+        'width="' + L.W + '" height="' + L.H + '" style="height:auto" role="img">');
+      p.push('<defs><marker id="'+marker+'" markerWidth="10" markerHeight="10" refX="9" refY="3" ' +
         'orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,3 L0,6 z" fill="currentColor"/></marker></defs>');
       var i;
       for (i = 0; i < g.edges.length; i++) {
@@ -351,19 +359,21 @@
         var a = L.pos[e.from], b = L.pos[e.to];
         if (!a || !b) continue;
         var hl = !!g.hlEdges[i];
-        p.push('<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" ' +
+        var ax=a.x+L.widths[e.from]/2+2,bx=b.x-L.widths[e.to]/2-3,middle=(ax+bx)/2;
+        p.push('<path d="M'+ax+','+a.y+' C'+middle+','+a.y+' '+middle+','+b.y+' '+bx+','+b.y+'" fill="none" ' +
           'stroke="' + (hl ? '#dc2626' : 'currentColor') + '" stroke-width="' + (hl ? 3 : 1.2) + '" ' +
-          'opacity="' + (hl ? 1 : .45) + '" marker-end="url(#wf-arw)"/>');
+          'opacity="' + (hl ? 1 : .45) + '" marker-end="url(#'+marker+')"/>');
       }
       for (i = 0; i < g.order.length; i++) {
         var id = g.order[i], n = g.nodes[id], pos = L.pos[id];
         if (!pos) continue;
-        var w = Math.max(72, Math.min(152, 18 + String(n.label).length * 8));
+        var w = L.widths[id];
         var h = 30;
         var hl2 = !!g.hlNodes[id];
         var fill = hl2 ? '#ffe08a' : 'var(--panel-2,#f7f9fc)';
         var stroke = hl2 ? '#d97706' : 'var(--border-strong,#c4cfdd)';
         var sw = hl2 ? 3 : 1.2;
+        p.push('<g class="graph-node" tabindex="0" role="img" data-node-id="'+esc(id)+'" data-graph-label="'+esc(n.label)+'" aria-label="'+esc(n.label)+'"><title>'+esc(n.label)+'</title>');
         if (n.shape === 'diamond') {
           p.push('<polygon points="' + pos.x + ',' + (pos.y - h / 2 - 5) + ' ' + (pos.x + w / 2) + ',' + pos.y +
             ' ' + pos.x + ',' + (pos.y + h / 2 + 5) + ' ' + (pos.x - w / 2) + ',' + pos.y +
@@ -374,9 +384,10 @@
             '" rx="' + rx + '" style="fill:' + fill + ';stroke:' + stroke + ';stroke-width:' + sw + '"/>');
         }
         var label = String(n.label);
-        if (label.length > 16) label = label.slice(0, 15) + '…';
-        p.push('<text x="' + pos.x + '" y="' + (pos.y + 4) + '" text-anchor="middle" font-size="11" ' +
+        if (Array.from(label).length > 24) label = Array.from(label).slice(0, 24).join('') + '…';
+        p.push('<text x="' + pos.x + '" y="' + (pos.y + 4) + '" text-anchor="middle" font-size="13" ' +
           'fill="' + (hl2 ? '#7c2d12' : 'currentColor') + '">' + esc(label) + '</text>');
+        p.push('</g>');
       }
       p.push('</svg>');
       return p.join('');
@@ -386,7 +397,7 @@
       initialize: function () { return undefined; },
       render: function (id, def) {
         return new Promise(function (resolve, reject) {
-          try { resolve({ svg: render(def) }); }
+          try { resolve({ svg: render(def,id) }); }
           catch (e) { reject(e); }
         });
       }

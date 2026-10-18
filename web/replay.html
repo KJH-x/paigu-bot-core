@@ -81,6 +81,7 @@
       </aside>
 
       <section class="replay-content">
+        <h2 class="replay-view-heading">复盘视图</h2>
         <div class="tabs">
           <button id="tab-table" class="active" data-view="table">表格视图</button>
           <button id="tab-column" data-view="column">列视图</button>
@@ -96,6 +97,14 @@
         </div>
         <div id="table-view"></div>
         <div id="column-view" class="hidden"></div>
+        <div id="graph-tools" class="graph-tools hidden" role="group" aria-label="关系图控制">
+          <label>商品<select id="graph-item" aria-label="关系图商品"></select></label>
+          <label>定位<input id="graph-find" type="search" placeholder="姓名或款式" maxlength="256" /></label>
+          <button id="graph-locate" class="small">定位 / 下一处</button>
+          <button id="graph-fit" class="small">适配宽度</button>
+          <button id="graph-actual" class="small">原始字号</button>
+          <span id="graph-status" class="hint" role="status"></span>
+        </div>
         <div id="mermaid-view" class="hidden"></div>
       </section>
     </div>

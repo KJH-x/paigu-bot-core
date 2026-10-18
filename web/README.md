@@ -14,7 +14,7 @@
 | `admin.html` | 兼容管理入口，保留查询与锚点转总览，不加载旧 admin.js |
 | `msglog.js` / `message-editor.js` | 排谷原文只读日志与统一动作编辑器；远程只读不请求本机私有日志 |
 | `settlement.html` / `settlement.js` / `settlement.css` | 规则独立保存、订单自动保存；来源变化保留订单并显式复核；缺号/价格/数量问题定位及严格锁定 |
-| `replay.html` / `replay.js` / `replay.css` | 重放步进查看器：步进/播放、累积排位与状态差异高亮、列视图、Mermaid、核对条、双向联动 |
+| `replay.html` / `replay.js` / `replay.css` | 当前轮只读复盘：表格/列/按商品分组关系图、姓名款式定位与宽度适配；步骤/视区保留，独立投影游标更新；导入明确只读 |
 | `display.css` / `theme.css` / `app.css` | 共用基础样式、语义 token、工作流外壳与响应式布局 |
 | `newlook.css` | 方形视觉层：无圆角、分层边框、高对比焦点、明暗主题统一覆盖 |
 | `workbench.css` | 最后加载的桌面工作台布局：统一顶栏、宽内容区、对齐分栏与紧凑表单 |
