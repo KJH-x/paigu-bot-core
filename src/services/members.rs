@@ -464,8 +464,8 @@ mod tests {
 
     #[test]
     fn example_members_are_placeholders() {
-        let members =
-            load_members(Path::new(EXAMPLE_PATH)).expect("data/members.example.json 应存在");
+        let members = load_members(&Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLE_PATH))
+            .expect("data/members.example.json 应存在");
         assert!(!members.is_empty());
         for m in &members {
             let nickname = m["nickname"].as_str().unwrap_or("");

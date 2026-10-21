@@ -1,6 +1,6 @@
 # paigu-bot-core
 
-QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。本机接收 QQ 群消息，经 LLM 清理与抽取、确定性引擎排谷计算；排位快照与回放发布到 Cloudflare（R2 + Pages）供成员查看。
+QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。本机接收 QQ 群消息，经 LLM 清理与抽取、确定性引擎排谷计算；排位快照与回放将来发布到 Cloudflare（R2 + Pages）供成员查看（远程发布尚未接线）。
 
 > 定位：**本地处理 + 远程展示**。本地（本机 `部署主机`）负责接入、解析、排谷；远程只负责只读展示。
 > 安全红线：`reply_enabled` 默认 `false`，**绝不主动发消息给真实群**（只读拉取成员名单允许）。
@@ -22,7 +22,7 @@ QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。�
                            ▼
    axum HTTP API 127.0.0.1:21081
      /api/config /api/board /api/display /api/messages /api/sim/* /api/members /api/gateway/status
-     / /admin /sim /replay 与 /web/* 静态页（fallback 目录 web/）
+     / /index /round /display /settlement /replay /members /settings 与 /web/*
                            ▼
    浏览器展示页（local 数据源，5s 增量轮询）
    ┈┈┈┈（尚未接线）┈┈┈▶ Cloudflare R2(快照/回放) + Pages(静态展示)
@@ -46,6 +46,8 @@ cargo run -- run
 # 端到端测试（Playwright，脚本自带 cargo build + 临时服务）
 node tests/e2e/sim.mjs
 ```
+
+公开协作无需NapCat、真实名单或模型：`npm run check` 提供隔离核心/脚本/文档/离线CLI与隐私门禁，`npm run check:full` 再执行完整桌面。私有语料显式选择，未提供显示NOT RUN而不是通过；依赖、隔离路径及可选参数见 [开发检查](./docs/DEVELOPMENT.md)。
 
 离线验证（确定性重放；旧 verifier 暂留以支撑语料回归，见 T-24）：
 
@@ -75,8 +77,7 @@ npm run test:privacy
 src/
 ├── main.rs          # 入口分派：run / serve → 新栈；simulate → 离线重放；其余按 run
 ├── bus.rs           # 冻结接口：IncomingEvent / EventSink / PipelineOutcome
-├── settings.rs      # AppConfig + ConfigStore（revision + 热载）
-├── error.rs         # thiserror 错误类型（AppError + 各领域错误）
+├── settings/        # AppConfig + ConfigStore（revision + 可恢复热载）
 ├── gateway/         # OneBot 反向 WS：路由(白名单/drop)、心跳、echo 动作回包、只读动作
 ├── llm/             # DeepSeek 客户端 + 排谷流水线（规则快路径 + LLM 清理/抽取 + 回退）
 ├── api/             # axum 路由：config/board/display/messages/replay/settlement/sim/members + 静态页
@@ -91,7 +92,7 @@ src/
 ├── snapshot_bundle/ # 单一 JSON 快照导出/导入
 ├── messages/        # 消息日志 MessageLog（JSONL + 原始事件）
 └── tests/           # Rust 重放辅助测试
-web/                 # 静态前端：display / admin / sim / replay / settlement + common.js
+web/                 # 七工作区静态页；admin兼容跳转，无sim页
 docs/                # 现行文档（入口 docs/README.md）+ archive/
 tests/e2e/           # Node .mjs Playwright 端到端测试
 scripts/             # 模拟/录制脚本 + 隐私扫描 privacy-scan.mjs

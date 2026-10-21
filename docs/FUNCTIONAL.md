@@ -1,682 +1,92 @@
-# 排谷机器人 · 功能描述文档（FUNCTIONAL）
+# 排谷机器人 · 当前功能（FUNCTIONAL）
 
-> 当前验收摘要（2026-10-19）：消息修订/补充/逆事务、显式代填与完整迟到守卫、七区导航/作用域保存/草稿往返、结算来源复核及复盘关系图已实施。MP 41＋IA 18 项逐条证据见 [台账](./VERIFICATION-msg-ia-2026-10-18.md)；核心319项，最终门禁以台账批次为准。以下分批记录保留历史语境；不代表仍缺当时未完成的功能。未部署，不操作真实群和真实配置。
+> 2026-10-21 源码复核。本文只列当前行为，引用模块/函数而非易失效行号；`npm run test:docs` 校验本地链接及本文显式源码符号是否存在。接口字段以 [INTERFACES](./INTERFACES.md) §8.9 为准，业务决策以 [POLICY](./POLICY.md) 与 [DECISIONS](./DECISIONS.md) §H 为准。
+> MP41＋IA18 已逐项验收，证据见 [台账](./VERIFICATION-msg-ia-2026-10-18.md)。后继 E2…E4 不因此算完成，见 [工程计划](./PLAN-engineering-followup-2026-10-19.md)。未部署，不操作真实群/配置。
 
-> 面向评审。本文描述**当前代码实际实现**的功能，用于据此提出修改指示。
-> 权威政策见 [POLICY.md](./POLICY.md)，程序路线见 [DESIGN.md](./DESIGN.md)，任务拆分见 [TASKS.md](./TASKS.md)，协作规则见 [AGENT-RULES.md](./AGENT-RULES.md)。冲突时以 POLICY 为准。
->
-> **事实来源**：本文所有描述均来自源码阅读（引用 `文件:行号`）与本机运行 `target/debug/paigu-bot-core.exe run`（端口 32181，`llm.enabled=false`）的实测响应（2026-09-14）。JSON 示例为实测输出或按序列化契约裁剪；不确定处标注「待确认」。**本文不修改任何代码或其它文件。**
+## 1. 运行与接收
 
-> ⚠️ **快照说明（2026-09-14）**：本文多数细节对应 **Wave 1–4 之前**的栈（旧栈 `repo/services/ws/publisher/config/app_state/inbound` 与旧 `api` 路由当时仍存在，已在 **C-4** 删除）。
-> 现役实现以 [INTERFACES.md](./INTERFACES.md) §8 与源码为准；本文中「旧栈 / `legacy` / publisher」相关段落仅作历史记录，**不再是现行行为**。
+`run`（默认）与 `serve` 装配同一 Gateway、Pipeline 和本地 HTTP 服务，不连接 PostgreSQL。启动先从持久消息/人工审计恢复，再接受入站；坏日志或不能恢复的结算锁明确失败，不猜测恢复成功。入口：[`run_gateway_stack`](../src/main.rs)、[`restore_persistent_lock`](../src/services/settlement/mod.rs)。
 
----
+- Gateway 接收 OneBot 反向 WS，检查群消息、白名单、非空及成员限制，群名片优先。[`decide_route`](../src/gateway/onebot/mod.rs)、[`parse_identity`](../src/gateway/onebot/mod.rs)。
+- 昵称清洗统一调用 [`clean_nickname`](../src/parser/normalize.rs)：全角归一，首个括号或空白截断；代理语义另保留身份，不能靠改显示名取得管理员资格。
+- `send_*` 仅在 `reply_enabled=true` 且动作属于允许名单时才可发送；默认关闭。成员拉取是显式受限的只读动作，`reply` 字段不代表实际群回复。[`Gateway::send_action`](../src/gateway/ws_server/mod.rs)。
+- 当前 Gateway 对通过路由的消息分别派任务，业务 writer 串行不等于入站有界，也不保证任务加锁即到达顺序。有界入站仍属 E4，不能宣称已实现。[`Gateway::on_text`](../src/gateway/ws_server/mod.rs)。
+- HTTP 仅监听 `127.0.0.1`，默认21081；没有公网鉴权。不可直接暴露管理 API。[`serve`](../src/api/mod.rs)。
 
-## 当前增补：消息理解留存（2026-10-16，开发中、未部署）
+## 2. 自动理解、权限与确定性排谷
 
-新增正常消息处理保存完整自动理解（含权限判定前动作、候选、来源及原处理结果），人工修订和当前权限结果不覆盖它。重算复用匹配组的已存动作，改别名不会改排到另一商品；已存结果损坏/组不匹配明确待核对。旧历史无产物仍走单独兼容路径，不能把当前规则结果冒充初次自动结果。已处理记录的原文、身份、时间和物理删除有保护。
+[`Pipeline::ingest`](../src/llm/pipeline/mod.rs) 是入站入口。高置信规则优先，否则按启用/分段策略请求模型，失败按设置回退；不让模型决定排序或结算。[`Pipeline::understand`](../src/llm/pipeline/understanding.rs)。
 
-普通轮次页保存优先名单等业务输入会确定性重算，原 Rejected 可变当前 Applied，原拒绝仍保留，重算不请求模型。只读动作详情和复盘 DTO 能区分原自动、当前结果和管理员解释。
+自动理解产物完整保留权限判定前动作、候选、来源及当时结果。当前执行结果与原自动结果分开；重算复用已存理解，不因改别名而改指另一商品。坏产物/不匹配组明确待核对，旧无产物历史单独兼容，不能把新规则结果冒充首次理解。[`Pipeline::persist_understanding`](../src/llm/pipeline/understanding.rs)。
 
-第四批已接线完整编辑：本地所有消息状态带入当前动作，支持排/撤/改单、多项/多动作、数量、策略、解释、忽略/拒绝/恢复自动；一次保存，无 JSON/二次确认。补充消息可连续或不连续选取，最早主条完整替换、补充拒绝并可跳回主条，自动组必须完整转人工。最近人工事务可单步撤回，之后的新消息与撤排保留。显式模型代填只填同一草稿，可取消/手改，迟到响应不覆盖；保存/执行/撤回均不请求模型。独立投影版本通知旧行变化，按身份更新不滚底。重启先从持久日志恢复，原自动结果不被修改；旧 override 已收口同一事务。第五批（2026-10-18）已统一旧维护/热载/锁/轮次/备份写边界：先准备结果、可恢复落盘后发布；成员作用域保存、整盒关联保真、无人认领商品锁定和等效移动已隔离回归。备份先预检再显式应用，保留当前配置/订单草稿与完整旧日志，不重注入 NC。此处是第五批历史进度；设置往返、结算依赖提示与 IA 逐项验收现已收口，见本文当前验收摘要；仍未部署。接口与限制见 [INTERFACES §8.9](./INTERFACES.md#89-消息动作人工修订2026-10-16分批实施)、验证见 [专项 §18.1](./PLAN-message-reprocess-2026-10-15.md#181-第四批接线与验收2026-10-16)。下文历史细节不因此自动成为现行契约。
+权限按照消息时间和当前配置判断，包括白名单、优先名单/半开时段、阶段和持久锁。优先名单改变只更新权限并确定性重算，不重跑模型。统一重放入口是 [`replay_messages_with_parse`](../src/replay/session/mod.rs)，阶段政策为 [`phase_rejection`](../src/parser/policy.rs)。
 
-### 桌面整并增补（2026-10-18，持续验收中）
+排位区分拼团、单领、整盒与特典；原价/子项调价以整数分存储，前端统一元。包盒策略与整盒商品不是一回事；包尾按已确认列规则分配并参与强制成盒。分配真源是 [`AllocationEngine`](../src/engine/allocation_engine/mod.rs)，生效行/撤销真源是 [`collect_effective_claims`](../src/engine/replay.rs)。
 
-七个工作区固定同序、一步互达：总览、轮次与商品、排谷、结算与下单、复盘、成员、系统设置。旧 admin 与成员/消息锚点保留上下文并到唯一入口；同源部署不再被另一实例的已存 API 偏好覆盖。成员称呼和来源独立保存，AI 建议先预览选入草稿；消息原文只读，日常纠错只用统一动作编辑器。
+排与撤不自动合并。原申购后没有再次加排同商品时，后来撤销仍针对原申购，不要求相邻。前序修订让精确引用失效时，保留原引用并说明“撤销未命中”，不改撤另一认购；仍继续执行之后的撤排/改单。
 
-系统设置现为接入、消息理解、展示默认、数据维护四个任务组，一次显示一组；前三者分别显式保存，在最新完整配置上合并白名单字段，同区冲突保留输入，不提交其他草稿。不再并列“待保存”和“立即取反”开关。测试群/伪造开关、分段理解与实验合并、高级权限分类、轮次类别和整盒关联可达；无关目录保存保留显式 class 与关联。结算三个页内入口仍保留旧细分锚点。
+实验合并 `merge.enabled` 默认关闭。开启时只合并同人相邻同语义理解单元，不推迟首条处理；实际分组及原产物保留，不能在改配置时重切冻结组。[`message_groups`](../src/replay/session/mod.rs)。匿名代排按发送者权限判断，不借代理名提升权限；具名代理同名歧义仍待后继核对。
 
-消息编辑、成员、系统设置、轮次和结算注册共用离开保护；未保存时切页、切实例、重新读取、磁盘重载及备份应用先保存/放弃/继续编辑，浏览器重载有标准提醒。消息保存仍一次执行，不新增二次确认；仅离开脏草稿时询问。权限设置携草稿往返、结算依赖复核及完整逐项验收仍待完成，见 [验收台账](./VERIFICATION-msg-ia-2026-10-18.md)。不部署、不改真实数据。
+## 3. 管理员原位修订（非 JSON）
 
-消息权限往返（第八批接线）：编辑器可去优先名单/时段或阶段管理，完整草稿仅存本标签 sessionStorage，URL 只带随机令牌，有效期两小时。不会自动添加成员、切轮或保存动作。返回重新读取同一实例/轮次/记录，原记录版本变化时只读保留旧草稿而不套用；正常返回保留筛选和滚动。消息支持状态筛选，修订后离开筛选的定位行暂留，显式“清除定位”后移出。当前轮复盘可去排谷处理同一记录；导入复盘仍只读。全部负面与完整 IA 验收仍以台账为准。
+排谷消息流的每个状态均可打开统一动作编辑器。默认复制当前动作，点改排/撤/改单、多项、数量、策略并附管理员解释。原消息文本、身份、时间和自动产物只读；已处理记录不允许靠旧原文维护接口绕开修订。
 
-结算依赖复核（第十批，2026-10-19）：排位、目录、权限、成员称呼或结算规则改变，订单显示“需要重新核对”、旧来源试算标记，保留手工排包、价格和订单号，不自动重新生成。普通后台保存不能将该状态悄悄消除；管理员点“保留当前订单并重新核对”才在同一来源/版本守卫下保存新复核基线，全部确定性计算、零模型。锁定还逐项检查实际数量、商品/款式、价格及唯一订单号；缺失、重复、差额问题可点击定位实际包/行输入（不因前面空包而错位）。规则编辑只试算预览和显式独立保存，不顺带保存订单。正式页不再提供会写入当前草稿的占位示例；测试在隔离夹具注入。重新生成排包为单独明确操作，已有排包先说明替换影响。专项逐项验收已收口，仍未部署。
+- 选择完整动作替换、忽略、人工拒绝或恢复自动；空动作与忽略/拒绝不混为一谈。[`read`](../src/services/message_actions/mod.rs)、[`save`](../src/services/message_actions/mod.rs)。
+- 一次保存立即在原消息位置重算，不强制模型或二次确认；之后的新消息/撤排不被旧快照覆盖。
+- 连续或不连续补充由人工选取，等效于“最早主条完整动作替换＋补充条人工拒绝”。同一事务原子提交；自动组不可半改，解除补充可恢复其精确前选项。
+- 最近一次人工事务支持单步撤回，使用逆事务恢复前次选择，不用备份覆盖整个当前状态。政策/锁态/目标版本变化会阻止不安全撤回，失败不消耗撤回槽。[`undo`](../src/services/message_actions/transaction.rs)。
+- 模型代填仅在显式点击后请求，同一草稿可手改/取消。响应抵达时重查轮次、配置、目标/补充版本与锁态，迟到结果不覆盖编辑或自动执行。保存和撤回零模型。[`suggest`](../src/services/message_actions/suggest.rs)。
+- 保存带轮次、配置/记录版本和幂等事务标识；并发修改/半截审计日志/写失败不报告成功。请求失败保留输入。独立 `view_epoch/view_revision` 通知旧行改变，不以事件数或最大seq代替。
+- 需要改优先名单/阶段时可携草稿去设置再返回。草稿只在本标签会话保存，URL不放消息/名单；返回重验上下文，不自动加成员、切轮或执行。
 
-复盘关系图（第十一批）：默认当前商品，可按商品分组看全部；按姓名/款式定位，完整提示和键盘焦点保留，原始字号或适配宽度均不缩小到难读字号。单领/等待不再漏画，原始 user_id 按当前快照称呼解析；绘图全部本地，无 CDN。表格、列、图切换保留各自视区和步骤；读入导入文件后明确只读。步骤列表和列视图使用原生按钮，Space/Enter 可选步且焦点恢复。工作流附独立投影游标，人工只改解释、事件数不变时，当前轮复盘也重新读取，不依赖领域 version 增长。完整 MP/IA 验收见逐项台账，不部署。
+详细 UI、请求与不可变产物合同见 [消息计划](./PLAN-message-reprocess-2026-10-15.md) 和 [INTERFACES §8.9](./INTERFACES.md#89-消息动作人工修订2026-10-16分批实施)。
 
-第十二批验收修正：精确撤销所指申购因前序修订而失效时，仍保留原引用、不撤其他申购，并在消息当前“执行说明”中展开“撤销未命中”；原自动结果不覆盖。新自动理解中的多商品撤销逐项准备、全项有效才执行；保留已解析的商品范围，不因跨商品同名款式重新 first-match，也不将无法确认的明确商品降级成撤最近一笔。原先已经冻结的理解事件不按新代码追溯重解析；需要时管理员直接修订动作。已规范数量保持原值，不把后续“撤 1”扩大成撤全部。
+## 4. 工作区、轮次与配置
 
-## 1. 概述与定位
+七个工作区固定同序互达：总览、轮次与商品、排谷、结算与下单、复盘、成员、系统设置。旧admin/消息/成员入口只作兼容跳转，不能成为另一个编辑真源；模拟器页已移除。路由装配：[`build_router`](../src/api/mod.rs)，桌面说明：[web/README](../web/README.md)。
 
-- **本地数据处理 + 远程展示**：本地机（`部署主机`）接收 QQ 群消息、LLM 解析、排谷计算；排位快照/回放将来发布到 Cloudflare（R2 + Pages）供成员查看（`docs/POLICY.md:8`）。
-- **绝不主动发消息给真实群**：`reply_enabled=false`（`config.example.json:7`）默认关闭；`send_*` 仅当 `reply_enabled=true` 且 `action ∈ allowed_actions` 时放行（已强制，见 §10.1）。成员名单拉取为只读动作，允许。
-- **确定性优先**：LLM 只做自然语言 → 结构化；排序/分配/结算由确定性引擎完成（`docs/POLICY.md:10`）。
-- **与文档的关系**：POLICY 是权威业务规则；DESIGN 定义模块/接口/路由/部署；TASKS 记录分工与完成状态。本文是**功能视角**的描述（触发 → 处理 → 结果 + JSON），与 DESIGN §5 的接口契约一一对应。
-- **新栈装配**：`src/main.rs` 的 `run` 子命令装配 Gateway + Pipeline + HTTP API + 每日成员调度（`src/main.rs:82-117`）。接口冻结件为 `src/bus.rs`、`src/settings.rs`、`config.example.json`（`docs/TASKS.md:83`）。
+轮次库以 `active_round_id` 指向私有 `data/rounds/<id>.json`。创建/阶段/当前设置归轮次管理；商品四类目录独立编辑。切换与重放解耦；界面不提供“激活并清空”，已有后台fresh合同不等于日常推荐操作。[`activate_round`](../src/services/rounds.rs)、[`setup_round`](../src/services/rounds.rs)。
 
----
+系统设置分接入、消息理解、展示默认、数据维护，一次显示一组。业务区显式独立保存，在最新配置上合并该区允许字段；同区冲突保留输入，不顺带提交其他区草稿。轮次/成员/结算/消息亦有统一离开草稿保护；此时才询问保存/放弃/继续，不给每次消息保存增加确认。
 
-## 2. 运行时架构
-
-### 2.1 进程 / 端口 / 线程
-
-- **单进程**：`#[tokio::main]` 异步运行时（`src/main.rs:31`）。`run` 模式下不连接 PostgreSQL。
-- **反向 WebSocket 服务器（Gateway）**：绑定 `AppConfig.gateway.bind`，默认 `0.0.0.0:9801`（`config.example.json:4`；绑定逻辑 `src/gateway/ws_server.rs:46-73`）。NapCat 主动连入。
-- **HTTP API**：绑定 `127.0.0.1:{PAIGU_HTTP_PORT}`，默认 `21081`（`src/api/mod.rs:80-87`；`src/main.rs:100-103`）。
-- **成员调度任务**：一个 `tokio::spawn` 循环，每日在 `members.daily_pull_at`（默认 `19:00`）拉取群成员（`src/main.rs:143-158`）。
-- **每条消息一个任务**：Gateway 对路由通过的每条消息 `tokio::spawn(sink.handle(...))`（`src/gateway/ws_server.rs:267-269`）。Pipeline 共享状态由 `tokio::sync::Mutex` 保护（`src/llm/pipeline.rs:34`），因此业务状态应用是串行的，但多消息的**加锁顺序不等于到达顺序**（并发下 `sequence` 由加锁时刻决定，`src/llm/pipeline.rs:82-112`）。
-- **连接内**：每连接一个读循环 + 一个写任务 + 心跳 `interval`（`heartbeat_secs`，默认 15s）（`src/gateway/ws_server.rs:171-184`）。
-
-### 2.2 数据流图
-
-```
-NapCatQQ ──反向 WS──▶ Gateway 0.0.0.0:9801
-                       │  decide_route（白名单/群消息/非空）→ Drop 记 debug
-                       ▼
-              IncomingEvent（每消息 spawn）
-                       ▼
-   Pipeline.process：幂等 → 规则快路径 → LLM 清理/抽取 → EventValidator → 权限(时段/预存)
-                       ▼
-       内存事件列表 → rebuild(ReplayService + AllocationEngine) → AllocationSnapshot
-                       ▼
-   axum HTTP API 127.0.0.1:21081
-     /api/config /api/board /api/display /api/messages /api/sim/* /api/members /api/gateway/status
-     / /admin /sim /web/* 静态页
-                       ▼
-   浏览器展示页（local 数据源，5s 增量轮询）
-   ┈┈┈┈（未接线）┈┈┈┈▶ Cloudflare R2(快照/回放) + Pages(静态展示)
-```
-
-- 入队/背压：DESIGN §7 描述有界 `mpsc`；当前 Gateway 实际用 `tokio::spawn` 直接调用 sink（`src/gateway/ws_server.rs:267-269`），**未实现有界队列与背压日志**（待确认是否按 DESIGN 补齐）。
-- 发布：`R2Publisher`/`LocalPublisher` 已实现但 `run` 栈未构造、未调用（见 §9、§10）。
-
-### 2.3 端到端时序（一条群消息 → 排位更新）
-
-1. NapCat 建立 WS 连接（`src/gateway/ws_server.rs:168`）。
-2. 收到文本帧 → `on_text`：先尝试按 `echo` 回包（动作响应），否则解析 `RouteMessageEvent`（`src/gateway/ws_server.rs:230-249`）。
-3. `decide_route`：`post_type=="message"` 且 `message_type=="group"` 且 `group_id∈whitelist` 且规范化文本非空，否则 `Drop`（`src/gateway/onebot.rs:218-235`）。
-4. `to_incoming_event`：解析身份、`timestamp_ms = time*1000`（无 time 用当前时间），生成 `IncomingEvent`（`src/gateway/onebot.rs:237-256`）。
-5. `Pipeline.process`（`src/llm/pipeline.rs:73`）：
-   1. 幂等键 `group_id::message_id`，重复 → `Duplicate`（`:84-107`）；
-   2. 空文本 → `Ignored`（`:116-120`）；
-   3. 以 `/` 开头 → 管理员命令分支（`:122-145`）；
-   4. `RuleParser::parse`，规则高置信（`>=0.9` 且非 Unknown）直接用，否则调 LLM；LLM 失败按 `fallback_to_rules` 回退（`:147-186`）；
-   5. `EventValidator::validate`：Unknown→Ignore、歧义→NeedConfirm、置信度<0.65→Reject、数量 0/>99→Reject（`:213-255`；`src/parser/validation.rs:38-104`）；
-   6. 权限：优先时段内非预存 → `Rejected`（`:257-269`）；
-   7. 追加事件 → `rebuild` 重放得到快照，`version = 事件数`（`:271-302`；`src/llm/pipeline.rs:416-432`）。
-6. 返回 `PipelineOutcome { status, detail, reply, version, snapshot }`（`src/bus.rs:23-30`）。`reply` 仅回给 HTTP 调用方，不发送到群。
-7. 展示页每 5s `GET /api/display?since=<version>` 拉增量并 keyed diff（`web/display.js:290`；`src/api/display_routes.rs:48-75`）。
-
----
-
-## 3. 运行模式与入口
-
-入口分派见 `src/main.rs:37-48`。
-
-| 模式 | 命令 | 效果 |
-|---|---|---|
-| `run`（默认，新栈） | `cargo run` 或 `cargo run -- run` | Gateway(`gateway.bind`, 默认 `0.0.0.0:9801`) + Pipeline + API(`127.0.0.1:21081`) + 每日 19:00 成员调度（`src/main.rs:46-48,82-117`） |
-| `simulate`（离线重放验证，旧引擎） | `cargo run -- simulate --round-config <json> --queue <jsonl> [--out <dir>]` | 逐条解析/校验/重放语料，输出 `out/report.md`、`out/result.json`、`out/outcomes.jsonl`（`src/main.rs:38-41`；`src/simulation/verifier.rs:62-93`） |
-| `serve`（已并入新栈） | `cargo run -- serve`（等价 `run`） | 按 `run` 启动 Gateway + Pipeline + API；旧 `src/simulation/chat_server.rs` 与旧聊天服务器**已在 C-4 删除** |
-| `legacy`（旧栈，已删除） | `cargo run -- <任意未识别子命令>` | 未识别子命令现按 `run` 启动；旧栈（`DATABASE_URL`/PostgreSQL/`src/config.rs`）**已在 C-4 删除**，无回退路径 |
-
-> 说明：`cargo run -- legacy` 不再被专门识别，而是按 `run` 启动。旧栈路由（`src/api/routes.rs` 的 `/webhook`、`/admin`、`/public`、`/api/replays`、`/api/simulations`）**已在 C-4 删除**；现役路由为 `src/api/*_routes.rs`。（历史记录，见上方快照说明）
-
----
-
-## 4. 配置
-
-### 4.1 `AppConfig` 全字段表
-
-定义见 `src/settings.rs:12-186`；默认值来自 `config.example.json`（经 `include_str!` 嵌入，`src/settings.rs:183-186`）。「热载」指 `PUT /api/config` 或文件变更后是否即时生效。
-
-| 字段路径 | 类型 | 默认值 | 含义 | 热载 |
-|---|---|---|---|---|
-| `revision` | u64 | `1` | 乐观并发版本号 | 是（`put`/`reload` 更新） |
-| `gateway.bind` | String | 无（必填） | 反向 WS 监听地址 | 部分：`run` 循环只在 accept 返回后重读，监听中不重绑（`src/gateway/ws_server.rs:46-73`） |
-| `gateway.whitelist_groups` | Vec<String> | `[]` | 白名单群号 | 是（每帧读配置，`src/gateway/ws_server.rs:251-254`） |
-| `gateway.heartbeat_secs` | u64 | `15` | 心跳间隔 | 否（每连接读一次，`src/gateway/ws_server.rs:182`） |
-| `gateway.reply_enabled` | bool | `false` | 是否允许回复群消息 | 是（每次 `send_action` 读；`send_*` 仅当 `true` 且 `action∈allowed_actions` 放行，`src/gateway/ws_server.rs:75-88`；§10.1） |
-| `gateway.allowed_actions` | Vec<String> | `[]` | 允许的出站动作白名单 | 是（每次 `send_action` 读，`src/gateway/ws_server.rs:79-82`） |
-| `llm.enabled` | bool | `true` | 是否启用 LLM | 是（每消息读，`src/llm/pipeline.rs:152`） |
-| `llm.base_url` | String | 无（必填） | OpenAI 兼容 base URL | 是 |
-| `llm.model` | String | 无（必填） | 模型名 | 是 |
-| `llm.api_key_env` | String | 无（必填） | 读取 API key 的环境变量名 | 是 |
-| `llm.timeout_secs` | u64 | `60` | 请求超时 | 是 |
-| `llm.max_tokens` | u32 | `2048` | 最大输出 token | 是 |
-| `llm.temperature` | f32 | `0.1` | 采样温度 | 是 |
-| `llm.fallback_to_rules` | bool | `true` | LLM 失败时回退规则解析 | 是 |
-| `llm.prompt_template` | String | `""`（空则用 `DEFAULT_PROMPT`） | 系统提示词 | 是（`src/llm/prompt.rs:6-11`） |
-| `round.round_id` | String | 无（必填） | 团 ID | 是 |
-| `round.title` | String | 无（必填） | 团标题 | 是 |
-| `round.group_id` | String | 无（必填） | 群号 | 是 |
-| `round.priority_users` | Vec<String> | `[]` | 预存（购物金）用户 | 是（每消息读，`src/llm/pipeline.rs:494-499`） |
-| `round.priority_window` | Option<{start_ms,end_ms}> | `None` | 优先时段（end 独占） | 是（`src/llm/pipeline.rs:487-492`） |
-| `round.items` | Vec<ItemConfig> | `[]` | 商品目录 | 是（`src/settings.rs:113-152`） |
-| `round.items[].item_id` | String | 必填 | 商品 ID | 是 |
-| `round.items[].name` | String | 必填 | 商品名 | 是 |
-| `round.items[].kind` | String | 必填 | **种类**：`拼团`/`单领`/`整盒`/`特典`（兼容 `group`/`single`/`box`/`gift` 与旧 `split`/`single`/`gift`；其余按拼团） | 是（`src/settings/mod.rs`，2026-09-24 更新） |
-| `round.items[].class` | Option<String> | `None` | `A`/`B`；缺省**自动推导**（有子项⇒A，无子项⇒B），显式合法值可覆盖 | 否 |
-| `round.items[].aliases` | Vec<String> | `[]` | 商品别名 | 是 |
-| `round.items[].subitems` | Vec<SubitemConfig> | `[]` | 子项 | 是 |
-| `…subitems[].subitem_id` | String | 必填 | 子项 ID | 是 |
-| `…subitems[].name` | String | 必填 | 子项名 | 是 |
-| `…subitems[].capacity` | Option<u32> | `None` | 盒容量（`null` 时 FullBox/包尾取消息数量） | 是 |
-| `…subitems[].aliases` | Vec<String> | `[]` | 子项别名 | 是 |
-| `display.refresh_ms` | u64 | `5000` | 展示页轮询间隔 | 是（前端载入时读，`web/display.js:337`） |
-| `display.data_source` | String | `"local"` | `local`/`remote` | 是 |
-| `display.remote_base_url` | String | `""` | 远程快照基址 | 是 |
-| `members.group_id` | String | 必填 | 拉取成员的群号 | 是 |
-| `members.cache_path` | String | 必填 | 成员缓存文件 | 是 |
-| `members.daily_pull_at` | String | `"19:00"` | 每日拉取时刻 | 是（调度每轮读，`src/main.rs:146`） |
-
-> 注意（**2026-09-25 核对**，见 [DESIGN.md](./DESIGN.md) §4、[INTERFACES.md](./INTERFACES.md) §8.7）：商品级 `unit_price_cents` 为**原价**（无调价）；**仅子项**有 `unit_price_cents`(A) + `adjust_cents`(B)（最终价 **C=A+B**，已落库并接入结算）。`box_size` 与 `subitems[].pieces` 已从配置模型移除；`max_quantity` 仅单领使用。
-
-### 4.2 环境变量
-
-| 变量 | 作用 | 引用 |
-|---|---|---|
-| `PAIGU_CONFIG_PATH` | 配置文件路径，默认 `config/app.json` | `src/main.rs:83` |
-| `PAIGU_HTTP_PORT` | HTTP API 端口，默认 `21081` | `src/main.rs:100-103` |
-| `PAIGU_WEB_DIR` | 静态页目录，默认 `web` | `src/api/mod.rs:32-36` |
-| `DEEPSEEK_API_KEY` | LLM key（由 `llm.api_key_env` 指定名） | `src/llm/client.rs:84-85`；`config.example.json:20` |
-| `RUST_LOG` | tracing 过滤 | `src/main.rs:33-35` |
-| 旧栈专用（已删除） | `DATABASE_URL`、`DATABASE_MAX_CONNECTIONS`、`R2_*`、`LLM_*`、`HOST/PORT/WS_*` | 旧 `src/config.rs` 已在 **C-4 删除** |
-
-### 4.3 `config/app.json` 生成与热载机制
-
-- **生成**：若 `PAIGU_CONFIG_PATH` 指向的文件不存在，用内嵌的 `config.example.json` 写出（`src/settings.rs:216-227`）。当前仓库已存在 `config/app.json`（`revision:1`），内容与示例一致（`config/app.json:1-40`）。
-- **存储**：`ConfigStore` = `RwLock<AppConfig>` + `path`（`src/settings.rs:208-211`）。
-- **写**：`put(cfg, expected)` 校验 `expected==当前 revision`，不符返回 `StaleRevision{expected,actual}`，相符则 `revision+1` 落盘并替换内存（`src/settings.rs:246-260`）。
-- **重载**：`reload()` 从磁盘读取；若文件 revision `<=` 内存则强制 `+1`（避免回退）（`src/settings.rs:262-272`）。
-- **监听**：`spawn_watch()` 用 `notify` 监听文件，300ms 去抖后异步 `reload()`（`src/settings.rs:275-308`）。DESIGN §9 提到的「无依赖时退化为 mtime 轮询」**未实现**（`notify` 已在依赖中，`Cargo.toml`）。
-- **revision/notify**：`PUT /api/config` 成功后前端刷新 revision（`web/admin.js:298-303`）；文件热载不会主动推送前端，前端需重新 `GET /api/config`（`web/admin.js:279`）。
-
----
-
-## 5. 功能清单
-
-> 每条格式：**触发 → 处理 → 结果**，附实测/契约 JSON。`PipelineOutcome.status` 取值集合为 `Applied | Duplicate | Ignored | Rejected | NeedConfirm | Error`（`src/llm/pipeline.rs:97,118,126,161,190,199,229,235,242,252,296`）。
-
-### F1 接入与白名单
-
-- **触发**：NapCat 反向连接 `ws://0.0.0.0:9801` 并上报群消息文本帧。
-- **处理**：`accept_async` → `on_text`（先尝试 echo 回包）→ `RouteMessageEvent` 反序列化 → `decide_route`（`post_type=="message"`、`message_type=="group"`、`group_id∈whitelist`、`normalize_message` 非空）；非路由项 `Drop` 仅记 debug（`src/gateway/ws_server.rs:230-263`；`src/gateway/onebot.rs:218-235`）。消息文本由 `message` 段的 text 拼接，或从 `raw_message` 去 CQ 码并反转义（`src/gateway/onebot.rs:97-150`）。
-- **结果**：路由通过 → `IncomingEvent` → spawn 交给 Pipeline。出站动作仅允许 `allowed_actions`；`send_*` 仅当 `reply_enabled=true` 且在白名单时放行（默认 `false` → 拒绝并告警，`src/gateway/ws_server.rs:75-88`）。
-- **入站事件 JSON 示例**（OneBot 字段）：
-```json
-{
-  "post_type": "message",
-  "message_type": "group",
-  "self_id": 3000000000,
-  "user_id": 10001,
-  "group_id": 123456789,
-  "message_id": 42,
-  "raw_message": "排 通行证 结城理 1",
-  "message": [{ "type": "text", "data": { "text": "排 通行证 结城理 1" } }],
-  "sender": { "user_id": 10001, "nickname": "成员01", "card": "成员01（备注）", "role": "member" },
-  "time": 1788782400
-}
-```
-- **出站动作帧（只读）**：`{ "action": "get_group_member_list", "params": { "group_id": "123456789" }, "echo": "<uuid>" }`（`src/gateway/ws_server.rs:94`；`src/gateway/action.rs:7-10`）。
-
-### F2 昵称清洗与身份
-
-- **触发**：事件携带 `sender.card` 或 `sender.nickname`。
-- **处理**：`parse_identity` 取 `user_id`（顶层或 sender），昵称优先用 `card`；`clean_nickname` 做全角→半角归一、识别代理写法 `A(代B)` → 身份 `A` / 显示 `A(B)`、去首个括号备注（`src/gateway/onebot.rs:187-216`）；`is_admin = role ∈ {owner, admin}`（`:209`）。Pipeline 在入口直接调用同一个 `gateway::onebot::clean_nickname`（**昵称清洗单一真源**，`src/llm/pipeline.rs:73`）。
-- **结果**：`Identity { user_id, identity, display, is_admin }`；`to_incoming_event` 把 `display` 写入 `nickname`（`src/gateway/onebot.rs:246-255`）。
-- **示例**：
-  - `成员01（备注）` → 身份/显示 `成员01`
-  - `A（代B）` → 身份 `A`，显示 `A(B)`
-  - `名：015` → `名:015`
-  - 测试：`src/gateway/onebot.rs:351-369`
-
-### F3 消息判定（规则快路径 + LLM 清理/抽取 + 回退）
-
-- **触发**：Pipeline 收到 `IncomingEvent`。
-- **处理**：
-  1. 幂等：键 `group_id::message_id`，命中 → `Duplicate`（`src/llm/pipeline.rs:84-107`）。
-  2. 空文本 → `Ignored`（`:116-120`）。
-  3. `/` 开头：非管理员 → `Rejected`「非管理员斜杠命令」；管理员命令开关关闭时只记录，开启时执行 `/开团 /锁位 /结团 /状态 /导出`。
-  4. `RuleParser::parse`（规则置信度 `>=0.9` 且 intent 非 Unknown 则采用）；否则 `llm.enabled` 时调 LLM；LLM 抛错且 `fallback_to_rules` → 回退规则，否则 `Rejected`「没识别成功」（`:147-186`；常量 `:28-29`）。
-  5. `EventValidator`：Unknown→`Ignore`；有 `ambiguous_parts`→`NeedConfirm`；`confidence<0.65`→`Reject`；`quantity==0` 或 `>99`→`Reject`；商品无法解析→`Reject`（`src/parser/validation.rs:38-104`）。
-  6. `Modify` 意图复用 Claim 校验与分配链路，应用前先撤销本人同商品既有认购，再按新数量重排；管理员指定他人改单仍见 T-14。
-- **LLM 输出契约**（`src/llm/prompt.rs:43-50`；解析 `src/llm/pipeline.rs:539-615`）：
-```json
-{
-  "intent": "claim",
-  "items": [
-    { "item": "通行认证SP-月行水上", "subitem": "岳羽由加莉", "quantity": 1,
-      "claim_type": "split", "slot_policy": "normal" }
-  ],
-  "confidence": 0.95,
-  "ambiguous_parts": []
-}
-```
-> 说明：契约文档用 `subitem:"岳羽由加莉"`；解析器实际同时接受 `item`/`name`/`subitem`，按商品名/别名/ID 匹配（`src/llm/pipeline.rs:617-690`）。`slot_policy` 实际值为 `normal|tail|fullbox`（提示词），归一化后映射为 `Normal|TailLocked|FullBox`（`src/parser/normalize.rs:17-31`）。
-- **结果示例**（实测 `POST /api/sim/message` 的 `outcome`）：
-```json
-{
-  "status": "Applied",
-  "detail": "claim: pass_spx1[normal]",
-  "reply": "已记录，当前版本 #1",
-  "version": 1,
-  "snapshot": { "...": "见 F5/§7" }
-}
-```
-```json
-{ "status": "Ignored", "detail": "无法识别为排谷/撤销意图", "reply": null, "version": 0, "snapshot": null }
-```
-
-### F4 权限（优先时段 / 预存 / 管理员）
-
-- **触发**：校验通过后。
-- **处理**：`is_priority_user` 用 `priority_users` 逐项匹配 `user_id`/`nickname`/`identity`/`display` 任一（`src/llm/pipeline.rs:494-499`）；`in_priority_window` 判定 `timestamp_ms ∈ [start_ms, end_ms)`（end 独占，`:487-492`）。窗口内且非预存 → `Rejected`；预存用户首次成功排谷时注入 `Eligibility{priority_level:10}`（`:257-269,274-278,467-485`）。
-- **排序**：`priority DESC → effective_at ASC → sequence ASC`（`src/domain/event.rs:193-199`；`src/engine/replay.rs:124-129`）。
-- **结果示例**（实测：非预存用户在窗口内）：
-```json
-{
-  "status": "Rejected",
-  "detail": "优先时段仅限预存(购物金)用户",
-  "reply": "优先时段仅限预存(购物金)用户，请求已拒绝",
-  "version": 0,
-  "snapshot": null
-}
-```
-- 管理员斜杠命令：仅 `is_admin` 可用，非管理员 `/` 命令被拒绝（`src/llm/pipeline.rs:122-134`）。
-
-### F5 排谷执行（子项 / 单领 / 包盒 / 包尾 / 撤销 / 幂等）
-
-- **触发**：`ParsedIntent::Claim` 校验为 `Ok(event)` 后。
-- **处理**：
-  - 子项感知：状态键为 `(item_id, subitem_id)`（`src/engine/allocation_engine.rs:40,50-71`）；配置商品 → `Item` 映射见 `src/settings.rs:113-152`。
-  - `split` 普通：填第一个可填普通槽，满则开新盒（`src/engine/allocation_engine.rs:222-235`）。
-  - `single`：写入 `singles`，超出 `max_quantity` 的部分进 `waiting`（`:417-456`）。
-  - `FullBox`（包盒）：独占整盒，未占满的槽标记 `LockedEmpty` 并带 `segment_id`（`:202-220`）。
-  - `TailLocked`（包尾）：开新盒占前 N 槽、其余锁空（`:237-258`）。
-  - `ColumnLocked`（锁列）：当前按普通槽处理（`:190-192`，见 §10）。
-  - 撤销：`ClaimCancelled` 在重放时按「目标 claim → 目标 item 数量 → 最近一条」定位（`src/engine/replay.rs`）；2026-10-16 明确排/撤不自动合并，未再次加排同商品时，后续撤销仍命中原申购，不受邻接/间隔影响。原位修订后继续执行后续撤排，不用旧 board 覆盖当前流，见 DECISIONS H-8。
-  - 幂等：同 `message_id` 不重复处理（`src/llm/pipeline.rs:84`）。
-- **结果**：重建 `AllocationSnapshot`，`version = 已应用事件数`（`src/llm/pipeline.rs:416-432`）。
-- **实测快照 JSON（裁剪：`pass_sp/v_jcl` 被 `成员01` 占第 1 槽）**：
-```json
-{
-  "round_id": "月行水上",
-  "version": 1,
-  "generated_at": "2026-09-14T04:28:33.172973900Z",
-  "item_allocations": [
-    {
-      "item_id": "pass_sp",
-      "item_name": "通行认证SP-月行水上",
-      "kind": "split",
-      "subitem_id": "v_jcl",
-      "boxes": [
-        {
-          "box_index": 1,
-          "slots": [
-            {
-              "slot_index": 1,
-              "user_id": "10001",
-              "claim_id": "ec5d6724-5a13-4d1a-8feb-0ad212ecdd9f",
-              "claim_line_index": 0,
-              "status": "Filled",
-              "slot_policy": "Normal",
-              "segment_id": null,
-              "lock_reason": null
-            }
-          ]
-        }
-      ],
-      "singles": [],
-      "waiting": []
-    }
-  ],
-  "user_summaries": [
-    {
-      "user_id": "10001",
-      "display_name": "",
-      "items": [
-        { "item_id": "pass_sp", "item_name": "通行认证SP-月行水上",
-          "quantity": 1, "claim_type": "Split", "unit_price": 0, "gross": 0 }
-      ]
-    }
-  ],
-  "warnings": []
-}
-```
-> **序列化注意（重要）**：`SlotStatus`、`SlotPolicy`、`ClaimType` 等枚举以 **PascalCase** 序列化（实测 `"status":"Filled"`、`"slot_policy":"Normal"`、`"claim_type":"Split"`），而 `as_str()` 返回的是 snake_case（`src/domain/allocation.rs:15-24`；`src/domain/claim.rs:13-51`）。前端部分样式判定使用小写（`web/common.js:228-235`），存在不一致（见 §10）。
-
-### F6 快照与重放
-
-- **触发**：每次成功应用事件；或 `GET /api/board`。
-- **处理**：事件保存在内存 `State.events`（`src/llm/pipeline.rs:39`）；`rebuild` 先按 `effective_at, sequence` 排序，再 `ReplayService::collect_effective_claims` 得到生效行并按优先级排序，最后 `AllocationEngine::allocate` 生成快照（`src/llm/pipeline.rs:416-432`；`src/engine/replay.rs:63-132`）。`version = 排序后事件数`（`src/llm/pipeline.rs:430`）。
-- **结果**：`GET /api/board` 返回 `{version, board, status}`；无事件时 `board:null`。
-- **实测（空）**：
-```json
-{ "board": null, "version": 0,
-  "status": { "listening": true, "bound_addr": "127.0.0.1:0", "clients": 0, "last_error": null } }
-```
-- **当前轮次复盘（2026-10-13）**：`GET /api/replay/view` 只读输出当前激活管线的实际消息与领域事件步骤。每步包含完整排位和该步成员汇总，默认显示最新一步；新消息、配置或轮次变化触发页面刷新。不会重跑 LLM、改写日志或替换实时管线。示例文件仅由用户手动导入；空轮次与接口错误不回退为示例。旧服务缺少该接口时仅显示实际当前快照并提示逐步历史不可用。消息日志持久化与 `POST /api/replay` 的权威重算见现行接口文档。
-
-### F7 who-whats
-
-- **触发**：`GET /api/display`（或展示页渲染）。
-- **处理**：`who_whats` 遍历快照 `user_summaries`，以 `display` 为分组键（`state.display` 映射，缺失回退 user_id），identity 记录在 `state.identity`，商品按 `item_name` 累加数量，`BTreeMap` 稳定排序（`src/llm/pipeline.rs:338-367`）。前端在无 `who_whats` 时可从排位表推导（`web/common.js:701-724`）。
-- **实测 JSON**：
-```json
-[
-  { "display": "成员01", "identity": "成员01",
-    "items": [ { "name": "通行认证SP-月行水上", "qty": 1 } ] }
-]
-```
-
-### F8 成员名单（缓存 / 每日 19:00 / 手动拉取）
-
-- **触发**：`GET /api/members`；每日 `daily_pull_at`；`POST /api/members/refresh`。
-- **处理**：
-  - `GET /api/members` 读取顺序：配置缓存 → seed（gitignored）→ example（入库占位）→ 空；返回来源、缓存群属/时间、轮次/配置版本与名单指纹。数组及 `{group_id,refreshed_at_ms,members}` 包装均可读；数值成员标识归一为字符串，群名片优先。路径可用 `PAIGU_MEMBERS_SEED_PATH` / `PAIGU_MEMBERS_EXAMPLE_PATH` 覆盖。
-  - 显式拉取须带当前 `round_id/config_revision/members_fingerprint`。仅请求允许的 `get_group_member_list` 只读动作；等待后再核对同一上下文、校验完整成员数组，在共同写锁内原子写入带群属/时间的私有缓存。过期、坏响应、写入失败保留旧缓存；未连接返回 502，不伪装刷新成功。
-  - 显式称呼建议使用同样三项守卫；模型关闭或上下文过期不外发。只发送必要标识/群名片；严格拒绝未知/重复成员、额外字段及无效称呼，等待期间配置或名单变化也拒绝套用。结果仅预览→管理员选择填入草稿→显式保存；人工称呼默认不勾选，请求期间改过的输入不被覆盖。
-  - 调度：`run` 启动时 spawn 循环，每日在 `daily_pull_at` 调 `refresh_members_from_gateway`，失败仅告警（`src/main.rs:142-157`）。
-- **实测 `GET /api/members`（example 兜底，占位名）**：
-```json
-{ "source": "example",
-  "members": [
-    { "user_id": null, "nickname": "成员01" },
-    { "user_id": null, "nickname": "成员02" },
-    { "user_id": null, "nickname": "成员03" }
-  ]
-}
-```
-- **失败**：缺请求守卫 400，过期 409，接收器失败 502；建议模型停用/无效响应 422。页面保留现有名单与输入，不自动再问模型或清空数据。
-- **前端兜底**：API 不可用时 `web/common.js` 使用内置占位子集（`成员01`…`成员05`，`web/common.js:759-769`）。
-
-### F9 展示页（5s 增量 / keyed diff / 不打断 / local-remote）
-
-- **触发**：打开 `/`（`display.html`）或 `/web/display.html`。
-- **处理**：`display.js` 初始化 → `GET /api/config` 取 `display.*` → 每 `refresh_ms`（默认 5000）`GET /api/display?since=<version>`（`web/display.js:290,337`）。
-  - **keyed diff**：`syncKeyedChildren` 复用 DOM；排位单元格 key = `item|subitem#box:slot`；消息 key = `s<seq>`；who-whats key = `display`（`web/common.js:138-166,287-306`）。变化格高亮 3s（`web/common.js:197-210`）。
-  - **不打断**：仅在文本变化时写入；`extra` 块用 `__html` 比较后写（`web/common.js:319-322`）；smart-scroll 仅在距底 60px 内自动跟随，否则显示「有新内容 N 条」（`web/common.js:373-424`）。
-  - **数据源**：`local` 走 API；`remote` 依次尝试 `<base>/rounds/<round_id>/current`、`<base>/current`（**无 `.json` 后缀**，`web/common.js:841-847`）。
-- **实测 `GET /api/display?since=0`（裁剪）**：
-```json
-{
-  "version": 1,
-  "board": { "...": "AllocationSnapshot，见 F5" },
-  "messages": [
-    { "seq": 1, "display": "成员01", "text": "排 通行证 结城理 1",
-      "status": "Applied", "detail": "claim: pass_spx1[normal]" }
-  ],
-  "who_whats": [ { "display": "成员01", "identity": "成员01",
-    "items": [ { "name": "通行认证SP-月行水上", "qty": 1 } ] } ],
-  "status": { "listening": true, "bound_addr": "127.0.0.1:0", "clients": 0, "last_error": null },
-  "changed": []
-}
-```
-- **静态资源实测**：`/`、`/common.js`、`/display.css` 均返回 HTTP 200（由 `src/api/mod.rs` 的静态路由与 `fallback_service` 提供）；`/sim`、`/sim.js` 已移除（返回 404）。
-
-### F10 管理面板（revision / 409）
-
-- **触发**：打开 `/admin`。
-- **处理**：`load()` → `GET /api/config`（`web/admin.js:279-292`）；保存 → `PUT /api/config {config, revision}`（`:298`）；冲突（HTTP 409）→ 横幅提示「配置冲突，需重新载入」（`:305-307`）；「从磁盘重载」→ `POST /api/config/reload`（`:317`）；成员表 → `GET /api/members`、拉取 → `POST /api/members/refresh`（`:347-371`）。商品编辑器支持 items/subitems 增删改（`:118-228`）；时段窗口 `datetime-local` ↔ `start_ms/end_ms`（`:46-62`）。
-- **结果**：服务端 `ConfigStore.put` 校验 revision（`src/settings.rs:246-260`），冲突返回：
-```json
-{ "error": "stale_revision", "revision": 5 }
-```
-（HTTP 409；`src/api/config_routes.rs:60-71`）
-
-### F11 测试注入（HTTP，仅测试轮）
-
-- **背景**：模拟器页（`/sim`、`sim.html`/`sim.js`）与浏览器端伪造发送**已移除**；测试消息改由 HTTP 端点注入，且**仅测试轮可用**（`RoundSettings.category == "test"`）。
-- **触发**：`POST /api/sim/message`（单条）或 `POST /api/sim/messages`（批量，裸数组或 `{messages:[…]}`）。
-- **处理**：每条为**完整消息** `{user_id|id, text, timestamp, nickname?, is_admin?, message_id?, group_id?}`，`timestamp` **逐条出现**（整数毫秒 / 纯数字串 / RFC3339 / 本地 `YYYY-MM-DD HH:MM[:SS]`）。服务端逐条构造 `IncomingEvent`，走与真实链路**同一** `Pipeline::process`（`src/api/sim_routes.rs`）。
-- **隔离**：伪造解包只在 NC 入口 `Pipeline::handle` 生效，且要求「`accept_forged_messages` + 测试轮 + 测试群（`gateway.test_group_id`）」三者同时满足；`process` 核心不再感知伪造。
-- **逐条 drop（不整批拒绝）**：缺 `user_id`/`text`/`timestamp`（或 timestamp 非法）→ 该条 `Dropped`，不进入处理；`group_id` 非测试群 → 该条 `Dropped`；其余照常。非测试轮调用 → `400 {"error":"not_a_test_round"}`。
-- **响应**（批量）：
-```json
-{ "ok": true, "round_id": "…", "category": "test", "count": 3,
-  "summary": { "applied": 1, "dropped": 2, "rejected": 0, "ignored": 0 },
-  "results": [ { "index": 0, "user_id": "…", "text": "…", "status": "Applied", "detail": "…", "version": 1 } ],
-  "board": { "…": "AllocationSnapshot" }, "version": 1 }
-```
-- **注意**：`POST /api/sim/identity` 仅把身份存入进程内 `BTreeMap`（`src/api/sim_routes.rs`），**不参与消息处理**；重置 `POST /api/sim/reset` 仅手动。
-
-### F11.5 消息合并与匿名代排（实验，2026-10-13）
-
-- **合并**：`merge.enabled=true` 时，同发送者、消息流**相邻**、**同意图**（Claim/Cancel/Modify）的多条消息合并理解：代表 = 组内 `(timestamp_ms, seq)` 最大者（结果归属代表），成员行标 `Merged`；**无时间窗口**、**被其他 user 打断即断**；**处理不推迟**（首条立即、补充到达即 `recompute` 更新）。`代排` 计为 Claim 修饰；普通闲聊/模糊表述（如"想要"）不算 Claim、保持 `Ignored`。
-- **统一入口**：`Pipeline::ingest`（NC `handle` 与测试注入 `POST /api/sim/message(s)` **共用**；测试 == 实际）。实时/重放共用 `src/parser/coalesce.rs` 分组，保证 **实时 == 重放**。
-- **匿名代排 `X(代)`**：席位填 **`发送者(代)`**（合成身份、昵称留空）；**权限按发送者**判定（`settings::proxy_base` 取基名）；**锁定仍生效**。
-- **展示**：消息流**逐条不合并**（代表显示本条原始文本，成员显示"已合并"徽标）。
-
-### F12 配置热载
-
-- **触发**：`PUT /api/config`、`POST /api/config/reload`，或 `config/app.json` 文件变更。
-- **处理**：`ConfigStore` 为 `RwLock<AppConfig>`（`src/settings.rs:208-211`）；`spawn_watch` 用 `notify` 监听，300ms 去抖后 `reload()`（`:275-308`）；`reload()` 保证 revision 单调（`:262-272`）。
-- **结果**：`GET/PUT /api/config` 返回 `{config, revision}`（`src/api/config_routes.rs:20-43`）。
-- **注意**：`gateway.bind` 在监听中不会重绑（`run` 循环只在 `accept_loop` 返回后重读，`src/gateway/ws_server.rs:46-73`）；`heartbeat_secs` 每连接读一次（`:182`）。
-
----
-
-## 6. HTTP API 参考
-
-基址 `http://127.0.0.1:21081`（`src/api/mod.rs:80-87`）。CORS 允许 `null`、`http://127.0.0.1:*`、`http://localhost:*`（`src/api/mod.rs:38-48`）。路由装配 `src/api/mod.rs:57-78`。
-
-| 方法 | 路径 | 请求体 | 成功响应 | 错误 |
-|---|---|---|---|---|
-| GET | `/api/health` | — | `{status:"ok", version}` | — |
-| GET | `/api/board` | — | `{version, board, status}` | — |
-| GET | `/api/gateway/status` | — | `{listening, bound_addr, clients, last_error}` | — |
-| GET | `/api/config` | — | `{config, revision}` | — |
-| PUT | `/api/config` | `{config, revision}` | `{config, revision}` | `409 {error:"stale_revision", revision}`；`500 {error}` |
-| POST | `/api/config/reload` | `{}` | `{config, revision}` | `500 {error}` |
-| GET | `/api/display?since=<version>` | — | `{version, board, messages, who_whats, status, changed}` | — |
-| GET | `/api/messages?since=<seq>` | — | `{messages, version}` | — |
-| POST | `/api/sim/message` | `{user_id\|id, text, timestamp, nickname?, is_admin?, message_id?, group_id?}` | `{outcome, board, version}` | `400 {error:"not_a_test_round"}`；缺字段/非测试群 → `outcome.status="Dropped"` |
-| POST | `/api/sim/messages` | 裸数组 或 `{messages:[…]}`（每项同上） | `{ok, round_id, category, count, summary, results, board, version}` | `400 {error:"not_a_test_round"}` |
-| POST | `/api/sim/identity` | `{user_id, nickname, is_admin?, priority?}` | `{ok, identity, identities}` | — |
-| POST | `/api/sim/reset` | `{}` | `{ok, version}` | — |
-| GET | `/api/members` | — | `{members,source,round_id,config_revision,members_fingerprint,cached_group_id,cache_updated_at_ms}` | — |
-| POST | `/api/members/refresh` | `{round_id,config_revision,members_fingerprint}` | `{members,source:"gateway",…}` | `400/409/502` |
-| POST | `/api/members/cn-suggest` | 同上 | `{suggestions,executed:false,…}` | `400/409/422` |
-| GET | `/api/replay`、`/api/replay/*` | — | — | `501 {error:"not_implemented"}` |
-| GET | `/` | — | `display.html` | — |
-| GET | `/admin` | — | `admin.html` | — |
-| GET | `/replay` | — | `replay.html` | — |
-| GET | `/web/*` | — | 静态文件；未命中回退目录 `web/` | 404 |
-
-**细节与引用**：
-
-- `GET /api/health` → `src/api/board_routes.rs:17-19`；实测 `{"status":"ok","version":"0.1.0"}`。
-- `GET /api/board` → `src/api/board_routes.rs:21-25`；空态实测 `{"board":null,"version":0,"status":{...}}`。
-- `GET /api/gateway/status` → `src/gateway/ws_server.rs:113-120`。
-- `GET /api/config` / `PUT` / `POST reload` → `src/api/config_routes.rs:14-71`；409 映射 `:60-65`。
-- `GET /api/display?since=` → `src/api/display_routes.rs:48-75`；`changed` 仅在缓存中命中 `since` 对应版本时计算（`:55-65`）。
-- `GET /api/messages?since=` → `src/api/display_routes.rs:77-82`。
-- `POST /api/sim/message` → `src/api/sim_routes.rs`（**仅测试轮**；逐条 drop）。
-- `POST /api/sim/messages` → `src/api/sim_routes.rs`（批量，裸数组或 `{messages:[…]}`）。
-- `POST /api/sim/identity` → `src/api/sim_routes.rs`。
-- `POST /api/sim/reset` → `src/api/sim_routes.rs`（`pipeline.reset()` + `display::clear_cache()`）。
-- `GET /api/members` / `POST /api/members/refresh` → `src/api/member_routes.rs:30-91`。
-- 静态页 → `src/api/mod.rs:57-75`。
-
-**curl 示例**：
-
-```bash
-# 健康检查
-curl http://127.0.0.1:21081/api/health
-
-# 当前排位
-curl http://127.0.0.1:21081/api/board
-
-# 增量展示（since 传上次 version）
-curl "http://127.0.0.1:21081/api/display?since=0"
-
-# 批量注入测试消息（仅测试轮；缺字段/非测试群逐条 Dropped）
-curl -X POST http://127.0.0.1:21081/api/sim/messages \
-  -H "Content-Type: application/json" \
-  -d '[{"user_id":"10001","nickname":"成员01","text":"排 通行证 结城理 1","timestamp":1791792000000}]'
-
-# 读取配置
-curl http://127.0.0.1:21081/api/config
-
-# 保存配置（revision 必须与服务器一致，否则 409）
-curl -X PUT http://127.0.0.1:21081/api/config \
-  -H "Content-Type: application/json" \
-  -d '{"config":{...},"revision":1}'
-
-# 拉取群成员（只读；需先 GET /api/members，取其三项守卫原值）
-curl -X POST http://127.0.0.1:21081/api/members/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"round_id":"占位轮","config_revision":1,"members_fingerprint":"用当前 GET 返回值替换"}'
-
-# 重置模拟会话
-curl -X POST http://127.0.0.1:21081/api/sim/reset -H "Content-Type: application/json" -d '{}'
-```
-
----
-
-## 7. 数据模型与文件
-
-### 7.1 文件
-
-| 路径 | 说明 | 是否入库 |
-|---|---|---|
-| `config/app.json` | 运行配置，`ConfigStore` 读写；缺失时从内嵌 `config.example.json` 生成（`src/settings.rs:216-227`） | 否（`.gitignore` 忽略 `/config/`） |
-| `data/members.json` | 成员缓存，`POST /api/members/refresh` 与每日调度写入（`src/api/member_routes.rs:80-88`） | 否（`.gitignore` 忽略 `/data/`） |
-| `data/members.seed.json` | 真实名单（gitignored，可选）；读取顺序 seed→example→空（见 F8） | 否 |
-| `data/members.example.json` | 入库占位成员（`成员01`…`成员05`） | 是 |
-| `config.example.json` | 配置模板/默认值来源（`src/settings.rs:183-186`） | 是 |
-| `simulation-corpus/**` | 回归语料（只读资产，不得改，`docs/AGENT-RULES.md:11`） | 部分（`real-*/` 被忽略） |
-
-### 7.2 事件模型
-
-- `EventEnvelope`（`src/domain/event.rs:39-51`）：`event_id, round_id, group_id, user_id, raw_message_id, event_type, effective_at, sequence, payload, status`。
-- `DomainEvent`（`#[serde(tag="event_type")]`，`src/domain/event.rs:7-37`）子项：
-  `ClaimCreated`、`ClaimCancelled`、`ClaimModified`、`AdminAllocationAdjusted`、`AdminSlotLocked`、`AdminSlotUnlocked`、`DiscountRulesSet`、`RoundClosed`、`RoundOpened`、`ParseOverride`。
-- 当前新栈**只会产生** `ClaimCreated` / `ClaimCancelled`（`src/parser/validation.rs:144,193`）；其余子项虽在重放/引擎中被处理，但无入站路径（见 §10）。
-- 排序：`compare_event_order` = `effective_at ASC → sequence ASC`（`src/domain/event.rs:188-191`）。
-
-### 7.3 `AllocationSnapshot` 关键字段
-
-`src/domain/snapshot.rs:7-15`：
-
-- `round_id`（字符串，新类型 `RoundId` 序列化为字符串）
-- `version`（i64；新栈 = 已应用事件数，`src/llm/pipeline.rs:430`）
-- `generated_at`（RFC3339）
-- `item_allocations: Vec<ItemAllocation>`（`src/domain/allocation.rs:103-113`）：`item_id, item_name, kind, subitem_id, boxes, singles, waiting`
-  - `boxes[].slots[]`（`SlotAllocation`，`src/domain/allocation.rs:26-36`）：`slot_index, user_id, claim_id, claim_line_index, status, slot_policy, segment_id, lock_reason`
-  - `singles[]`：`user_id, claim_id, item_id, quantity, unit_price`
-  - `waiting[]`：`user_id, claim_id, item_id, quantity, claim_type, priority_level`
-- `user_summaries: Vec<UserAllocationSummary>`：`user_id, display_name`（**新栈恒为空串**，`src/engine/allocation_engine.rs:166`）, `items[]`
-- `warnings: Vec<AllocationWarning>`（新栈恒为空，`src/engine/allocation_engine.rs:92`）
-- 另定义 `PublicSnapshot`（`src/domain/snapshot.rs:24-95`）供发布器使用（`to_public`，`:97-133`），但新栈未发布。
-
----
-
-## 8. 测试矩阵
-
-### 8.1 Rust 单测（`cargo test`）
-
-共 **52** 个（按源码 `#[test]` / `#[tokio::test]` 计数）：
-
-| 文件 | 数量 | 覆盖点 |
-|---|---|---|
-| `src/gateway/onebot.rs` | 12 | 路由（白名单/非白名单/非 message/空消息）、消息规范化（段/CQ/转义）、昵称清洗（备注/代理/全角）、身份、字段映射 |
-| `src/gateway/ws_server.rs` | 8 | `reply_enabled` 强制（拒绝 `send_*` / 未授权动作 / 白名单放行）、无客户端报错、echo 往返、status 形状 |
-| `src/gateway/action.rs` | 1 | 只读动作无客户端时失败 |
-| `src/llm/pipeline.rs` | 8 | 规则排谷成功、LLM 排谷成功、非排谷忽略、歧义确认、时段拒绝、预存优先排序、LLM 失败回退、无回退拒绝 |
-| `src/settings.rs` | 2 | 优先时段 end 独占、预存用户候选匹配 |
-| `src/api/config_routes.rs` | 2 | 409 映射、500 映射 |
-| `src/api/display_routes.rs` | 4 | 增量 diff（新填/不变/清空/移除格） |
-| `src/api/member_routes.rs` | 2 | 成员解析（数组/对象）、example 占位名 |
-| `src/api/sim_routes.rs` | 1 | 身份存取与列出 |
-| `src/api/mod.rs` | 2 | 默认 web 目录、CORS 构建 |
-| `src/tests/replay_helpers.rs` | 10 | 既有引擎/重放辅助（`src/tests/replay_helpers.rs`） |
-
-### 8.2 Node e2e（`tests/e2e/sim.mjs`）
-
-- 运行：`node tests/e2e/sim.mjs` / `npm run test:e2e` / `pwsh tests/e2e/run.ps1`（`tests/e2e/README.md:16-24`）。
-- 脚本自建：`cargo build` → 临时配置（`bind=127.0.0.1:0`、`reply_enabled=false`、`llm.enabled=false`、固定优先窗口）拉起 `run` → Chromium 驱动 `/sim` → 断言（`tests/e2e/sim.mjs:51-98`）。
-- **8 个用例**（每例前 `POST /api/sim/reset`，`tests/e2e/sim.mjs:257-386`）：
-  1. 常规排谷：`成员01`（预存）+ `排 通行证 结城理 1` → `Applied`，`pass_sp/v_jcl` 首格为 `成员01`；
-  2. 非排谷忽略：`今天天气不错` → `Ignored`；
-  3. 时段拒绝：非预存 `成员02` + 偏移落在窗口内 → `Rejected`，原因含「预存/优先时段」；
-  4. 预存优先：非预存 `成员02` 先排、预存 `成员01` 后排 → 首格变为 `成员01`；
-  5. `/sim` 静态资源 200：`/sim`、`/common.js`、`/sim.js`、`/display.css` 均 200；
-  6. `PUT /api/config` 冲突 409：陈旧 `revision` → `409 stale_revision`；
-  7. `/api/members` 回退 example：seed 缺失时 `source=example` 且 5 个占位成员；
-  8. `remote` 数据源：本地静态服务提供 `rounds/<id>/current`（无 `.json`），`/display?source=remote` 渲染。
-- 断言以 HTTP API 为主、页面表格/转录为辅（`tests/e2e/README.md:62`）。
-
-### 8.3 `simulation-corpus` 回归
-
-- **确定性重放**：`cargo run -- simulate --round-config … --queue … --out …`（`simulation-corpus/VERIFICATION.public.md`）。
-- **real-samples**：`sample1`、`sample2`，逐槽对比 `expected_allocation.json`（`simulation-corpus/real-samples/verify-samples.mjs`；`docs/TASKS.md:92` 记录「real-samples 逐格回归 ALL PASS」）。
-- **real-xlsx**：两个真实团（`月行水上`、`辉夜姬`）的 xlsx → fixtures 重建（`simulation-corpus/real-xlsx/`）。
-- **多 agent 语料**：`agent-a-normal`、`agent-b-box-tail`、`agent-c-cancel-fund`、`agent-d-adversarial`（`simulation-corpus/VERIFICATION.public.md`）。
-- **已修复缺陷**：包盒未识别、购物金无优先通道、带商品撤销误判、FullBox 数量、包尾超规、数量 0/超 99、闲聊误拒、version 恒 1（`simulation-corpus/VERIFICATION.public.md`）。
-
-### 8.4 覆盖点与未覆盖点
-
-**已覆盖**：路由白名单/drop、消息规范化、昵称清洗与代理、规则与 LLM（mock）两条解析路径、回退、校验（歧义/置信度/数量）、权限时段与预存排序、快照增量 diff、config 409/500、e2e 八场景。
-
-**未覆盖**：
-- 真实 NapCat 接入链路（无 WS 集成测试；仅单元 mock echo）；
-- LLM 真实网络调用（全部 mock/`enabled=false`）；
-- 包盒 / 包尾 / 单领 / 撤销在**新栈 Pipeline** 中的端到端断言（仅在 `simulate` 旧引擎语料中覆盖）；
-- 成员拉取成功路径（依赖 NapCat 在线，无自动测试）；
-- `PUT /api/config` 成功路径与热载竞态；
-- 远程（R2/Pages）数据源与发布；
-- `AdminAllocationAdjusted` 等管理事件的重放（无入站路径）。
-
----
-
-## 9. 部署
-
-### 9.1 本地
-
-```powershell
-cargo run -- run
-# 展示 http://127.0.0.1:21081/  ·  管理 http://127.0.0.1:21081/admin  ·  模拟 http://127.0.0.1:21081/sim
-node tests/e2e/sim.mjs
-```
-
-- 数据落 `config/app.json`、`data/members.json`（`src/main.rs:82-117`）。
-- `gateway.bind` 默认 `0.0.0.0:9801`；若该地址不可用，Gateway 每 2s 重试绑定并记录 `last_error`，**HTTP API 不受影响**（`src/gateway/ws_server.rs:46-72`；`/api/gateway/status` 可查）。
-
-### 9.2 将来 Cloudflare（R2 快照 + Pages 静态展示）——**未接线**
-
-- **发布器代码**：旧栈的 `SnapshotPublisher` trait、`R2Publisher`、`LocalPublisher`（`src/publisher/**`）**已在 C-4 删除**，当前无发布实现；远程展示接线时需重新实现。
-- **前端远程适配器**：`web/common.js:841-847` 依次尝试 `<remote_base>/rounds/<round_id>/current`、`<remote_base>/current`（**无 `.json` 后缀**）；`display.data_source=remote` 时启用（`web/display.js:265-287`）。
-- **未接线点**：`run_gateway_stack` 不做任何远程发布（发布器已删除）；`PublicSnapshot.to_public` 未被调用。远程数据契约与本地 `/api/display` 的 `AllocationSnapshot` **未统一**（remote 预期 `PublicSnapshot`/`items`，local 为 `item_allocations`，前端 `normalizeBoard` 两者兼容，但 `messages`/`who_whats`/`changed` 远程缺失，`web/display.js:226-254`）。
-
----
-
-## 10. 已知限制与未实现
-
-1. **`reply_enabled` 已强制，但新栈未接发送路径**：`Gateway::send_action` 对 `send_*` 仅当 `reply_enabled=true` **且** `action ∈ allowed_actions` 时放行，否则 `Err` + `warn!`（默认 `false` → 拒绝，`src/gateway/ws_server.rs:75-88`）。但 `Pipeline` 产出的 `reply` 只回给 HTTP 调用方，新栈**没有调用 `send_*` 的代码路径**；即使置 `true` 也不会自动发消息。
-2. **远程发布未接线**：旧 `src/publisher/**` 已在 **C-4 删除**，当前无发布实现（见 §9.2）；远程展示待后续接线。
-3. ~~管理员命令仅记录不执行~~（**Wave 3 已实现**）：`Pipeline::run_admin_command` 执行 `/开团 /锁位 /结团 /状态 /导出`，由 `gateway.admin_commands_enabled` 热开关控制；锁定后拒绝排/撤/改。
-4. ~~`Modify`（改单）未实现~~（**Wave 3 已实现**）：`ParsedIntent::Modify` 支持自助改单（撤销本人该商品既有认购 + 重新认购）；管理员改任意指定人待 T-14。
-5. ~~`/api/replay` 501~~（**Wave 1–4 已实现**）：`/api/replay`、`/api/replay/*` 已接线逐步重放，契约见 [INTERFACES.md](./INTERFACES.md) §8。
-6. **远程数据源契约待统一**：local 返回 `AllocationSnapshot`（`item_allocations`），remote 预期 `PublicSnapshot`（`items`）；`messages`/`who_whats`/`changed` 远程无对应（`src/domain/snapshot.rs:24-95`；`web/common.js:537-661`）。
-7. ~~枚举序列化大小写不一致导致状态样式失效~~（**2026-09-25 已修复**）：`web/common.js` 在 UI 边界把 PascalCase/kebab-case 统一为 snake_case。
-8. ~~重复消息 `seq` 复用~~（**2026-09-25 已修复**）：重复入站不改变排位版本，但会获得独立、单调的 UI 消息序号。
-9. **运行态快照在内存**：消息 JSONL 与原始事件 JSONL 会持久化；进程重启后的状态恢复仍依赖主动重放，当前没有数据库型快照持久层。
-10. **`ColumnLocked`（锁列）无专门语义**：按普通槽处理（`src/engine/allocation_engine.rs:190-192`；`simulation-corpus/VERIFICATION.public.md`）。
-11. **`gateway.bind` 热改不重绑**：监听循环不响应配置变更（`src/gateway/ws_server.rs:46-73`）。
-12. **`sim/identity` 的身份/优先级未参与处理**：仅存储；预存判定实际来自 `config.round.priority_users` 与昵称匹配（`src/api/sim_routes.rs:85-96`；`src/llm/pipeline.rs:494-499`）。
-13. **`data/members.seed.json` 默认不存在**：真实名单需用户自行放置（gitignored）；未放置时 `/api/members` 回退 `data/members.example.json`（占位 `成员01`…`成员05`），`source=example`（`src/api/member_routes.rs:39-58`）。
-14. **`display` 的 `changed` 仅在命中缓存时非空**：首次或 `since` 不在最近 64 个版本内返回 `[]`（`src/api/display_routes.rs:12,25-34,55-64`）。
-15. **API 无鉴权**：仅绑定 `127.0.0.1`（`src/api/mod.rs:82`）；若暴露需自行加防护。
-16. **结算/优惠未接入新栈**：`rebuild` 只做分配，不调用 `SettlementEngine`（`src/llm/pipeline.rs:416-432`）；`DiscountRulesSet` 无入站路径。
-17. **有界队列/背压未实现**：Gateway 直接 spawn，非 DESIGN §7 描述的有界 `mpsc`（`src/gateway/ws_server.rs:267-269`）。
-18. **`simulate`/`serve` 属旧引擎**：与新栈 Pipeline 是两套解析/校验代码路径（`src/simulation/**`），二者行为可能不完全一致（待确认是否需统一）。
-
----
-
-## 11. 待办与变更
-
-- **接线远程发布**：在 `run` 栈快照变更后调用 `SnapshotPublisher`（R2/Local），并统一 remote 数据契约（对齐 `PublicSnapshot` 或扩展前端适配器）。
-- **回复发送路径**：如需群内回复，需在 Pipeline 侧接线 `Gateway::send_action`（当前 `reply` 仅回 HTTP；`send_*` 门禁已强制：`reply_enabled=true` 且在白名单才放行）。
-- **实现或明确拒绝 `Modify`**：改单语义（`ParsedIntent::Modify`）目前仅忽略。
-- **管理员命令执行**：把 `/` 命令映射为 `AdminAllocationAdjusted` 等事件并接入重放。
-- **持久化事件/快照**：重启不丢状态；为 `/api/replay` 提供真实回放数据。
-- **前端大小写对齐**：统一枚举序列化（snake_case）或修正前端判定，使锁定/预留样式生效。
-- **重复消息 `seq` 语义**：修正 `Duplicate` 的 seq/key 处理。
-- **测试补强**：新栈下的包盒/包尾/单领/撤销端到端、成员拉取成功路径、`PUT /api/config` 成功与热载竞态、WS 集成。
-- **成员兜底文件化**：是否引入 `data/members.seed.json`（gitignored）替代 `data/members.example.json` 占位（当前默认无 seed 文件）。
-
----
-
-> 复核建议：`cargo test`（52）、`node tests/e2e/sim.mjs`（8/8）、`node simulation-corpus/real-samples/verify-samples.mjs`（ALL PASS），以及本机 `cargo run -- run` 后按 §6 的 curl 核对响应。
+所有会影响当前投影的配置保存、磁盘重载、监听热载、锁/轮次和私有导入统一经过 writer，先准备结果再可恢复落盘，成功后发布。[`apply_locked`](../src/services/configuration.rs)、[`ConfigStore::spawn_watch`](../src/settings/mod.rs)、[`persist`](../src/settings/commit.rs)。`gateway.bind` 改动仍不在线重绑，心跳按连接读取；不误称所有配置都无条件热生效。
+
+## 5. 成员与隐私边界
+
+名单来源按配置缓存→私有seed→公开example→空回退；群名片优先，数字身份归一。CN绑定user_id，可编辑；显示回退CN→清洗称呼→user_id，人工编辑后停止自动填充。[`get_members`](../src/services/members.rs)、[`member_name`](../src/services/members.rs)、[`resolve_cn`](../src/settings/mod.rs)。
+
+显式拉取/称呼建议需当前轮次、配置版本与名单指纹。请求完成后再次检查，坏名单、未知/重复建议、缓存原子写失败均保留旧数据。模型关闭不发送建议请求；建议只预览选入草稿，再显式保存。[`refresh_members`](../src/services/members.rs)、[`suggest_cn`](../src/services/members.rs)。
+
+每日调度已实现，失败只日志告警；状态/恢复仍未闭环，不能把无接收器称作成功刷新。[`spawn_members_scheduler`](../src/main.rs)。
+
+公开协作者不需要真实名单、模型或NapCat：`npm run check` 运行公开占位核心/脚本/离线CLI/文档/隐私门禁，`npm run check:full` 额外跑既有完整桌面套件。私有夹具需显式提供，遗漏显示NOT RUN，详见 [开发检查](./DEVELOPMENT.md)。
+
+私有配置/消息/成员/备份/工作簿不入库。隐私扫描同时检查索引与工作副本，覆盖已知群名片/CN/别名/私有配置及密钥/IP/禁止路径，但不保证未知数据已匿名化，也不自动清洗历史。[`privacy-scan.mjs`](../scripts/privacy-scan.mjs)。
+
+## 6. 排表、消息流与复盘
+
+排表姓名中央仅姓名，共用“三字宽/全长”偏好。三字按实际字体测量，空位同宽；全长按商品内同盒列最大名宽，格间2px/盒间4px，不均分撑满。实际容量/空位保留，超宽在商品内容内横滚。上沿2px盒色、下沿4px形状状态，全文/盒号/变化附提示与无障碍标签。字体加载后校准，复盘按全部已载入步骤算宽，切步不跳列。共用渲染入口：[`createBoardRenderer`](../web/common.js)。
+
+消息及排位增量按稳定身份更新，不重建整页，不打断划词/点击/滚动；只有贴底才自动跟随。旧条修订通过投影游标补更，保留筛选定位行，清除定位后才移出筛选。[`display_with_cursor`](../src/services/display.rs)、[`syncKeyedChildren`](../web/common.js)。
+
+复盘默认读取当前激活轮次实际消息/动作，最新步、成员汇总、表格/列/图，追溯可去同一消息处理。关系图默认当前商品，支持分组全部、单领/等待、姓名/款式定位、键盘与明暗；绘图本地无CDN。视图切换保留各自视区/步骤；当前轮旧条改解释也刷新。手动导入明确只读，不改当前排位，不回退假示例。[`active_view`](../src/services/replay.rs)、[`Pipeline::replay_view`](../src/llm/pipeline/replay_view.rs)。
+
+## 7. 结算、下单与备份
+
+结算真源是 [`evaluate`](../src/settlement/engine.rs)。目录仅子项调价，调价不参与折扣/减均/特典档位；规则只试算与显式独立保存，不顺带保存订单。
+
+排位/权限/目录/称呼/规则变化，旧订单保留但提示需重新核对、旧来源试算。普通后台保存不能清掉标记；管理员显式保留当前订单复核才记录新来源基线。锁定前检查数量、目标/价格和唯一订单号，问题可定位实际输入。重排包单独显式触发；正式页面不注入演示订单。[`put_draft`](../src/services/settlement/mod.rs)、[`lock_draft`](../src/services/settlement/mod.rs)，来源守卫见 [结算模块](../src/services/settlement/)。
+
+私有导出/预检/显式应用支持完整日志和人工选择，保留当前配置/订单草稿；恢复可重试，不重注入NC或请求模型。备份不能上传公开Issue/PR；浏览器下载形态仍是差距。[`snapshot_export`](../src/services/snapshot.rs)、[`snapshot_import`](../src/services/snapshot.rs)。
+
+## 8. 测试与仍未完成项
+
+可重复检查见 [DEVELOPMENT](./DEVELOPMENT.md) 与 [桌面套件](../tests/e2e/README.md)。桌面仅验收1920×1080、100%、DPR1；计数以实际输出/台账为准，不按总数推断业务全覆盖。私有样本与源表只读，输出在隔离目录；缺私有输入不声称语料通过。真实接收器/真实模型/公网发布不属于自动测试。
+
+`simulate` 目前仍是旧离线verifier，与当前冻结理解会话尚未统一，E3迁移中不可提前改称已完成。[`run_cli`](../src/simulation/verifier.rs)。管理员目标改单语法、完整具名代理歧义、有界入站、调度可观测性及跨商品提示分级等以 [TODOS](./TODOS.md)/工程计划为准；ColumnLocked与管理员阶段豁免仍需业务决策。远程发布暂停，未部署或重启常驻实例。
+
+## 9. 已放弃／历史内容（不可据此重新执行）
+
+2026-09-14调查与之后分批记录完整移至 [历史快照](./archive/FUNCTIONAL-2026-09-14.md)。其旧行号、52/8测试、已删除的pipeline.rs/ws_server.rs等路径，以及“复盘501”“结算未接线”“无持久化/需主动恢复”“serve走旧栈”“模拟器仍可达”等描述不再有效。
+
+不恢复：日常改原始消息、批量LLM重解析、覆盖整文件式撤回、按事件数/seq判旧行更新、默认开启merge、删除持久锁或接受伪造管理员提权。修正动作完整替换，原自动理解与后续操作保留；这些与旧提案冲突时以DECISIONS §H和现行消息计划为准。共享历史强推与公网发布需独立授权，不在当前自动执行范围。

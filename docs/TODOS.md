@@ -156,7 +156,7 @@
 |---|---|---|---|---|
 | T-19 | doing | **每日拉取调度和日志告警已有**：`spawn_members_scheduler` / `next_daily_ms`；可观测状态和恢复链仍需补验 | B-2 | 不在真实群触发拉取作测试 |
 | T-20 | done | **隐私守护及隔离自测**：card/CN/别名/自定义缓存/轮次，索引＋工作副本、vendor/自身密钥守卫、示例不能放行私有标识 | — | 2026-10-21：`npm run test:privacy`21项、249文件扫描通过；命中/源损坏失败且不打印秘密值，不等于历史清洗或完整DLP |
-| T-21 | todo | **`FUNCTIONAL.md` 引用改函数名**（现行号易漂移） | — | 不再依赖行号 |
+| T-21 | done | **FUNCTIONAL现行引用稳定函数/类型与源码链接**，旧混合快照归档，不再冒充当前限制 | — | `test:docs`校验本地链接与显式源码声明；E2开发入口同跑，历史引用只保留在archive |
 | T-22 | done | **结算配置样例已有**：pricing/discounts/gift_tiers/reduce_average | — | 配置测试及30项桌面实际加载现行模板；不重复生成 |
 | T-23 | todo | **入站有界队列/背压**（DESIGN §7 的 mpsc） | — | 压测不丢消息 |
 | T-24 | todo | **`simulate` 迁移到新栈**（当前保留旧 verifier 以支撑 real-samples/real-xlsx 回归；迁移需保持逐格一致） | T-11 | 同输入同结果 |
