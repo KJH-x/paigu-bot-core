@@ -21,7 +21,7 @@ npm run check:full -- --samples 'C:\private-fixtures' --settlement-fixture 'C:\p
 ```
 
 - `--samples <root>`：源目录含sample1、sample2各自的round_config.json、queue.jsonl、expected_allocation.json；只复制这三项到隔离目录，重放并逐格比较，不改原夹具，不复用旧out冒充本次结果。无该选项打印NOT RUN。
-- 结算参考默认使用已跟踪的公开夹具，复制到隔离目录再单独执行对应测试，核对确实运行1项而非静默返回。当前318核心＋1参考=319项，不需要私有源工作簿。`--settlement-fixture <json>`仅用于显式替换参考；指定但缺失即失败，诊断不显示私有内容。
+- 结算参考默认使用已跟踪的公开夹具，复制到隔离目录再单独执行对应测试，核对确实运行1项而非静默返回。E2基线为318核心＋1参考=319项；后续新增测试以实际输出为准，参考始终另计1项，不需要私有源工作簿。`--settlement-fixture <json>`仅用于显式替换参考；指定但缺失即失败，诊断不显示私有内容。
 - `--xlsx`：选择本机私有两份工作簿回归，需既有只读解析器/夹具构建器和openpyxl。所有产物临时写入；比较后校验整个语料及源表哈希未变。指定但缺源表/依赖时失败，不降级通过；无该选项打印NOT RUN。
 - `--ui`：执行完整桌面，省略明确NOT RUN；因此 `npm run check` 成功不表示UI通过。
 
