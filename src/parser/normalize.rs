@@ -39,7 +39,7 @@ fn split_proxy(s: &str) -> Option<(String, String)> {
 }
 
 /// 去掉群名片里的注释：从首个**括号或空白**处截断。
-/// 约定每张群名片**至少包含 CN**，少部分带注释（空格/括号等），如 `HOA 有猫猫喊我` → `HOA`。
+/// 约定每张群名片**至少包含 CN**，少部分带注释（空格/括号等），如 `成员01 占位备注` → `成员01`。
 fn strip_remark(s: &str) -> String {
     let cut = s
         .char_indices()
@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(clean_nickname("丙/丁（备注丙）").1, "丙/丁");
         assert_eq!(clean_nickname("戊（备注戊👀）").1, "戊");
         // 群名片 = CN + 可选注释（空格/全角空格分隔）→ 截首个空白。
-        assert_eq!(clean_nickname("HOA 有猫猫喊我").1, "HOA");
+        assert_eq!(clean_nickname("成员01 占位备注").1, "成员01");
         assert_eq!(clean_nickname("甲　乙").1, "甲");
     }
 

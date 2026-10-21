@@ -1,6 +1,6 @@
 # SPEC · 唯一事件处理链（统一处理 + 阶段锁 + computed 缓存）（2026-10-13）
 
-> 状态：**实施中**。口径见 [DECISIONS.md](./DECISIONS.md) §B-6；工程动作见 [TODOS.md](./TODOS.md)「唯一事件处理链」。
+> 状态：**2026-10-13历史方案，2026-10-21重新审计；不得逐字执行**。共同写边界/持久理解/原位修订等已由后续专项实现；旧默认值、游标、原文编辑和锁定草案有冲突，见文末。有效剩余工程项以 [后继计划](./PLAN-engineering-followup-2026-10-19.md) 和现行DECISIONS §H/INTERFACES为准。
 > 目标：**只有唯一事件处理**——`传入消息 → 落盘储存 → 即时重算(live) 或 分步重算检查(复盘)`。
 
 ## 1. 目标数据流
@@ -106,7 +106,18 @@ let locked = matches!(effective_phase, Some(RoundPhase::Settling) | Some(RoundPh
 - e2e：开合并用例；锁/阶段断言改由 `workflow.locked`。
 - 全量：`cargo test` / `clippy -D warnings` / `node tests/e2e/sim.mjs` / `npm run privacy`。
 
-## 8. Git（清理历史 → 重签 → push）
+## 8. 历史Git提议（暂不执行，需专项确认）
+
+以下是当时的调查提议，不是当前事实或执行授权。“全部提交未签名”已不符合目前G签名提交；任何历史改写必须另行核实泄露范围、备份与协作者影响，不因继续开发自动执行或force-push。
 
 - 仓库历史已泄露真实群号、约 32 个真实昵称、内网 IP；且**全部提交未签名**（`commit.gpgsign=true` 但历史为 `N`）。
 - 步骤：① `git filter-repo --replace-text <清洗表>`（用 `data/members.json` 真实昵称 + `config/app.json` 6+位值 + 内网 IP 生成替换表；仅改历史，不动 HEAD）→ ② 校验 `git log --all -S` 0 命中 → ③ **重签全部分支提交**（`git filter-repo --commit-callback` 或 `git rebase --root -S`）→ ④ 校验 `%G?` 全 `G` → ⑤ **协调 force-push**（共享分支）。
+
+## 9. 已放弃或停止直接沿用的旧功能/思路
+
+- “合并默认开”：由现行实验默认关取代。排/撤不同语义，既存组按理解产物冻结，不重新按当前开关拆并。
+- “消息按seq/排位按事件数即可增量”：已由独立投影epoch/revision取代，旧行修订不得漏刷新。
+- 日常修改/删除原消息触发解析、批量LLM覆盖：由保留原文/自动结果、完整人工动作与可选草稿代填取代。
+- 简单删除持久锁、使锁后订单可写、仅last_seq缓存键：不再是可直接执行的代码清单。必须保留现行持久锁、来源/修订守卫和恢复门禁；computed只作可重建派生物。
+- 强行把复盘折叠成组末一步：与原消息位置/逐条核对需求须重新对照，不借性能重构删除消息可达性。
+- 测试信封时间/管理员权限变更、历史重写不是本目标自动授权范围；保持测试群隔离和已确认排序合同，争议项单列待确认。

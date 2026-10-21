@@ -31,7 +31,7 @@ QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。�
 - 单进程：Gateway + Pipeline + HTTP API 同进程运行；`run` 模式**不连接 PostgreSQL**。
 - 确定性优先：LLM 只做自然语言 → 结构化；排序/分配/结算由确定性引擎完成，任何 LLM 输出都经校验层。
 - 事件溯源：所有操作记录为不可变事件，最终状态由事件流确定性重放得到。
-- 当前为内存态：事件/快照不持久化，进程重启即丢失（`data/` 仅存成员缓存）。
+- 消息/原自动理解及人工审计写入私有日志，启动先重放恢复，再接收新消息；坏/半截日志拒绝启动，不回退猜测。排位为可重建派生状态，私有配置、轮次、成员缓存和订单草稿不入库。
 
 ## 运行
 
@@ -40,7 +40,8 @@ QQ 机器人拼团排谷系统：**本地做数据处理，远程做展示**。�
 cargo run -- run
 #   反向 WS   → ws://0.0.0.0:9801（NapCat 主动连入；白名单群 123456789；默认不回复）
 #   HTTP API  → http://127.0.0.1:21081
-#   展示 /  管理 /admin  模拟 /sim  重放 /replay
+#   排谷 /display  总览 /index  轮次 /round  成员 /members
+#   结算 /settlement  复盘 /replay  系统 /settings（/admin兼容转总览，/sim已移除）
 
 # 端到端测试（Playwright，脚本自带 cargo build + 临时服务）
 node tests/e2e/sim.mjs
@@ -56,11 +57,14 @@ cargo run -- simulate \
   --out          simulation-corpus/agent-a-normal/out
 
 # 语料夹具与逐格验证（先经 simulate 生成 out/，再校验；详见对应 README）
-python simulation-corpus/real-xlsx/build_fixtures.py
+python tests/read-only-corpus.py   # 只读源表，产物仅写临时目录，不改语料资产
 node   simulation-corpus/real-samples/verify-samples.mjs simulation-corpus/real-samples
 
 # 隐私/密钥扫描（跟踪文件命中真实昵称/密钥/内网 IP/data·config·xlsx 入库即失败）
 npm run privacy
+
+# 隐私守护自测：临时Git仓库、合成数据，无需NapCat或私有名单
+npm run test:privacy
 ```
 
 > `run` / `serve` 均走新栈；任何未识别的子命令按 `run` 启动。旧栈与 PostgreSQL 已在 **C-4** 删除（不再有 `DATABASE_URL` 回退路径）。
@@ -111,7 +115,8 @@ simulation-corpus/   # 回归语料（只读资产，不得修改）
 - `config/app.json`、`data/**`、`*.xlsx`、`sample*.json`、`simulation-corpus/real-*/` 均被 `.gitignore` 忽略，保持忽略状态。
 - 文档与语料使用占位名（`用户A` / `成员01` 等）；语料内部原版 `*.md` 被忽略，入库为 `*.public.md` 脱敏版。
 - 密钥不入代码：LLM key 仅经 `api_key_env`（`DEEPSEEK_API_KEY`）读取。
-- 校验：`npm run privacy`（`scripts/privacy-scan.mjs`）扫描全部 `git ls-files` 跟踪文件，命中真实昵称/密钥/内网 IP，或 `data/**`、`config/**`、`*.xlsx` 被跟踪即失败；另可用 `git grep` 复核真实昵称应为 **0 命中**。
+- 校验：`npm run privacy` 同时扫描Git暂存索引与工作副本，防止已暂存的敏感内容被干净/删除的工作文件掩盖。已知私有源涵盖群名片及清洗称呼、CN/别名、自定义成员缓存、拆分轮次及数字身份；坏隐私源会失败，不打印匹配内容或自定义私有路径。vendor只豁免词典姓名匹配，密钥/IP不豁免（扫描器自身同样检查）。禁止跟踪 `data/**`（占位例外）、`config/**`、工作簿。
+- `npm run test:privacy` 提供21类本地隔离回归，不连接真实接收器或模型。只豁免已知占位值，不能靠修改示例把私有标识加入豁免。无私有源的公开checkout仍可检查通用密钥/IP/禁止路径，但无法识别所有未知真实称呼；检测不等于完整匿名化或历史清洗，公开前仍须审查数据来源及历史。不要把私有备份/完整消息日志上传到Issue或PR。
 
 ## 文档索引
 

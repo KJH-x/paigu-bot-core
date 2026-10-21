@@ -2,7 +2,7 @@
 // 隐私/密钥扫描：只扫描 git 跟踪文件（git ls-files），命中即报错（退出码非 0）。
 // 本脚本不得包含任何真实昵称/群号/内网 IP 字面量；仅使用通用模式。
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,7 +11,14 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 
 const SELF = "scripts/privacy-scan.mjs";
 const PLACEHOLDER_NICK = /^成员\d{2}$/;
+// A generic keyboard/formatting term is not an identifying name by itself.
+const NON_IDENTIFYING = new Set(["空格"]);
 const ALLOWED_DATA = new Set(["data/members.example.json"]);
+const stagedText = new Map();
+const scannedText = new Map();
+function isPublicPlaceholder(value) {
+  return PLACEHOLDER_NICK.test(value) || /^user_[a-z]$/.test(value) || value === "123456789";
+}
 
 // 只对「有辨识度」的昵称做全局搜索，避免 2–4 位通用英文短词（如 IDE/web/data）
 // 造成大量误报；中文昵称、带数字/符号或较长的昵称仍会被检出。
@@ -41,44 +48,77 @@ const IP_PATTERNS = [
 ];
 
 function gitLsFiles() {
-  const out = execFileSync("git", ["-c", "core.quotepath=false", "ls-files"], {
+  const out = execFileSync("git", ["ls-files", "--stage", "-z"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
   });
-  return out
-    .split("\n")
-    .map((s) => s.replace(/\r$/, ""))
-    .filter((s) => s.length > 0);
+  const entries = out.split("\0").filter(Boolean).map(entry => {
+    const split = entry.indexOf("\t"), metadata = entry.slice(0, split).split(" ");
+    if (split < 0 || !/^[a-f0-9]+$/.test(metadata[1])) throw new Error("invalid index entry");
+    return {file: entry.slice(split + 1), object: metadata[1]};
+  });
+  const objects = [...new Set(entries.map(e => e.object))], blobs = new Map();
+  if (objects.length) {
+    const batch = execFileSync("git", ["cat-file", "--batch"], {cwd: REPO_ROOT, input: objects.join("\n") + "\n", maxBuffer: 64 * 1024 * 1024});
+    let offset = 0;
+    for (const object of objects) {
+      const end = batch.indexOf(10, offset), header = batch.subarray(offset, end).toString("utf8").split(" ");
+      const size = Number(header[2]);
+      if (end < 0 || header[0] !== object || !Number.isSafeInteger(size) || size < 0 || end + size + 2 > batch.length) throw new Error("incomplete index object");
+      const raw = batch.subarray(end + 1, end + 1 + size);
+      blobs.set(object, header[1] === "blob" && !raw.includes(0) ? raw.toString("utf8") : "");
+      offset = end + size + 2;
+    }
+  }
+  for (const entry of entries) stagedText.set(entry.file, (stagedText.get(entry.file) || "") + "\n" + blobs.get(entry.object));
+  return [...new Set(entries.map(e => e.file))];
 }
 
 function readText(rel) {
+  if (scannedText.has(rel)) return scannedText.get(rel);
   const abs = path.join(REPO_ROOT, rel);
-  let buf;
+  let working = "";
   try {
-    buf = readFileSync(abs);
+    const raw = readFileSync(abs);
+    if (!raw.includes(0)) working = raw.toString("utf8");
   } catch {
-    return null;
+    // Missing/deleted working files still have an index blob to inspect.
   }
-  if (buf.includes(0)) return null; // 二进制
-  return buf.toString("utf8");
+  const text = (stagedText.get(rel) || "") + "\n" + working;
+  scannedText.set(rel, text);
+  return text;
 }
 
-function collectNicknames(rel) {
-  const abs = path.join(REPO_ROOT, rel);
+function readPrivateJson(rel, errors, label = rel) {
+  const abs = path.resolve(REPO_ROOT, rel);
   if (!existsSync(abs)) return [];
-  let data;
   try {
-    data = JSON.parse(readFileSync(abs, "utf8"));
+    return JSON.parse(readFileSync(abs, "utf8"));
   } catch {
-    return [];
+    errors.push({file: label, kind: "private-source-unreadable", detail: "本地隐私源无法读取或解析，未跳过保护；请在本机核对"});
+    return null;
   }
+}
+
+function addName(names, value) {
+  if (typeof value !== "string") return;
+  const raw = value.trim(), normalized = raw.normalize("NFKC");
+  const clean = normalized.split(/[（(\s]/u)[0].replace(/[、。，．.·・:：;；!！?？~～]+$/u, "");
+  for (const n of [raw, normalized, clean]) {
+    if (!PLACEHOLDER_NICK.test(n) && !NON_IDENTIFYING.has(n) && isDistinctiveNickname(n)) names.add(n);
+  }
+}
+
+function collectNicknames(data, names, identifiers) {
+  if (!data) return;
   const list = Array.isArray(data) ? data : Array.isArray(data.members) ? data.members : [];
-  const names = new Set();
   for (const m of list) {
-    const n = m && typeof m.nickname === "string" ? m.nickname.trim() : "";
-    if (n.length >= 2 && !PLACEHOLDER_NICK.test(n) && isDistinctiveNickname(n)) names.add(n);
+    if (!m || typeof m !== "object") continue;
+    for (const field of ["nickname", "card", "cn", "resolved", "display_name"]) addName(names, m[field]);
+    for (const alias of Array.isArray(m.aliases) ? m.aliases : []) addName(names, alias);
+    const id = String(m.user_id ?? "");
+    if (/^\d{6,}$/.test(id)) identifiers.add(id);
   }
-  return [...names];
 }
 
 function flattenStrings(value, out) {
@@ -87,29 +127,15 @@ function flattenStrings(value, out) {
   else if (value && typeof value === "object") Object.values(value).forEach((v) => flattenStrings(v, out));
 }
 
-function collectConfigLeaks() {
-  const localPath = path.join(REPO_ROOT, "config", "app.json");
-  const examplePath = path.join(REPO_ROOT, "config.example.json");
-  if (!existsSync(localPath)) return [];
-  let local, example = {};
-  try {
-    local = JSON.parse(readFileSync(localPath, "utf8"));
-  } catch {
-    return [];
-  }
-  try {
-    example = JSON.parse(readFileSync(examplePath, "utf8"));
-  } catch {
-    example = {};
-  }
+function collectConfigLeaks(local, example, identifiers) {
   const exampleArr = [];
   flattenStrings(example, exampleArr);
-  const exampleStrings = new Set(exampleArr);
+  const exampleStrings = new Set(exampleArr.filter(isPublicPlaceholder));
 
   const localStrings = [];
   flattenStrings(local, localStrings);
 
-  const distinctive = new Set();
+  const distinctive = new Set([...identifiers].filter(v => !exampleStrings.has(v)));
   for (const v of localStrings) {
     if (exampleStrings.has(v)) continue;
     const t = v.trim();
@@ -120,11 +146,36 @@ function collectConfigLeaks() {
 }
 
 function main() {
-  // 第三方 vendored 前端库（压缩产物）跳过隐私扫描：词典音节会误命中真实昵称。
+  // Vendor dictionaries only skip name matching, never secret/IP/path checks.
   const VENDOR_PREFIX = "web/vendor/";
-  const tracked = gitLsFiles().filter((f) => !f.startsWith(VENDOR_PREFIX));
+  const tracked = gitLsFiles();
   const findings = [];
   const add = (file, kind, detail) => findings.push({ file, kind, detail });
+  const local = readPrivateJson("config/app.json", findings) || {};
+  const example = readPrivateJson("config.example.json", findings) || {};
+  const names = new Set(), identifiers = new Set(), configs = [local];
+  const nickSources = new Map([["data/members.json", "data/members.json"], ["data/members.seed.json", "data/members.seed.json"]]);
+  if (typeof local.members?.cache_path === "string" && local.members.cache_path.trim()) nickSources.set(local.members.cache_path, "configured-member-cache");
+  for (const [source, label] of nickSources) collectNicknames(readPrivateJson(source, findings, label), names, identifiers);
+  const roundDirectory = path.join(REPO_ROOT, "data", "rounds");
+  if (existsSync(roundDirectory)) {
+    try {
+      for (const file of readdirSync(roundDirectory, {withFileTypes: true})) {
+        if (file.isFile() && file.name.endsWith(".json")) configs.push(readPrivateJson(path.join(roundDirectory, file.name), findings, "local-round-library") || {});
+      }
+    } catch {
+      add("local-round-library", "private-source-unreadable", "本地轮次库无法读取，未跳过保护；请在本机核对");
+    }
+  }
+  for (const cfg of configs) {
+    collectNicknames(cfg.members?.cn_overrides || [], names, identifiers);
+    for (const name of cfg.round?.priority_users || cfg.priority_users || []) addName(names, name);
+  }
+  const publicValues = [];
+  flattenStrings(example, publicValues);
+  // Only known placeholders are exempt; editing the example cannot bless a
+  // private identity or token copied into the same staged change.
+  for (const value of publicValues.filter(isPublicPlaceholder)) names.delete(value);
 
   // 1) 禁止入库路径
   for (const f of tracked) {
@@ -135,7 +186,6 @@ function main() {
 
   // 2) 密钥形态
   for (const f of tracked) {
-    if (f === SELF) continue;
     const text = readText(f);
     if (text == null) continue;
     for (const p of SECRET_PATTERNS) {
@@ -145,7 +195,6 @@ function main() {
 
   // 3) 内网 IP
   for (const f of tracked) {
-    if (f === SELF) continue;
     const text = readText(f);
     if (text == null) continue;
     for (const p of IP_PATTERNS) {
@@ -153,22 +202,18 @@ function main() {
     }
   }
 
-  // 4) 真实昵称（data/members.json / seed）
-  const nickSources = ["data/members.json", "data/members.seed.json"];
-  const names = [];
-  for (const s of nickSources) names.push(...collectNicknames(s));
-  const uniqueNames = [...new Set(names)];
+  // 4) 群名片/CN/别名与清洗后称呼；输出不包含匹配内容或私有路径。
   for (const f of tracked) {
-    if (f === SELF) continue;
+    if (f === SELF || f.startsWith(VENDOR_PREFIX)) continue;
     const text = readText(f);
     if (text == null) continue;
-    for (const n of uniqueNames) {
-      if (text.includes(n)) add(f, "real-nickname", `命中 data/members.json 中的真实昵称`);
+    for (const n of names) {
+      if (text.includes(n)) add(f, "real-nickname", "命中本地成员/CN隐私源中的称呼");
     }
   }
 
   // 5) config/app.json 内容泄露
-  const leaks = collectConfigLeaks();
+  const leaks = collectConfigLeaks(configs, example, identifiers);
   for (const f of tracked) {
     if (f === SELF) continue;
     const text = readText(f);
@@ -199,4 +244,9 @@ function main() {
   return 1;
 }
 
-process.exit(main());
+try {
+  process.exit(main());
+} catch {
+  console.error("privacy-scan: FAIL — 无法完整读取 Git 索引或隐私源，未跳过检查；请在本机核对。");
+  process.exit(1);
+}

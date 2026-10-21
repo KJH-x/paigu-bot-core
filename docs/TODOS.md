@@ -6,6 +6,8 @@
 
 ## 当前专项收口（2026-10-19）
 
+后继执行（2026-10-21）：前项目标已签名推送 `9bb8bf2`；[工程计划](./PLAN-engineering-followup-2026-10-19.md) 区分已实现/部分/仍有效/待决策。E0审计与E1隐私守护正在收口，不代表E2…E4已实施。扫描现覆盖暂存索引＋工作副本、card/CN/别名/自定义缓存/轮次，vendor仅姓名词典匹配豁免；隐私源损坏失败而非跳过，不输出匹配值。该守护是已知来源/模式检测，不是自动匿名化或完整DLP证明；无私有来源的公开checkout只能检查通用模式与禁止路径。
+
 消息 MP-0…6 与桌面 IA G0…G5 的实施及 MP 41＋IA 18 项已逐条补齐可重复证据，见 [验收台账](./VERIFICATION-msg-ia-2026-10-18.md)。本轮最终门禁已通过，签名交付由实际Git核验；仍未部署、未重启常驻实例。下方带日期批次记录保留原进度语境，不据历史“仍待”回滚现有功能。现有工程 todo 含已被新方案实现或替代的条目；当前目标完成后按用户授权另设目标核实，不把这些旧条目一概重新执行。
 
 ## 已完成（Wave 1–4，2026-09-17）
@@ -142,8 +144,8 @@
 | T-13 | done | **阶段权限接入实时链路**：实时+重放均按 `phase_at` 拒绝越权；A/B 分类由 `class` **自动推导**（有子项⇒A/无子项⇒B，`RoundSettings::item_class`）+ `/round` 编辑器设置 `kind` | A-5 | ✅ 越权实时==重放单测；分类自动推导单测 |
 | T-14 | todo | **管理员改单目标语法**：`/改单 <目标> ...`（管理员改群内任意指定人）；需把目标昵称解析为 user_id（可用 `state.display/identity`） | D-2 | 管理员改他单用例 |
 | T-15 | done | **`MessageLog::update` 接线**：`PUT /api/messages/:seq` 已由 `services::messages::update_message` 调用细粒度 `MessageLog::update` | — | ✅ 不再全量重写 |
-| T-16 | todo | **快照导出/导入前端入口**：`web/admin` 按钮 + 下载（含 `format=file`） | T-06 | admin 可操作 |
-| T-17 | todo | **`/api/replay` diff 可视化**（`web/replay`） | — | diff 可见 |
+| T-16 | doing | **私有快照入口已实现**：系统数据维护导出/预检/应用及备份已有；旧 `admin + format=file` 下载形态未做，不再增admin重复真源 | T-06 | 已有 correctness-gates / snapshot_tests；下载形态另列差距 |
+| T-17 | doing | **现行复盘变化可视化已有**：三视图/标记/点击追溯；独立旧 `/api/replay/diff` 的去留随统一栈核实 | — | board-layout / replay-graph；旧API不冒充已迁移 |
 | T-18 | done | **成员 user_id 映射**（NapCat 拉取写入缓存）：refresh 已写缓存（`data/members.json`），映射实现完成；待实机验证 | B-2 | 映射非空 |
 | T-29 | todo | **代排（代理下单）归属**：识别 `代<名字>排:` / `<名字>：` 等前缀，抽取被代理人（名字/QQ），经成员缓存 `data/members.json` 反查 `user_id`，把该段认领**归属到被代理人**而非发信人；实时 == 重放；不支持时至少保留发信人并在 detail 标注 | — | `代DKLA排:…` 记在 DKLA 名下 |
 | T-28 | todo | **管理员阶段豁免**：`is_admin`（OneBot `sender.role` = owner/admin）在**阶段权限**中放行——`can_claim`/`can_cancel` 对管理员一律视为可排/可撤（不受 A/B 类别与 Phase0/II 限制）；**实时 == 重放**。伪造消息路径可用内层 `is_admin:true` 测试 | — | 管理员在 PhaseII 排 A 类不被拒；单测覆盖实时==重放 |
@@ -152,14 +154,14 @@
 
 | ID | 状态 | 任务 | 依赖 | 验收 |
 |---|---|---|---|---|
-| T-19 | todo | **每日 19:00 拉取验证 + 失败告警** | B-2 | 缓存更新/告警 |
-| T-20 | todo | **真实昵称零残留守护脚本**（纳入回归） | — | 命中即失败 |
+| T-19 | doing | **每日拉取调度和日志告警已有**：`spawn_members_scheduler` / `next_daily_ms`；可观测状态和恢复链仍需补验 | B-2 | 不在真实群触发拉取作测试 |
+| T-20 | done | **隐私守护及隔离自测**：card/CN/别名/自定义缓存/轮次，索引＋工作副本、vendor/自身密钥守卫、示例不能放行私有标识 | — | 2026-10-21：`npm run test:privacy`21项、249文件扫描通过；命中/源损坏失败且不打印秘密值，不等于历史清洗或完整DLP |
 | T-21 | todo | **`FUNCTIONAL.md` 引用改函数名**（现行号易漂移） | — | 不再依赖行号 |
-| T-22 | todo | **结算配置样例入 `config.example.json`** | — | 样例可加载 |
+| T-22 | done | **结算配置样例已有**：pricing/discounts/gift_tiers/reduce_average | — | 配置测试及30项桌面实际加载现行模板；不重复生成 |
 | T-23 | todo | **入站有界队列/背压**（DESIGN §7 的 mpsc） | — | 压测不丢消息 |
 | T-24 | todo | **`simulate` 迁移到新栈**（当前保留旧 verifier 以支撑 real-samples/real-xlsx 回归；迁移需保持逐格一致） | T-11 | 同输入同结果 |
-| T-25 | todo | **拆大文件**：`llm/pipeline.rs`(1300+)、`simulation/verifier.rs`(700+) | — | 职责清晰 |
-| T-26 | todo | **补单测**：`domain/**`、`engine/replay`、`api/board_routes` | — | 覆盖率提升 |
+| T-25 | doing | **pipeline已目录化**；verifier职责拆分随T-24推进，不为旧行数做无收益移动 | — | 职责清晰、回归不变 |
+| T-26 | doing | **已有319核心测试**；继续按领域/重放/路由实际分支补证据，不按总数称全覆盖 | — | 明确性质/边界回归 |
 | T-27 | todo | **远程展示接线**（C-1 暂不部署；`domain::snapshot::Public*` 视图模型已保留） | — | 待用户开启 |
 
 ## 技术债（2026-09-23 审查 → 已全部处理）

@@ -1064,11 +1064,11 @@ async fn ambiguous_bare_subitem_is_first_matched_not_need_confirm() {
 
 #[test]
 fn proxy_segments_split_mixed_message() {
-    let segs = proxy_segments("嘟嘟：旅骨通行证1 代DKLA排:人事部简历1").unwrap();
+    let segs = proxy_segments("成员01：旅骨通行证1 代成员02排:人事部简历1").unwrap();
     assert_eq!(segs.len(), 2, "{segs:?}");
     assert!(segs[0].0.is_none());
     assert!(segs[0].1.contains("旅骨通行证"));
-    assert_eq!(segs[1].0.as_deref(), Some("DKLA"));
+    assert_eq!(segs[1].0.as_deref(), Some("成员02"));
     assert!(segs[1].1.contains("人事部简历"));
     assert!(proxy_segments("排 通行证 1").is_none());
 }
