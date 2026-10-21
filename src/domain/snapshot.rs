@@ -204,18 +204,3 @@ pub struct SettlementTraceItem {
     pub rule_id: String,
     pub description: String,
 }
-
-impl DecisionTrace {
-    pub fn empty_with_note(note: &str) -> Self {
-        Self {
-            parse_trace: None,
-            validation_trace: vec![],
-            priority_trace: None,
-            allocation_trace: vec![],
-            settlement_trace: vec![SettlementTraceItem {
-                rule_id: "note".to_string(),
-                description: note.to_string(),
-            }],
-        }
-    }
-}

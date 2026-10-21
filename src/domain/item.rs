@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::domain::claim::ClaimType;
-use crate::domain::ids::{AliasId, ItemId, RoundId};
+use crate::domain::ids::{ItemId, RoundId};
 use crate::domain::money::MoneyCents;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,15 +91,6 @@ impl Item {
     pub fn exact_matches_name(&self, name: &str) -> bool {
         self.name == name || self.aliases.iter().any(|a| a == name)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ItemAlias {
-    pub alias_id: AliasId,
-    pub round_id: RoundId,
-    pub item_id: ItemId,
-    pub alias: String,
-    pub weight: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -49,14 +49,14 @@ node tests/e2e/sim.mjs
 
 公开协作无需NapCat、真实名单或模型：`npm run check` 提供隔离核心/脚本/文档/离线CLI与隐私门禁，`npm run check:full` 再执行完整桌面。私有语料显式选择，未提供显示NOT RUN而不是通过；依赖、隔离路径及可选参数见 [开发检查](./docs/DEVELOPMENT.md)。
 
-离线验证（确定性重放；旧 verifier 暂留以支撑语料回归，见 T-24）：
+离线验证（与当前确定性会话共用执行；夹具版本与兼容元数据说明见 [开发检查](./docs/DEVELOPMENT.md)）：
 
 ```bash
 # 确定性重放：商品表 + JSONL 消息队列 → 排结果与报告
 cargo run -- simulate \
   --round-config simulation-corpus/agent-a-normal/round_config.json \
   --queue        simulation-corpus/agent-a-normal/queue.jsonl \
-  --out          simulation-corpus/agent-a-normal/out
+  --out          "C:/private-fixtures-output/out"
 
 # 语料夹具与逐格验证（先经 simulate 生成 out/，再校验；详见对应 README）
 python tests/read-only-corpus.py   # 只读源表，产物仅写临时目录，不改语料资产

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::event::{DomainEvent, EventEnvelope};
 use crate::domain::ids::{ItemId, RoundId, UserId};
-use crate::domain::item::RoundContext;
+use crate::domain::item::{Item, RoundContext};
 use crate::engine::replay::describe_event;
 use crate::messages::processing::{
     stabilize_events, ProcessingOutcome, Understanding, UnderstandingSource,
@@ -19,6 +19,16 @@ pub(crate) async fn prepare_understanding(
     rec: &MessageRecord,
     parsed: ParsedMessage,
     source: UnderstandingSource,
+) -> Understanding {
+    prepare_with_catalog(cfg, rec, parsed, source, &cfg.round.to_items()).await
+}
+
+pub(crate) async fn prepare_with_catalog(
+    cfg: &AppConfig,
+    rec: &MessageRecord,
+    parsed: ParsedMessage,
+    source: UnderstandingSource,
+    items: &[Item],
 ) -> Understanding {
     let mut result = Understanding::terminal(source, "Ignored", "无法识别为排谷/撤销意图", None);
     result.parsed = Some(parsed.clone());
@@ -38,7 +48,7 @@ pub(crate) async fn prepare_understanding(
     let rounds = vec![RoundContext {
         round_id: RoundId(cfg.round.round_id.clone()),
         title: cfg.round.title.clone(),
-        items: cfg.round.to_items(),
+        items: items.to_vec(),
     }];
     let inputs = if input.intent == ParsedIntent::Cancel && input.items.len() > 1 {
         std::mem::take(&mut input.items)

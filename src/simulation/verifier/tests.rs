@@ -1,16 +1,16 @@
 use super::*;
 
-struct FixtureDir(std::path::PathBuf);
+pub(super) struct FixtureDir(pub(super) std::path::PathBuf);
 
 impl FixtureDir {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let path =
             std::env::temp_dir().join(format!("paigu-cli-contract-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&path).unwrap();
         Self(path)
     }
 
-    fn queue(&self, records: &[QueueMessageRecord]) -> std::path::PathBuf {
+    pub(super) fn queue(&self, records: &[QueueMessageRecord]) -> std::path::PathBuf {
         let path = self.0.join("queue.jsonl");
         let body = records
             .iter()
@@ -35,14 +35,24 @@ impl Drop for FixtureDir {
     }
 }
 
-fn fixture() -> RoundFixture {
+pub(super) fn fixture() -> RoundFixture {
+    let mut config = crate::settings::default_config();
+    config.llm.enabled = false;
+    config.gateway.reply_enabled = false;
+    config.gateway.whitelist_groups = vec!["g1".into()];
+    config.members.cache_path.clear();
+    config.members.cn_overrides.clear();
+    config.round.round_id = "round_x".into();
+    config.round.title = "公开占位团".into();
+    config.round.group_id = "g1".into();
+    config.round.priority_users.clear();
+    config.round.priority_window = None;
+    config.round.phases.clear();
+    config.round.items = fixture::catalog_settings(&[sample_item()]);
     RoundFixture {
-        round_id: "round_x".into(),
-        title: "公开占位团".into(),
-        group_id: "g1".into(),
+        fixture_version: 2,
+        config,
         items: vec![sample_item()],
-        priority_users: vec![],
-        priority_window: None,
     }
 }
 use crate::domain::ids::{ItemId, RoundId};
@@ -68,7 +78,7 @@ fn sample_item() -> Item {
     }
 }
 
-fn record(sequence: u64, user: &str, text: &str) -> QueueMessageRecord {
+pub(super) fn record(sequence: u64, user: &str, text: &str) -> QueueMessageRecord {
     QueueMessageRecord {
         source_sequence: sequence,
         group_id: "g1".to_string(),
@@ -97,16 +107,7 @@ async fn end_to_end_parse_validate_replay_compares_slots() {
         .join("\n");
     std::fs::write(&path, body).unwrap();
 
-    let fixture = RoundFixture {
-        round_id: "round_x".to_string(),
-        title: "测试团".to_string(),
-        group_id: "g1".to_string(),
-        items: vec![sample_item()],
-        priority_users: vec![],
-        priority_window: None,
-    };
-
-    let result = verify(&path, fixture).await.expect("verify");
+    let result = verify(&path, fixture()).await.expect("verify");
     let _ = std::fs::remove_file(&path);
 
     assert_eq!(result.applied_count, 2);
@@ -136,9 +137,17 @@ fn fixture_loader_preserves_explicit_legacy_catalog_inputs() {
             "subitems":[{"subitem_id":"a","name":"甲","capacity":3,"unit_price_cents":2100,"aliases":["款甲"]}]}]
     }).to_string()).unwrap();
     let loaded = load_round_fixture(&path).unwrap();
-    assert_eq!(loaded.round_id, "fixture");
-    assert_eq!(loaded.priority_users, ["成员01"]);
-    assert_eq!(loaded.priority_window, Some((1000, 2000)));
+    assert_eq!(loaded.config.round.round_id, "fixture");
+    assert_eq!(loaded.config.round.priority_users, ["成员01"]);
+    assert_eq!(
+        loaded
+            .config
+            .round
+            .priority_window
+            .as_ref()
+            .map(|w| (w.start_ms, w.end_ms)),
+        Some((1000, 2000))
+    );
     let item = &loaded.items[0];
     assert_eq!(item.box_size, Some(2));
     assert_eq!(item.unit_price.0, 1700);
@@ -216,6 +225,9 @@ async fn ordered_queue_duplicate_cancel_and_report_contract() {
             "ignored_count",
             "unsupported_count",
             "duplicate_count",
+            "dropped_count",
+            "merged_count",
+            "error_count",
             "outcomes",
             "eligibility",
             "final_snapshot",
@@ -282,8 +294,11 @@ async fn ordered_queue_duplicate_cancel_and_report_contract() {
 async fn priority_half_open_window_and_legacy_admin_grant_are_explicit_baselines() {
     let dir = FixtureDir::new();
     let mut window = fixture();
-    window.priority_users = vec!["u1".into()];
-    window.priority_window = Some((1_700_000_001_000, 1_700_000_003_000));
+    window.config.round.priority_users = vec!["u1".into()];
+    window.config.round.priority_window = Some(crate::settings::PriorityWindow {
+        start_ms: 1_700_000_001_000,
+        end_ms: 1_700_000_003_000,
+    });
     let queue = dir.queue(&[
         record(1, "u2", "排 通行证 1"),
         record(2, "u1", "排 通行证 1"),

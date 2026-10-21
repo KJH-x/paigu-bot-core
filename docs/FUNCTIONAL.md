@@ -83,7 +83,11 @@
 
 可重复检查见 [DEVELOPMENT](./DEVELOPMENT.md) 与 [桌面套件](../tests/e2e/README.md)。桌面仅验收1920×1080、100%、DPR1；计数以实际输出/台账为准，不按总数推断业务全覆盖。私有样本与源表只读，输出在隔离目录；缺私有输入不声称语料通过。真实接收器/真实模型/公网发布不属于自动测试。
 
-`simulate` 目前仍是旧离线执行，与当前冻结理解会话尚未统一，E3先分离夹具读取/执行/报告并建立输出基线，不提前改称已迁移。[`run_cli`](../src/simulation/verifier/mod.rs)。管理员目标改单语法、完整具名代理歧义、有界入站、调度可观测性及跨商品提示分级等以 [TODOS](./TODOS.md)/工程计划为准；ColumnLocked与管理员阶段豁免仍需业务决策。远程发布暂停，未部署或重启常驻实例。
+`simulate` 已经从旧ReplayEngine切到当前确定性会话：[`run_cli`](../src/simulation/verifier/mod.rs)、[`replay_prepared`](../src/replay/session/mod.rs)。只读夹具显式提供目录/容量、阶段/优先、CN/别名，不加载真实配置、缓存或模型；当前夹具用 `fixture_version:2`，缺省1保留历史夹具的未支持改单理解，不给旧语料新增动作。两种版本都用同一准备/权限/取消/分配逻辑，旧执行器及仅它使用的领域壳已删除，未恢复旧serde键。
+
+消息、每步/最终排位与结算显示CN；无CN按对应步骤最新有效称呼回退，重复/Drop不污染当前名。报告版本按实际事件数从0起，取消也增长；input_message_count与最终结算不再返回旧默认空值。步骤diff按商品/款式/盒/格比较，包含撤空消失格、同人换认购/状态变化，顺序固定；款式差异附可选subitem_id。原result/outcomes/report与步骤字段保留，新增Dropped/Merged/Error计数。格式与验证见 [DEVELOPMENT](./DEVELOPMENT.md)。
+
+管理员目标改单语法、完整具名代理歧义、有界入站、调度可观测性及跨商品提示分级等仍以 [TODOS](./TODOS.md)/工程计划为准；ColumnLocked与管理员阶段豁免仍需业务决策。远程发布暂停，未部署或重启常驻实例。
 
 ## 9. 已放弃／历史内容（不可据此重新执行）
 

@@ -16,96 +16,106 @@ pub struct StateDiff {
 
 impl StateDiff {
     pub fn from_snapshots(before: &AllocationSnapshot, after: &AllocationSnapshot) -> Self {
-        let mut slot_changes = Vec::new();
-
-        for after_ia in &after.item_allocations {
-            let before_ia = before
+        use crate::domain::allocation::SlotAllocation;
+        use std::collections::{BTreeMap, BTreeSet};
+        fn cells(
+            board: &AllocationSnapshot,
+        ) -> BTreeMap<(String, Option<String>, u32, u32), &SlotAllocation> {
+            board
                 .item_allocations
                 .iter()
-                .find(|i| i.item_id == after_ia.item_id);
-
-            for after_box in &after_ia.boxes {
-                let before_box = before_ia
-                    .and_then(|i| i.boxes.iter().find(|b| b.box_index == after_box.box_index));
-
-                for after_slot in &after_box.slots {
-                    let before_slot = before_box.and_then(|b| {
-                        b.slots
-                            .iter()
-                            .find(|s| s.slot_index == after_slot.slot_index)
-                    });
-
-                    let changed = match before_slot {
-                        Some(bs) => {
-                            bs.status != after_slot.status || bs.user_id != after_slot.user_id
-                        }
-                        None => true,
-                    };
-
-                    if changed {
-                        let reason = match (before_slot, after_slot) {
-                            (Some(bs), as_)
-                                if bs.status == SlotStatus::Empty
-                                    && as_.status == SlotStatus::Filled =>
-                            {
-                                if as_.slot_policy == SlotPolicy::TailLocked {
-                                    SlotChangeReason::TailSegmentCreated
-                                } else if as_.slot_policy == SlotPolicy::AdminFixed {
-                                    SlotChangeReason::AdminFixed
-                                } else {
-                                    SlotChangeReason::NewClaimFilled
-                                }
-                            }
-                            (Some(bs), as_)
-                                if bs.status == SlotStatus::Filled
-                                    && as_.status == SlotStatus::Empty =>
-                            {
-                                SlotChangeReason::CancelReleased
-                            }
-                            (None, as_) => {
-                                if as_.slot_policy == SlotPolicy::TailLocked {
-                                    SlotChangeReason::TailSegmentCreated
-                                } else if as_.slot_policy == SlotPolicy::AdminFixed {
-                                    SlotChangeReason::AdminFixed
-                                } else {
-                                    SlotChangeReason::NewClaimFilled
-                                }
-                            }
-                            _ => SlotChangeReason::NewClaimFilled,
-                        };
-                        slot_changes.push(SlotChange {
-                            item_id: after_ia.item_id.clone(),
-                            box_index: after_box.box_index,
-                            slot_index: after_slot.slot_index,
-                            before: before_slot.map(|s| SlotView {
-                                status: s.status.clone(),
-                                user_id: s.user_id.clone().map(|u| u.0),
-                                nickname: None,
-                                claim_id: s.claim_id.clone().map(|c| c.0),
-                                segment_id: s.segment_id.clone(),
-                                slot_policy: s.slot_policy.clone(),
-                                lock_reason: s.lock_reason.clone(),
-                            }),
-                            after: Some(SlotView {
-                                status: after_slot.status.clone(),
-                                user_id: after_slot.user_id.clone().map(|u| u.0),
-                                nickname: None,
-                                claim_id: after_slot.claim_id.clone().map(|c| c.0),
-                                segment_id: after_slot.segment_id.clone(),
-                                slot_policy: after_slot.slot_policy.clone(),
-                                lock_reason: after_slot.lock_reason.clone(),
-                            }),
-                            reason,
-                            causality: ChangeCausality::Direct,
-                        });
-                    }
-                }
+                .flat_map(|item| {
+                    item.boxes.iter().flat_map(move |column| {
+                        column.slots.iter().map(move |slot| {
+                            (
+                                (
+                                    item.item_id.0.clone(),
+                                    item.subitem_id.clone(),
+                                    column.box_index,
+                                    slot.slot_index,
+                                ),
+                                slot,
+                            )
+                        })
+                    })
+                })
+                .collect()
+        }
+        fn view(slot: &SlotAllocation) -> SlotView {
+            SlotView {
+                status: slot.status.clone(),
+                user_id: slot.user_id.as_ref().map(|id| id.0.clone()),
+                nickname: None,
+                claim_id: slot.claim_id.as_ref().map(|id| id.0.clone()),
+                segment_id: slot.segment_id.clone(),
+                slot_policy: slot.slot_policy.clone(),
+                lock_reason: slot.lock_reason.clone(),
             }
         }
+        let previous = cells(before);
+        let current = cells(after);
+        let keys: BTreeSet<_> = previous.keys().chain(current.keys()).cloned().collect();
+        let mut slot_changes = Vec::new();
+        for (item, subitem, column, position) in keys {
+            let key = (item.clone(), subitem.clone(), column, position);
+            let old = previous.get(&key).copied();
+            let new = current.get(&key).copied();
+            let unchanged = match (old, new) {
+                (Some(a), Some(b)) => {
+                    a.status == b.status
+                        && a.user_id == b.user_id
+                        && a.claim_id == b.claim_id
+                        && a.claim_line_index == b.claim_line_index
+                        && a.slot_policy == b.slot_policy
+                        && a.segment_id == b.segment_id
+                        && a.lock_reason == b.lock_reason
+                }
+                (None, None) => true,
+                _ => false,
+            };
+            if unchanged {
+                continue;
+            }
+            let reason = match (old, new) {
+                (Some(a), b)
+                    if a.status == SlotStatus::Filled
+                        && b.is_none_or(|s| s.status == SlotStatus::Empty) =>
+                {
+                    SlotChangeReason::CancelReleased
+                }
+                (_, Some(b)) if b.slot_policy == SlotPolicy::TailLocked => {
+                    SlotChangeReason::TailSegmentCreated
+                }
+                (_, Some(b)) if b.slot_policy == SlotPolicy::AdminFixed => {
+                    SlotChangeReason::AdminFixed
+                }
+                (Some(a), Some(b))
+                    if a.status == SlotStatus::LockedEmpty && b.status == SlotStatus::Empty =>
+                {
+                    SlotChangeReason::AdminUnlocked
+                }
+                (Some(a), Some(b))
+                    if a.status == SlotStatus::Filled
+                        && b.status == SlotStatus::Filled
+                        && a.user_id != b.user_id =>
+                {
+                    SlotChangeReason::AutoMovedForward
+                }
+                _ => SlotChangeReason::NewClaimFilled,
+            };
+            slot_changes.push(SlotChange {
+                item_id: ItemId(item),
+                subitem_id: subitem,
+                box_index: column,
+                slot_index: position,
+                before: old.map(view),
+                after: new.map(view),
+                reason,
+                causality: ChangeCausality::Direct,
+            });
+        }
 
-        use std::collections::HashSet;
-
-        let mut changed_claim_ids: HashSet<String> = HashSet::new();
+        let mut changed_claim_ids: BTreeSet<String> = BTreeSet::new();
         for change in &slot_changes {
             if let Some(ref after_view) = change.after {
                 if let Some(ref claim_id) = after_view.claim_id {
@@ -177,7 +187,7 @@ impl StateDiff {
             }
         }
 
-        let mut all_item_ids: HashSet<String> = HashSet::new();
+        let mut all_item_ids: BTreeSet<String> = BTreeSet::new();
         for s in &before.user_summaries {
             for i in &s.items {
                 all_item_ids.insert(i.item_id.0.clone());
@@ -238,6 +248,8 @@ impl StateDiff {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotChange {
     pub item_id: ItemId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subitem_id: Option<String>,
     pub box_index: u32,
     pub slot_index: u32,
     pub before: Option<SlotView>,

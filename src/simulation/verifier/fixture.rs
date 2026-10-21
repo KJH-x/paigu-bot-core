@@ -2,6 +2,7 @@ use super::RoundFixture;
 use crate::domain::ids::{ItemId, RoundId};
 use crate::domain::item::{Item, ItemKind, ItemSubitem};
 use crate::domain::money::MoneyCents;
+use crate::settings::{default_config, ItemCategory, ItemConfig, PriorityWindow, SubitemConfig};
 use serde_json::Value;
 use std::path::Path;
 
@@ -61,12 +62,15 @@ pub(crate) fn load_round_fixture(path: &Path) -> anyhow::Result<RoundFixture> {
             .unwrap_or("")
             .to_string();
         let kind_str = iv.get("kind").and_then(|x| x.as_str()).unwrap_or("split");
-        let kind = match kind_str {
-            "single" => ItemKind::Single,
-            "gift" => ItemKind::Gift,
-            "shipping" => ItemKind::Shipping,
-            "adjustment" => ItemKind::Adjustment,
-            _ => ItemKind::Split,
+        let kind = match ItemCategory::parse(kind_str) {
+            Some(ItemCategory::Single) => ItemKind::Single,
+            Some(ItemCategory::Box) => ItemKind::WholeBox,
+            Some(ItemCategory::Gift) => ItemKind::Gift,
+            _ => match kind_str {
+                "shipping" => ItemKind::Shipping,
+                "adjustment" => ItemKind::Adjustment,
+                _ => ItemKind::Split,
+            },
         };
         let unit_price_cents = iv
             .get("unit_price_cents")
@@ -158,12 +162,102 @@ pub(crate) fn load_round_fixture(path: &Path) -> anyhow::Result<RoundFixture> {
         });
     }
 
+    let mut config = default_config();
+    config.active_round_id = None;
+    config.llm.enabled = false;
+    config.gateway.reply_enabled = false;
+    config.gateway.allowed_actions.clear();
+    config.gateway.admin_commands_enabled = false;
+    config.gateway.accept_forged_messages = false;
+    config.gateway.react_emoji_id = None;
+    config.gateway.bind = "127.0.0.1:0".into();
+    config.gateway.whitelist_groups = vec![group_id.clone()];
+    config.gateway.whitelist_members = serde_json::from_value(
+        v.get("whitelist_members")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+    )?;
+    config.members.cache_path.clear();
+    config.members.group_id = group_id.clone();
+    config.members.cn_overrides = serde_json::from_value(
+        v.get("members")
+            .and_then(|m| m.get("cn_overrides"))
+            .or_else(|| v.get("cn_overrides"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+    )?;
+    config.round.round_id = round_id;
+    config.round.title = title;
+    config.round.group_id = group_id;
+    config.round.priority_users = priority_users;
+    config.round.priority_window =
+        priority_window.map(|(start_ms, end_ms)| PriorityWindow { start_ms, end_ms });
+    config.round.phases = serde_json::from_value(
+        v.get("phases")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+    )?;
+    config.round.items = catalog_settings(&items);
+    for (index, item) in config.round.items.iter_mut().enumerate() {
+        item.class = items_v[index]
+            .get("class")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        item.box_item_id = items_v[index]
+            .get("box_item_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        for (position, subitem) in item.subitems.iter_mut().enumerate() {
+            subitem.adjust_cents = items_v[index]
+                .get("subitems")
+                .and_then(|a| a.get(position))
+                .and_then(|s| s.get("adjust_cents"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+        }
+    }
+    config.merge = serde_json::from_value(
+        v.get("merge")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
+    )?;
+    let fixture_version: u8 = serde_json::from_value(
+        v.get("fixture_version")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!(1)),
+    )?;
+    anyhow::ensure!(matches!(fixture_version, 1 | 2), "未知离线夹具版本");
     Ok(RoundFixture {
-        round_id,
-        title,
-        group_id,
+        fixture_version,
+        config,
         items,
-        priority_users,
-        priority_window,
     })
+}
+
+pub(super) fn catalog_settings(items: &[Item]) -> Vec<ItemConfig> {
+    items
+        .iter()
+        .map(|item| ItemConfig {
+            item_id: item.item_id.0.clone(),
+            name: item.name.clone(),
+            kind: item.kind.as_str().to_string(),
+            class: None,
+            aliases: item.aliases.clone(),
+            unit_price_cents: item.unit_price.0,
+            max_quantity: item.max_quantity,
+            box_item_id: None,
+            subitems: item
+                .subitems
+                .iter()
+                .map(|subitem| SubitemConfig {
+                    subitem_id: subitem.subitem_id.clone(),
+                    name: subitem.name.clone(),
+                    unit_price_cents: subitem.unit_price.0,
+                    adjust_cents: 0,
+                    capacity: subitem.capacity,
+                    aliases: subitem.aliases.clone(),
+                })
+                .collect(),
+        })
+        .collect()
 }

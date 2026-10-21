@@ -36,9 +36,10 @@ fn render_report(result: &VerifyResult) -> String {
         "- 未支持(Unsupported): {}\n",
         result.unsupported_count
     ));
+    s.push_str(&format!("- 重复(Duplicate): {}\n", result.duplicate_count));
     s.push_str(&format!(
-        "- 重复(Duplicate): {}\n\n",
-        result.duplicate_count
+        "- 未接入(Dropped): {}\n- 并入(Merged): {}\n- 错误(Error): {}\n\n",
+        result.dropped_count, result.merged_count, result.error_count
     ));
 
     s.push_str("## 购物金优先权 (Eligibility)\n\n");

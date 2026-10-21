@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::claim::{Eligibility, EligibilityScope};
 use crate::domain::event::{ClaimCancelled, DomainEvent, EventEnvelope, EventStatus};
 use crate::domain::ids::{ClaimId, EligibilityId, EventId, ItemId, RoundId, UserId};
+use crate::domain::item::Item;
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::engine::replay::rebuild_allocation_snapshot;
 use crate::messages::{MessageLog, MessageRecord};
@@ -19,7 +20,9 @@ use crate::settings::{AppConfig, ItemConfig};
 use crate::settlement::SettlementConfig;
 
 mod understanding;
-pub(crate) use understanding::{evaluate_understanding, prepare_understanding, Evaluation};
+pub(crate) use understanding::{
+    evaluate_understanding, prepare_understanding, prepare_with_catalog, Evaluation,
+};
 
 /// 重放离线解析使用的规则置信度阈值（与实时校验层一致）。
 const REPLAY_CONFIDENCE_THRESHOLD: f32 = 0.65;
@@ -222,30 +225,88 @@ pub(crate) async fn replay_messages_with_parse(
     let replay_cfg = apply_overrides(base, &overrides);
 
     let (baseline_board, computed) = if overrides.is_empty() {
-        let computed = compute(&replay_cfg, records, parse_overrides, manual_phase).await;
+        let computed = compute(
+            &replay_cfg,
+            records,
+            parse_overrides,
+            manual_phase,
+            &replay_cfg.round.to_items(),
+            &[],
+        )
+        .await;
         (computed.board.clone(), computed)
     } else {
-        let baseline = compute(base, records, parse_overrides, manual_phase).await;
-        let computed = compute(&replay_cfg, records, parse_overrides, manual_phase).await;
+        let baseline = compute(
+            base,
+            records,
+            parse_overrides,
+            manual_phase,
+            &base.round.to_items(),
+            &[],
+        )
+        .await;
+        let computed = compute(
+            &replay_cfg,
+            records,
+            parse_overrides,
+            manual_phase,
+            &replay_cfg.round.to_items(),
+            &[],
+        )
+        .await;
         (baseline.board, computed)
     };
 
-    let diff = ReplayDiff::from_boards(&baseline_board, &computed.board);
+    Ok(computed.into_result(&replay_cfg, &baseline_board, overrides.settlement))
+}
 
-    Ok(ReplayResult {
-        round_id: replay_cfg.round.round_id.clone(),
-        revision: base.revision,
-        version: computed.version,
-        messages: computed.messages,
-        board: computed.board,
-        outcomes: computed.outcomes,
-        events: computed.events,
-        eligibilities: computed.eligibilities,
-        display_names: computed.display_names,
-        diff,
-        settlement: overrides.settlement,
-        locked: computed.locked,
-    })
+/// Offline callers supply their catalog/eligibility explicitly; no stores, model or gateway.
+pub(crate) async fn replay_prepared(
+    cfg: &AppConfig,
+    records: &[MessageRecord],
+    items: &[Item],
+    eligibility: &[Eligibility],
+    overrides: &ParseOverrides,
+) -> anyhow::Result<ReplayResult> {
+    anyhow::ensure!(
+        !cfg.llm.enabled && !cfg.gateway.reply_enabled && cfg.members.cache_path.is_empty(),
+        "离线会话必须关闭模型/回复及成员磁盘来源"
+    );
+    anyhow::ensure!(
+        records.iter().all(|r| r.processing.is_some()),
+        "离线会话必须显式准备全部消息理解"
+    );
+    let catalog_ids: std::collections::BTreeSet<_> =
+        items.iter().map(|item| item.item_id.0.as_str()).collect();
+    let config_ids: std::collections::BTreeSet<_> = cfg
+        .round
+        .items
+        .iter()
+        .map(|item| item.item_id.as_str())
+        .collect();
+    anyhow::ensure!(
+        catalog_ids == config_ids
+            && catalog_ids.len() == items.len()
+            && config_ids.len() == cfg.round.items.len()
+            && items
+                .iter()
+                .all(|item| item.round_id.0 == cfg.round.round_id)
+            && eligibility
+                .iter()
+                .all(|grant| grant.round_id.0 == cfg.round.round_id),
+        "离线目录/优先权与轮次不一致"
+    );
+    let record_ids: std::collections::BTreeSet<_> = records
+        .iter()
+        .map(|record| record.record_id.as_str())
+        .collect();
+    anyhow::ensure!(
+        record_ids.len() == records.len() && !record_ids.contains(""),
+        "离线记录身份缺失或重复"
+    );
+    let computed = compute(cfg, records, overrides, None, items, eligibility).await;
+    let baseline = computed.board.clone();
+    Ok(computed.into_result(cfg, &baseline, None))
 }
 
 struct Computation {
@@ -259,25 +320,42 @@ struct Computation {
     locked: bool,
 }
 
+impl Computation {
+    fn into_result(
+        self,
+        cfg: &AppConfig,
+        baseline: &AllocationSnapshot,
+        settlement: Option<SettlementConfig>,
+    ) -> ReplayResult {
+        let diff = ReplayDiff::from_boards(baseline, &self.board);
+        ReplayResult {
+            round_id: cfg.round.round_id.clone(),
+            revision: cfg.revision,
+            version: self.version,
+            messages: self.messages,
+            board: self.board,
+            outcomes: self.outcomes,
+            events: self.events,
+            eligibilities: self.eligibilities,
+            display_names: self.display_names,
+            diff,
+            settlement,
+            locked: self.locked,
+        }
+    }
+}
+
 async fn compute(
     cfg: &AppConfig,
     records: &[MessageRecord],
     parse_overrides: &ParseOverrides,
     manual_phase: Option<RoundPhase>,
+    items: &[Item],
+    initial_eligibility: &[Eligibility],
 ) -> Computation {
-    let items = cfg.round.to_items();
     let round_id = RoundId(cfg.round.round_id.clone());
 
-    // U4：CN → 归一化昵称 → user_id，供分配展示名与消息人名输出。
-    let mut display_names: HashMap<UserId, String> = HashMap::new();
-    for rec in records {
-        if display_names.contains_key(&UserId(rec.user_id.clone())) {
-            continue;
-        }
-        if let Some(name) = crate::settings::resolve_cn(cfg, &rec.user_id, &rec.nickname) {
-            display_names.insert(UserId(rec.user_id.clone()), name);
-        }
-    }
+    let display_names = resolve_display_names(cfg, records);
 
     let mut ordered: Vec<&MessageRecord> = records.iter().collect();
     ordered.sort_by_key(|r| (r.timestamp_ms, r.seq));
@@ -285,7 +363,7 @@ async fn compute(
     let groups = message_groups(cfg, &ordered, parse_overrides);
 
     let mut events: Vec<EventEnvelope> = Vec::new();
-    let mut eligibilities: Vec<Eligibility> = Vec::new();
+    let mut eligibilities = initial_eligibility.to_vec();
     let mut messages = Vec::with_capacity(ordered.len());
     let mut outcomes = Vec::with_capacity(ordered.len());
     let mut latest_ts: i64 = 0;
@@ -330,7 +408,16 @@ async fn compute(
 
         let rep_uid = ordered[rep_pos].user_id.clone();
         if !processed.events.is_empty() {
-            if processed.priority_claim && !eligibilities.iter().any(|e| e.user_id.0 == rep_uid) {
+            if processed.priority_claim
+                && !eligibilities.iter().any(|e| {
+                    e.user_id.0 == rep_uid
+                        && e.priority_level >= 10
+                        && e.scope.item_ids.is_none()
+                        && e.valid_until.is_none()
+                        && e.max_uses.is_none()
+                        && e.valid_from.is_none_or(|at| at.timestamp_millis() <= 0)
+                })
+            {
                 eligibilities.push(priority_eligibility(&round_id, &rep_uid));
             }
             events.extend(processed.events.clone());
@@ -381,7 +468,8 @@ async fn compute(
         }
     }
 
-    let mut board = rebuild_allocation_snapshot(&items, &events, &eligibilities, &display_names);
+    let mut board = rebuild_allocation_snapshot(items, &events, &eligibilities, &display_names);
+    board.round_id = round_id;
     board.generated_at = DateTime::<Utc>::from_timestamp_millis(latest_ts).unwrap_or_else(Utc::now);
     let version = board.version;
 
@@ -400,6 +488,37 @@ async fn compute(
         version,
         locked,
     }
+}
+
+pub(crate) fn resolve_display_names(
+    cfg: &AppConfig,
+    records: &[MessageRecord],
+) -> HashMap<UserId, String> {
+    let mut ordered: Vec<_> = records.iter().collect();
+    ordered.sort_by_key(|record| (record.timestamp_ms, record.seq));
+    let mut names = HashMap::new();
+    for record in ordered {
+        let duplicate = record
+            .processing
+            .as_ref()
+            .and_then(|h| h.results.first())
+            .is_some_and(|r| {
+                matches!(
+                    r.understanding.source,
+                    crate::messages::processing::UnderstandingSource::Duplicate
+                )
+            });
+        if duplicate
+            || record.routed.to_ascii_lowercase().starts_with("drop")
+            || !policy::group_allowed(&cfg.gateway.whitelist_groups, &record.group_id)
+        {
+            continue;
+        }
+        if let Some(name) = crate::settings::resolve_cn(cfg, &record.user_id, &record.nickname) {
+            names.insert(UserId(record.user_id.clone()), name);
+        }
+    }
+    names
 }
 
 async fn process_one(

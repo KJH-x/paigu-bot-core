@@ -31,4 +31,16 @@ npm run check:full -- --samples 'C:\private-fixtures' --settlement-fixture 'C:\p
 
 只提交源码、公开模板与占位测试。真实名单可通过受控私下渠道另行共享，但不是开发/测试必需。隐私扫描同时检查暂存索引和工作副本；新增文件应加入暂存后再跑扫描。检测不是完整DLP或历史匿名化证明，提交前仍需检查差异，私有配置/备份/消息日志不进入公开仓库。
 
+## 离线simulate（共享当前确定性会话）
+
+`simulate --round-config <json> --queue <jsonl> --out <独立输出目录>` 不构造Gateway、ConfigStore或真实模型。目录仍可显式承载历史盒容量，但只在夹具适配器处理，不把已移除的配置键恢复到运行时设置。输出禁止写回只读语料目录；命令本身按显式out写入，不会自动发布。
+
+- 当前夹具在轮次JSON增加 `"fixture_version":2`。允许当前规则改单、阶段、`whitelist_members`、`members.cn_overrides`（或顶层cn_overrides）与显式merge；模型始终关闭，cache_path无论传什么都不读取。合并仍默认关，排与撤分开。
+- 缺省版本1为**历史夹具解释**：保留原Unsupported改单及已存在的离线优先/关团命令、自述购物金适配，不凭迁移给旧样本新增动作。它不是线上权限政策；版本1/2都使用当前会话执行，未保留旧引擎。未知版本失败。
+- 冻结后的理解/组先准备再共用重算，改别名不重解释；坏产物明确NeedConfirm，不能悄悄走规则回退。消息、步骤、摘要和账单均使用显式CN；未配置CN时取当步最新有效称呼，重复/Drop不覆盖。
+- 保留result.json、outcomes.jsonl、report.md和原步骤字段。新增dropped_count、merged_count、error_count，避免这些状态不计数。版本统一事件数（空=0、取消计入），input_message_count实际计数，replay.final_settlement与顶层一致而不恒为null；这些是旧元数据缺陷修正，不能把旧默认值当业务规则。
+- 步骤diff不再混淆同商品不同款式；款式格差异新增可选subitem_id，撤空消失列及同人换认购/策略也记录，差异顺序固定。逐步采用相应prefix称呼与真实分配/等待数量，不能把请求量直接说成已分配。
+
+默认公开CLI回归额外包含四组已跟踪语料226条，按旧签名基线0be05ad实际运行捕获的逐格摘要校验身份、空位、容量、策略、单领/等待（不比较随机ID/生成时间）。全部输入只读，输出任务临时；无需旧可执行文件或任何私有源。当前夹具还与真实隔离Pipeline逐prefix对照merge开关/撤改，模型替身一旦调用就失败。私有两套语料仍显式可选，不能用公开通过代替。
+
 当前行为：[FUNCTIONAL](./FUNCTIONAL.md)；后继有效工作与暂缓项：[工程计划](./PLAN-engineering-followup-2026-10-19.md)。

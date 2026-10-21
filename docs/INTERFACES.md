@@ -498,3 +498,9 @@ MP-1 核心接线已通过隔离回归，尚非完整工作流：消息日志增
 - 可选 `POST /api/messages/:record_id/actions/suggest`（第四批已接线）：必需 request_id/draft_version/round_id/config_revision/record_revision/selection/instruction，可附 supplements；只返回经严格业务校验的草稿及 executed:false，不保存/执行。只此显式入口请求模型；不发送全名单/NC 原事件。失败/过期保留原草稿。
 - MP-5（独立投影与设置携草稿往返均已接线）：`GET /api/display?epoch=...&view_revision=...` 返回 `view_epoch/view_revision/config_revision/round_id/catalog` 与同代排位/消息/汇总；相同游标 message_mode=unchanged，否则 message_mode=replace/full_resync=true，完整对账。旧 since 不再作为投影游标截断历史消息；不能与领域 version 混用。前端按记录身份原位更新。
 - 排、撤分别处理、分别原位；甲排 A、没有再次加排 A 就撤 A，撤掉原认购而不自动合并。明确目标与数量条件不暗中扩大为撤所有历史单。
+
+### 8.10 离线simulate共用会话（2026-10-21）
+
+CLI参数与三个输出文件保留，输入显式 `fixture_version:2` 使用当前规则；缺省1保持历史夹具未支持改单的解释，不借迁移重解释旧样本。两者均经 `prepare_with_catalog` → `replay_prepared` → 当前compute/政策/生效行/分配；没有旧ReplayEngine执行路径。目录/初始优先权必须同轮且记录身份完整唯一，禁用模型/回复、空成员cache路径，不读ConfigStore或真实缓存。
+
+结果保留原字段，新增dropped_count/merged_count/error_count；版本从0按事件数增长，取消计入，input_message_count实际消息数，replay.final_settlement回填实际最终结算。每步diff可选subitem_id区分款式、包含消失格与同用户换认购/策略，顺序固定。CN来自显式夹具，非CN称呼按当步最新有效记录；重复/Drop不污染称呼。详情及回归边界见 [DEVELOPMENT](./DEVELOPMENT.md)。本变动不开放公网或真实接入，也不改人工事务/冻结产物HTTP合同。

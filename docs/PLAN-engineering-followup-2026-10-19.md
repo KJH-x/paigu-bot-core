@@ -3,7 +3,7 @@
 > 用户授权：前一目标完成后继续已计划内容，自行建立 goal。前一目标已在 `9bb8bf2` 签名并推送（G，本地/远程相等）：MP41＋IA18、319核心、30桌面、两套只读语料、隐私门禁完成。本文件是独立后继目标，不重新打开已完成的产品专项。
 > 当前分支 `dev-paigu-full-closure`；仅隔离占位环境。不得部署/重启常驻实例、操作真实群/配置、调用真实模型、修改只读语料或重写共享Git历史。主代理统一接线，不使用子代理。
 
-## 1. 代码核对结果与执行资格
+## 1. E0审计基线与执行资格（后续实施见§4起）
 
 | 旧项 | 当前代码事实 | 后继处置 |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ let result = session::replay_messages_with_parse(
 - FUNCTIONAL重写为现行合同与43个明确源码声明引用，旧混合快照完整归档（不是继续执行依据）；246个本地链接与声明校验接入统一门禁。T-21收口，非改行号掩盖旧“无持久化/复盘501/结算未接线”等已失效描述。
 - 最终完整入口实际通过：318核心＋1公开结算参考、6入口自测、3文档检查、公开离线3消息、21隐私自测、257跟踪文件扫描、30桌面；显式两套样本逐格及2工作簿67消息/47组通过，源哈希不变。格式/严格clippy/构建通过。真实服务/群/模型/配置不动，仍未部署；E3/E4保持进行中而非整体完成。
 
-### E3接续注意（已读代码，尚未切换默认）
+### E2收口时的E3接续注意（历史基线，随后已执行§7）
 
 旧verifier约935行，读取、命令特例、校验、ReplayEngine、报告混在一起；旧夹具可带已移除的商品box_size/特殊优先命令/自述购物金，新会话只从当前RoundSettings生成目录。不能简单把旧Item序列化回当前配置后就称等价：会丢容量、权限或盒列；也不能恢复已舍弃的serde旧键兼容。
 
@@ -84,7 +84,7 @@ let result = session::replay_messages_with_parse(
 - 新增3项占位回归：显式旧目录的容量/价格/别名/优先输入；乱序队列排序、重复不重复执行、撤销推进与三个输出文件；半开优先时段及旧 `/加优先` 的具体归属/等级。保留原有逐格测试，测试超过120行独立模块。报告追加顶层、逐条、replay和步骤字段精确键集，防止未来适配悄悄删字段。
 - 全套入口在分层后通过321核心＋1公开参考、30桌面、两套私有样本逐格与2源表67消息/47组，语料源哈希未变；追加字段断言后再复验322核心、6入口/3文档/21隐私自测、261跟踪文件扫描及两套私有语料亦通过。格式/严格clippy/构建、246链接/43源码声明通过。运行时业务逻辑及真实服务不改；后继goal仍进行，E3执行迁移、E4未完成。
 
-### 6.1 E3第二小批实施合同（尚未实现，不是已存在API）
+### 6.1 E3第二小批实施合同（制定时尚未实现；落地证据见§7）
 
 1. **纯夹具输入**：loader显式带入目录、优先/时段、阶段、CN/别名及测试身份，构造内存设置而非加载ConfigStore。成员映射只来自输入，不读默认缓存；禁用模型和出站。旧 `box_size` 等仅在fixture适配器处理，禁止重新加到当前设置模型或恢复已舍弃serde旧键。
 2. **共用准备/执行**：当前 `session::prepare_understanding` 以cfg生成目录，需抽出接受明确目录上下文的内部纯准备函数；现有实时入口仍使用当前目录包装调用，离线入口显式传历史目录。旧验证器中已确认仅为夹具的授权/关团命令可转换为明确输入/控制产物，不给线上新增权限或相信伪造管理员。避免再写第三套自然语言解析/取消算法。
@@ -103,3 +103,35 @@ prepare_understanding(cfg, record, parsed, source)
 // -> shared_session(prepared_records, fixture_catalog, explicit_eligibility)
 // -> compatible_report(shared_result)；不是旧ReplayEngine再跑一遍后改名。
 ```
+
+## 7. E3共享会话迁移（2026-10-21，最终门禁已通过）
+
+- `simulation::verify`准备完整MessageRecord/Understanding后进入当前 `session::replay_prepared`；实时包装仍取cfg目录，离线显式传目录/初始优先。准备逻辑抽出prepare_with_catalog，权限、取消、分配与配置重算共用compute。旧ReplayEngine与仅它使用的Round/RoundConfig/ItemAlias等壳删除；ReplayStep DTO仅放兼容报告模块，不保留另一套执行。
+- 夹具不加载ConfigStore/Gateway/真实模型，不读成员cache。CN/别名、阶段、白名单、整盒关联与实验merge来自明确输入；历史box_size只留夹具适配，不恢复设置旧键。私有cache路径即使传入也忽略，模型/回复强制关；目录/优先同轮、记录身份完整唯一，未准备/坏历史不悄悄重解析。
+- 旧公开C语料中Modify原为Unsupported，最初直接启用当前改单的逐格对照确实失败，未修改资产/预期放行。故显式fixture_version：缺省1保留历史理解限制，2使用当前规则；都执行当前核心。固定离线授权/关团/购物金语法仅为历史适配，成员/群白名单先于控制副作用，不能由被Drop的管理员增加优先权。未知版本失败，不影响线上管理员阶段待决策。
+- 另复现两处真实漂移：同人后续昵称变化时实时取最新、旧重放取首次；StateDiff无序集合使相同报告不稳定。现统一最新有效称呼（重复/Drop不覆盖）、逐prefix称呼和稳定差异顺序；款式pair参与diff键，撤空消失格、同人换认购/策略不漏。补可选subitem_id，不改HTTP人工事务真源。
+- 保留三个输出与原字段，补Dropped/Merged/Error计数。事件版本从0起且取消计入、input_message_count实际计数、replay.final_settlement实际最终值，均明确记录为旧元数据缺陷修正。每步同一生效行/分配器算prefix，完整CN进消息、摘要和账单，实际分配/等待不伪报成请求量。
+- 签名旧基线0be05ad可执行文件与新执行器实际对照四组已跟踪公开语料：52＋49＋57＋68＝226条，全部格/空位/容量/策略/单领/等待一致。摘要来自旧版而不是新渲染器自证；固定进默认公开CLI回归，无需旧exe或私有源。不比较已声明修正的随机ID/时间/旧元数据。
+
+新增12项隔离证据（migration_tests；不是靠总数推断）：
+
+| 验收 | 直接证据 |
+| --- | --- |
+| CN/优先、每个prefix与完整报告确定性 | explicit_cn_priority_every_prefix_and_report_are_deterministic |
+| 冻结动作不被别名改指、坏历史不回退 | frozen_actions_survive_alias_retarget_and_bad_history_does_not_reparse |
+| 空队列/无商品、非法时间/私有cache守卫 | empty_bad_inputs_and_private_cache_are_never_silently_accepted |
+| 实时管线逐prefix＝离线，merge开/关、撤/改单 | canonical_offline_matches_actual_live_pipeline_at_every_prefix_with_merge_and_modify；模型替身调用即失败 |
+| 控制/重复/排撤组边界 | legacy_lock_duplicate_and_claim_cancel_are_group_boundaries |
+| 阶段/群/成员权限与被Drop命令零副作用 | phase_foreign_group_and_whitelist_are_shared_without_admin_bypass |
+| 不同容量、包尾/包盒、单领等待、款式diff与实际分配量 | different_capacities_tail_fullbox_single_and_step_diff_keep_variant_identity；容量在包尾改为强制列之前对照，不擅改U8 |
+| 撤空列、同人新认购差异、每步称呼 | removed_columns_and_same_user_new_claim_are_reported_and_names_follow_each_prefix |
+| 历史理解不新增改单，当前夹具支持 | legacy_fixture_modify_is_not_reinterpreted_but_current_fixture_supports_it |
+| 多动作override保留原自动与后续撤销 | record_override_multi_action_uses_shared_recompute_and_keeps_later_cancel_and_original |
+| 局部/晚授优先不能抹掉全局优先或追溯提权 | scoped_later_grant_preserves_global_priority_and_cannot_retroactively_prioritize |
+| 冻结歧义在改别名后仍NeedConfirm | saved_ambiguous_understanding_stays_need_confirm_after_alias_changes |
+
+成员白名单控制副作用守卫后的最终入口已全通过：333核心＋1公开结算参考=334，完整30桌面、公开CLI及四组226条、6入口/3文档/21隐私自测、263跟踪文件扫描、250本地链接/44源码声明；两套私有样本逐格以及2工作簿67消息/47组通过，源哈希未变。fmt/严格clippy/build通过。临时旧基线只用于实际对照，摘要固定后移除，可从签名Git基线重建；隔离服务均退出，仅原常驻实例保留，无部署。T-24/W-G2-05收口；E4及待决策仍未完成，goal不收缩也不标完成。
+
+### E4接续发现（代码已核实，未实施）
+
+Gateway::on_text目前在网络读任务内等待MessageLog writer，再spawn sink。writer跨模型等待时，网络读循环可能连后续echo都读不到；仅把spawn换成有界send仍不能证明回包可达。E4要先用阻塞sink/饱和入站＋同连接echo重现，再处理接入、持久化及控制读循环的边界，不能以“只有一个worker”冒充有界/无丢失。还须覆盖顺序、关闭/恢复与轮次/配置写边界；不连接真实接收器或因此放宽发送权限。

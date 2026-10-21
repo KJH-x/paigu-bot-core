@@ -5,10 +5,13 @@ use crate::domain::claim::Eligibility;
 use crate::domain::item::Item;
 use crate::domain::settlement::SettlementSnapshot;
 use crate::domain::snapshot::AllocationSnapshot;
-use crate::replay::replay_engine::ReplayResult;
+use replay_report::ReplayResult;
 
+mod controls;
 mod execute;
 mod fixture;
+mod prepare;
+mod replay_report;
 mod report;
 pub use execute::verify;
 pub(crate) use fixture::load_round_fixture;
@@ -36,6 +39,9 @@ pub struct VerifyResult {
     pub ignored_count: usize,
     pub unsupported_count: usize,
     pub duplicate_count: usize,
+    pub dropped_count: usize,
+    pub merged_count: usize,
+    pub error_count: usize,
     pub outcomes: Vec<MessageOutcome>,
     pub eligibility: Vec<Eligibility>,
     pub final_snapshot: AllocationSnapshot,
@@ -44,14 +50,9 @@ pub struct VerifyResult {
 }
 
 pub struct RoundFixture {
-    pub round_id: String,
-    pub title: String,
-    pub group_id: String,
+    pub fixture_version: u8,
+    pub config: crate::settings::AppConfig,
     pub items: Vec<Item>,
-    /// 预存(购物金)用户；在 priority_window 内仅他们可排。
-    pub priority_users: Vec<String>,
-    /// 优先时段 [start_ms, end_ms)（end 独占）。
-    pub priority_window: Option<(i64, i64)>,
 }
 
 pub async fn run_cli(args: &[String]) -> anyhow::Result<()> {
@@ -90,18 +91,23 @@ pub async fn run_cli(args: &[String]) -> anyhow::Result<()> {
     write_outputs(Path::new(&out_dir), &result)?;
 
     println!(
-        "验证完成: {} 条消息, 生效 {} / 拒绝 {} / 需确认 {} / 忽略 {} / 未支持 {} / 重复 {}",
+        "验证完成: {} 条消息, 生效 {} / 拒绝 {} / 需确认 {} / 忽略 {} / 未支持 {} / 重复 {} / Drop {} / 合并 {} / 错误 {}",
         result.message_count,
         result.applied_count,
         result.rejected_count,
         result.need_confirm_count,
         result.ignored_count,
         result.unsupported_count,
-        result.duplicate_count
+        result.duplicate_count,
+        result.dropped_count,
+        result.merged_count,
+        result.error_count
     );
     println!("输出目录: {}", out_dir);
     Ok(())
 }
 
+#[cfg(test)]
+mod migration_tests;
 #[cfg(test)]
 mod tests;

@@ -18,6 +18,7 @@ impl AllocationEngine {
         Self {}
     }
 
+    #[cfg(test)]
     pub fn allocate(
         &self,
         items: &[Item],
@@ -27,7 +28,7 @@ impl AllocationEngine {
         self.allocate_with_names(items, claim_lines, events, &HashMap::new())
     }
 
-    /// 与 [`AllocationEngine::allocate`] 相同，但可传入 `user_id → 展示名（CN）` 映射。
+    /// 分配并写入传入的 `user_id → 展示名（CN）` 映射。
     /// 未命中映射时 `display_name` 保持为空串（向后兼容）。
     pub fn allocate_with_names(
         &self,

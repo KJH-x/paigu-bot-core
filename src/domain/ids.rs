@@ -47,6 +47,3 @@ impl std::fmt::Display for EventId {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EligibilityId(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct AliasId(pub String);

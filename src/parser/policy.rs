@@ -5,7 +5,7 @@
 //! 优先时段 / 阶段权限」逻辑。此处收敛为单一实现，保证「实时 == 重放」不漂移。
 //!
 //! 语义与收敛前逐字一致：
-//! - 白名单：群名单为空视为不限制；成员名单为空视为不限制，命中任一候选串即放行。
+//! - 白名单：群名单必须明确命中；成员名单为空视为不限制，命中任一候选串即放行。
 //! - 优先时段：`[start_ms, end_ms)`（end 独占）；优先用户命中任一候选串即可。
 //! - 阶段：复用 `round::{phase_at, can_claim, can_cancel}` 的权限矩阵。
 
@@ -14,7 +14,7 @@ use crate::round::{can_cancel, can_claim, RoundPhase};
 use crate::settings::AppConfig;
 
 pub use crate::round::phase_at;
-pub use crate::settings::{in_priority_window, is_priority_user};
+pub use crate::settings::in_priority_window;
 
 /// 群白名单：命中 `group_id` 才放行（空名单不放行任何群，与网关路由一致）。
 pub fn group_allowed(whitelist_groups: &[String], group_id: &str) -> bool {
