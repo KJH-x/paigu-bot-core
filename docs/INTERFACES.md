@@ -510,3 +510,13 @@ CLI参数与三个输出文件保留，输入显式 `fixture_version:2` 使用�
 Gateway不再逐消息spawn业务任务或在网络读循环等共同writer；先原子保存私有接收文件，以容量1唤醒驱动单worker。`EventSink::deliver(binding,event)` 返回 Committed/Deferred 或错误；生产Pipeline在writer内重验轮次/群/类别。IncomingEvent与MessageRecord新增可选 ingress 身份，旧记录None，原自动输入指纹不改。按帧与子项身份恢复，不混同上游重复message_id；原始JSON及目标日志同步后才确认，完整失败边界见 [持久入站](./SPEC-DURABLE-INTAKE.md)。
 
 gateway/status及workflow.gateway、board.status新增intake：pending、pending_by_round、wake_capacity=1、paused、last_error、worker_running。`POST /api/gateway/intake/retry` 必需round_id/config_revision且拒绝未知字段；共同writer内上下文不符409 intake_context_changed，不切轮、不改配置、不批量重解析。前端状态警告直达系统设置接入分区，可键盘恢复。积压轮次的fresh/删除/同轮群类别变更/快照导出及应用/测试reset拒绝409 pending_ingress。快照是完成消息切面，非整个待处理区备份。
+
+### 8.12 成员拉取健康（2026-10-22，已通过隔离门禁）
+
+手动 `POST /api/members/refresh` 仍必需round_id/config_revision/members_fingerprint；不新增无上下文重试。每日与手动共用验证/原子缓存安装及进程内单飞监控，并发409 members_pull_busy，不发送第二次动作。自动请求也带计时时的期望配置，迟到来源不向替换来源拉取/安装；保留现有响应后上下文守卫。
+
+预检就过期的请求不创建拉取尝试，不把旧请求挂为新来源的失败；已经发出的有效请求若迟到，则只记录原来源的结果，不能覆盖新来源缓存。
+
+`GET /api/members`新增pull_status，`GET /api/workflow`新增members_pull，同一状态：running、running_for_current_source、last_attempt、last_success_at_ms、consecutive_failures、schedule_state、next_attempt_at_ms。尝试含origin(manual/scheduled)、started_at_ms/finished_at_ms、status(running/succeeded/failed/cancelled)、通用reason和member_count；不包含名单、内部缓存路径、请求/响应载荷或原始错误。仅保留一个活动/最近尝试和最近成功；按轮次/成员群/缓存路径区分，重启即无历史，不能充当审计日志或后台一定存活的保证。
+
+每日时间严格HH:MM、本地日历下一次，启动/变更来源不立即补拉；配置时间/来源约1秒重排，改其他配置不把今日任务不断延后。失败等下次日程或明确手动拉取，无新增自动重试；非法时间schedule_state=invalid_time、无next，不回退19点。成员页复用已有workflow轮询展示，不新增名单轮询/自动覆盖草稿/模型请求；运行中禁用手动按钮，手动恢复仍经过离开草稿三选保护。取消状态提示先重读缓存，不承诺取消一定发生在缓存提交之前。

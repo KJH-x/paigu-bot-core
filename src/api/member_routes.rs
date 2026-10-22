@@ -34,11 +34,6 @@ async fn suggest_cn(
     Ok(Json(value))
 }
 
-/// 拉取群成员并写入缓存（每日调度 / 刷新路由复用）。只读动作，绝不发消息。
-pub async fn refresh_members_from_gateway(state: &ApiState) -> anyhow::Result<Value> {
-    members::refresh_members_from_gateway(state).await
-}
-
 async fn refresh_members(
     State(state): State<Arc<ApiState>>,
     body: Result<Json<members::MemberContext>, JsonRejection>,

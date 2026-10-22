@@ -90,6 +90,7 @@ async fn pending_draft_rechecks_main_supplements_config_group_and_lock_without_h
             old.messages.clone(),
         );
         let state = Arc::new(crate::api::ApiState {
+            members_pull: Default::default(),
             cfg: old.cfg.clone(),
             gateway: crate::gateway::Gateway::new(old.cfg.clone(), pipeline.clone()),
             pipeline,

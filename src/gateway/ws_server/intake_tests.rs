@@ -151,7 +151,9 @@ async fn slow_business_writer_cannot_block_same_connection_echo() {
 }
 
 async fn wait_pending(gateway: &Gateway, count: u64) {
-    tokio::time::timeout(Duration::from_secs(8), async {
+    // This is a disk acceptance/drain deadline, not the separate 500ms echo
+    // requirement. Full-suite fsync contention must not masquerade as echo loss.
+    let completed = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             if gateway.status().await["intake"]["pending"] == count {
                 break;
@@ -159,8 +161,12 @@ async fn wait_pending(gateway: &Gateway, count: u64) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
-    .await
-    .expect("pending intake did not converge");
+    .await;
+    assert!(
+        completed.is_ok(),
+        "pending intake did not converge to {count}: {}",
+        gateway.status().await["intake"]
+    );
 }
 
 fn slow_fixture() -> (Arc<ConfigStore>, Arc<SlowSink>, Connection) {

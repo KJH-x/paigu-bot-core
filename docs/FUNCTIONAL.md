@@ -57,7 +57,7 @@
 
 显式拉取/称呼建议需当前轮次、配置版本与名单指纹。请求完成后再次检查，坏名单、未知/重复建议、缓存原子写失败均保留旧数据。模型关闭不发送建议请求；建议只预览选入草稿，再显式保存。[`refresh_members`](../src/services/members.rs)、[`suggest_cn`](../src/services/members.rs)。
 
-每日调度已实现，失败只日志告警；状态/恢复仍未闭环，不能把无接收器称作成功刷新。[`spawn_members_scheduler`](../src/main.rs)。
+每日拉取按本地日历时间安排，时间/来源变化后及时重排；无效HH:MM明确暂停自动任务，不默默改时间。成员页只读显示下次计划、运行中和本次运行的最近成败/连续失败；复用受上下文与草稿保护的“拉取群成员”重试，不自动重试或向群告警。并发拒绝叠加，取消释放忙碌状态；来源变化不冒用旧成功。此状态不含名单/原始错误载荷，重启不保留，不能把无接收器称作成功刷新。[`spawn`](../src/services/member_pull.rs)、[`Monitor::snapshot`](../src/services/member_pull.rs)。
 
 公开协作者不需要真实名单、模型或NapCat：`npm run check` 运行公开占位核心/脚本/离线CLI/文档/隐私门禁，`npm run check:full` 额外跑既有完整桌面套件。私有夹具需显式提供，遗漏显示NOT RUN，详见 [开发检查](./DEVELOPMENT.md)。
 

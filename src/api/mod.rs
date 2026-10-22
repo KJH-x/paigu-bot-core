@@ -27,6 +27,7 @@ use crate::llm::Pipeline;
 use crate::settings::ConfigStore;
 
 pub struct ApiState {
+    pub members_pull: Arc<crate::services::member_pull::Monitor>,
     pub cfg: Arc<ConfigStore>,
     pub pipeline: Arc<Pipeline>,
     pub gateway: Arc<Gateway>,

@@ -99,7 +99,7 @@ pub async fn get_members(state: &ApiState) -> Value {
         .collect();
     json!({ "members": decorated, "source": snapshot.source, "round_id":cfg.round.round_id,
         "config_revision":cfg.revision,"cached_group_id":snapshot.group_id,"cache_updated_at_ms":snapshot.updated_at_ms,
-        "members_fingerprint":snapshot.fingerprint })
+        "members_fingerprint":snapshot.fingerprint,"pull_status":state.members_pull.snapshot(&cfg) })
 }
 
 fn scalar_string(v: &Value) -> Option<String> {
@@ -318,7 +318,15 @@ pub async fn refresh_members(
     state: &ApiState,
     context: MemberContext,
 ) -> Result<Value, ServiceError> {
-    let cfg = {
+    refresh_with_origin(state, context, super::member_pull::Origin::Manual).await
+}
+
+async fn refresh_with_origin(
+    state: &ApiState,
+    context: MemberContext,
+    origin: super::member_pull::Origin,
+) -> Result<Value, ServiceError> {
+    let (cfg, attempt) = {
         let _serial = state.pipeline.message_write_guard().await;
         let cfg = state.cfg.get().await;
         check_context(
@@ -326,27 +334,33 @@ pub async fn refresh_members(
             &snapshot_from_disk(Path::new(&cfg.members.cache_path)),
             &context,
         )?;
-        cfg
+        let attempt = state.members_pull.begin(&cfg, origin)?;
+        (cfg, attempt)
     };
-    let response = state
-        .gateway
-        .send_action(
-            "get_group_member_list",
-            json!({"group_id":cfg.members.group_id}),
+    let result = async {
+        let response = state
+            .gateway
+            .send_action(
+                "get_group_member_list",
+                json!({"group_id":cfg.members.group_id}),
+            )
+            .await
+            .map_err(|e| ServiceError::Upstream(e.to_string()))?;
+        if response.get("status").and_then(Value::as_str) != Some("ok") {
+            return Err(ServiceError::Upstream(
+                "接收器未成功返回成员列表，原缓存保留".into(),
+            ));
+        }
+        install_member_cache(
+            state,
+            context,
+            response.get("data").cloned().unwrap_or(Value::Null),
         )
         .await
-        .map_err(|e| ServiceError::Upstream(e.to_string()))?;
-    if response.get("status").and_then(Value::as_str) != Some("ok") {
-        return Err(ServiceError::Upstream(
-            "接收器未成功返回成员列表，原缓存保留".into(),
-        ));
     }
-    install_member_cache(
-        state,
-        context,
-        response.get("data").cloned().unwrap_or(Value::Null),
-    )
-    .await
+    .await;
+    attempt.finish(&result);
+    result
 }
 
 pub(crate) async fn install_member_cache(
@@ -388,18 +402,20 @@ pub(crate) async fn install_member_cache(
     )
 }
 
-pub async fn refresh_members_from_gateway(state: &ApiState) -> anyhow::Result<Value> {
+pub async fn refresh_members_from_gateway(
+    state: &ApiState,
+    expected: &AppConfig,
+) -> anyhow::Result<Value> {
     let context = {
         let _serial = state.pipeline.message_write_guard().await;
-        let cfg = state.cfg.get().await;
-        let snapshot = snapshot_from_disk(Path::new(&cfg.members.cache_path));
+        let snapshot = snapshot_from_disk(Path::new(&expected.members.cache_path));
         MemberContext {
-            round_id: cfg.round.round_id,
-            config_revision: cfg.revision,
+            round_id: expected.round.round_id.clone(),
+            config_revision: expected.revision,
             members_fingerprint: snapshot.fingerprint,
         }
     };
-    let result = refresh_members(state, context)
+    let result = refresh_with_origin(state, context, super::member_pull::Origin::Scheduled)
         .await
         .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     Ok(result["members"].clone())

@@ -178,6 +178,7 @@ fn test_pipeline(cfg: &AppConfig, llm: Arc<dyn LlmClient>) -> Arc<Pipeline> {
 
 fn api_state(pipeline: Arc<Pipeline>) -> crate::api::ApiState {
     crate::api::ApiState {
+        members_pull: Default::default(),
         cfg: pipeline.cfg.clone(),
         gateway: crate::gateway::Gateway::new(pipeline.cfg.clone(), pipeline.clone()),
         messages: pipeline.messages(),

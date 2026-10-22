@@ -53,6 +53,8 @@
 
 ## 3. LLM + Pipeline（`src/llm/**`，A2）
 
+成员拉取的进程内健康/日历调度另在 `services/member_pull.rs`，由ApiState持有Monitor；不是Gateway或成员缓存文件里的另一份真源。服务层共用手动/每日调用，监控只存通用成败及时间，不存名单/请求载荷；原缓存安装仍由 `services/members.rs` 完成。
+
 - `mod.rs`：`truncate(text, max)`（日志/错误信息截断，单一真源）。
 - `client.rs`：`trait LlmClient` + `OpenAiClient`（`chat/completions`，`base_url/model/api_key_env/timeout/max_tokens/temperature`，JSON 模式，超时/重试）。
 - `prompt.rs`：`build_system_prompt(cfg)` / `build_user_prompt(ev)`。

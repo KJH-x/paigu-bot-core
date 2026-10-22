@@ -50,6 +50,7 @@
               <span id="members-info" class="hint"></span>
             </div>
             <p class="hint">群名片 → 自动清洗 → 最终称呼。编辑称呼会固定该名字；“恢复自动”重新跟随群名片。别名独立保存，不改成员原消息。</p>
+            <p id="members-pull-status" class="workspace-notice" role="status">正在读取成员拉取状态…</p>
             <div class="row" style="margin-top:8px;gap:8px">
               <input id="members-filter" type="search" placeholder="筛选：群名片 / CN / 别名 / 拼音（全拼或首字母）" style="flex:1" />
             </div>
@@ -68,7 +69,7 @@
     </section>
     <details class="panel" id="member-source">
       <summary class="panel-head">成员数据来源与拉取设置</summary><div class="panel-body">
-        <p class="hint">这里只配置本机缓存与拉取策略，不会自动接收消息或拉取成员。拉取需要已连接的 NapCat；没有接收器时仍可使用本地缓存和人工称呼。</p>
+        <p class="hint">保存不会立即拉取；后台按每日时间尝试，失败保留原缓存，等下次日程或手动拉取。拉取需要已连接的接收器；没有接收器时仍可使用本地缓存和人工称呼。状态为本次运行记录，重启不保留。</p>
             <div class="split">
               <label class="field"><span>群号</span><input id="mb-group" /></label>
               <label class="field"><span>成员缓存文件</span><input id="mb-cache" /></label>

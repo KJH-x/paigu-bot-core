@@ -136,6 +136,7 @@ async fn undo_reopens_from_a_fresh_pipeline_and_restores_previous_manual_choice(
     let pipeline =
         super::Pipeline::new_with_messages(state.cfg.clone(), llm, state.messages.clone());
     let fresh = crate::api::ApiState {
+        members_pull: Default::default(),
         cfg: state.cfg.clone(),
         messages: state.messages.clone(),
         gateway: crate::gateway::Gateway::new(state.cfg.clone(), pipeline.clone()),

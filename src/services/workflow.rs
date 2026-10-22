@@ -63,6 +63,7 @@ pub async fn snapshot(state: &ApiState) -> Value {
         "admin_commands_enabled": cfg.gateway.admin_commands_enabled,
         "revision": cfg.revision,
         "gateway": state.gateway.status().await,
+        "members_pull": state.members_pull.snapshot(&cfg),
         "updated_at": chrono::Utc::now().to_rfc3339(),
     });
 

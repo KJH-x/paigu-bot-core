@@ -21,6 +21,7 @@ async fn build_router_registers_message_replay_and_snapshot_routes() {
     let gateway = crate::gateway::Gateway::new(cfg.clone(), pipeline.clone());
     let messages = pipeline.messages();
     let state = Arc::new(ApiState {
+        members_pull: Default::default(),
         cfg,
         pipeline,
         gateway,

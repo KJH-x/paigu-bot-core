@@ -6,6 +6,25 @@
   function setRev(){$('rev-badge').textContent='配置 v'+(state.revision==null?'—':state.revision);}
   function val(id){return $(id).value;}
   function sourceFields(config){var m=config.members;return {group_id:m.group_id,cache_path:m.cache_path,daily_pull_at:m.daily_pull_at};}
+  function paintPull(status){
+    state.pullStatus=status;
+    var host=$('members-pull-status');if(!status){host.textContent='当前服务未提供拉取状态；确认来源后仍可手动拉取，不会自动重试。';$('members-refresh').disabled=!state.fingerprint;return;}
+    $('members-refresh').disabled=!!status.running||!state.fingerprint;
+    var time=function(value){return value?new Date(value).toLocaleString():'尚无记录';};
+    var next=status.schedule_state==='invalid_time'?'每日时间无效，自动拉取暂停；请在来源设置填写 HH:MM':
+      status.next_attempt_at_ms?'下次自动拉取：'+time(status.next_attempt_at_ms):'正在准备每日计划';
+    var last=status.last_attempt, detail='本次运行尚无拉取记录';
+    if(status.running)detail=status.running_for_current_source?'正在拉取成员；不要重复提交':'另一来源的请求尚未完成；当前来源未重复拉取';
+    else if(last){
+      if(last.status==='succeeded')detail='最近成功：'+time(last.finished_at_ms)+'，'+last.member_count+' 名成员';
+      else {
+        var reasons={receiver_error:'请检查接收器连接和只读动作权限，再点「拉取群成员」重试',context_changed:'来源或配置已变化；先重新读取，未套用迟到数据',local_storage:'请检查本机缓存路径、权限和空间，再重试',interrupted_check_cache:'请求已中断，缓存可能已更新；先重新读取再决定是否重试',invalid_request:'请求未通过校验；请重新读取并检查来源'};
+        detail='最近'+(last.status==='cancelled'?'中断':'失败')+'：'+time(last.finished_at_ms)+'；'+(reasons[last.reason]||'请检查后手动重试')+'；连续失败 '+status.consecutive_failures+' 次';
+      }
+    }
+    host.textContent=next+'。'+detail+(status.last_success_at_ms&&(!last||last.status!=='succeeded')?'。上次成功：'+time(status.last_success_at_ms):'');
+    host.classList.toggle('warning',status.schedule_state==='invalid_time'||!!last&&['failed','cancelled'].indexOf(last.status)>=0);
+  }
   function setSource(){var m=state.config.members;$('mb-group').value=m.group_id;$('mb-cache').value=m.cache_path;$('mb-pull').value=m.daily_pull_at;}
   function namesDirty(){return !!state.config && JSON.stringify(collectOverrides())!==state.namesBaseline;}
   function sourceDirty(){return !!state.config && JSON.stringify(sourceDraft())!==state.sourceBaseline;}
@@ -160,6 +179,7 @@
       var config=res[0], members=res[1];
       if(members.round_id && (members.round_id!==config.config.round.round_id || members.config_revision!==config.revision))throw new Error('读取期间配置已变化，请重新读取');
       state.config=config.config;state.revision=config.revision;state.fingerprint=members.members_fingerprint;state.members=buildMembers(members);
+      paintPull(members.pull_status);
       renderMembers();setSource();setRev();state.namesBaseline=JSON.stringify(collectOverrides());state.sourceBaseline=JSON.stringify(sourceDraft());
       $('form').classList.remove('hidden');$('loading').classList.add('hidden');
       $('members-cn-save').disabled=!state.members.some(function(m){return !!m.user_id;});
@@ -174,7 +194,7 @@
       $('conn-badge').textContent='已读取成员';$('conn-badge').className='status-badge ok';banner('');
     }).catch(function(e){banner('成员载入未完成：'+P.errorText(e),true);$('loading').textContent='载入失败，可重新读取';throw e;}).finally(function(){
       $('form').inert=false;controls.forEach(function(n,i){if(n.isConnected)n.disabled=disabled[i];});
-      if(state.config){$('members-cn-save').disabled=!state.members.some(function(m){return !!m.user_id;});$('members-cn-llm').disabled=!state.config.llm.enabled || !state.fingerprint;$('members-refresh').disabled=!state.fingerprint;$('members-refresh').title=state.fingerprint?'只读请求接收器成员列表，不发送群消息':'请先重新读取成员来源';}
+      if(state.config){$('members-cn-save').disabled=!state.members.some(function(m){return !!m.user_id;});$('members-cn-llm').disabled=!state.config.llm.enabled || !state.fingerprint;$('members-refresh').title=state.fingerprint?'只读请求接收器成员列表，不发送群消息':'请先重新读取成员来源';paintPull(state.pullStatus);}
       delete state.loadPromise;
     });
     return state.loadPromise;
@@ -184,7 +204,7 @@
   }
   function refreshMembersNow(){
     var btn=$('members-refresh');btn.disabled=true;
-    return P.post('/api/members/refresh',memberContext()).then(load).catch(function(e){banner('拉取失败，保留现有名单与草稿：'+P.errorText(e)+'。需要已连接的接收器；名单或配置变更后请先重新读取。',true);}).finally(function(){btn.disabled=false;});
+    return P.post('/api/members/refresh',memberContext()).then(load).catch(function(e){banner('拉取失败，保留现有名单与草稿：'+P.errorText(e)+'。需要已连接的接收器；名单或配置变更后请先重新读取。',true);}).finally(function(){btn.disabled=false;if(window.PAIGU_SHELL)window.PAIGU_SHELL.refresh();});
   }
   function memberContext(){return {round_id:state.config.round.round_id,config_revision:state.revision,members_fingerprint:state.fingerprint || ''};}
   function suggest(){
@@ -223,6 +243,11 @@
     $('members-body').addEventListener('input',onMembersInput);$('members-body').addEventListener('click',onMembersClick);
     $('members-filter').setAttribute('aria-label','搜索成员群名片、称呼或别名');$('members-filter').addEventListener('input',renderMembers);
     $('members-refresh').addEventListener('click',refreshMembers);$('members-cn-llm').addEventListener('click',suggest);
+    if(window.PAIGU_SHELL)window.PAIGU_SHELL.onWorkflow(function(workflow){
+      if(!state.config)return;
+      if(!workflow||workflow.round_id!==state.config.round.round_id||workflow.revision!==state.revision){$('members-pull-status').textContent='状态连接或来源配置已变化；请重新读取，当前称呼草稿保留。';$('members-refresh').disabled=true;return;}
+      paintPull(workflow.members_pull);
+    });
     $('members-ai-apply').addEventListener('click',applySuggestions);$('members-ai-dismiss').addEventListener('click',function(){$('member-suggestions').hidden=true;});
     load().catch(function(){});
   }

@@ -78,6 +78,7 @@ pub(super) async fn fixture(
     });
     let pipeline = Pipeline::new_with_client_dir(store.clone(), llm.clone(), dir.join("messages"));
     let state = crate::api::ApiState {
+        members_pull: Default::default(),
         cfg: store.clone(),
         gateway: crate::gateway::Gateway::new(store, pipeline.clone()),
         messages: pipeline.messages(),

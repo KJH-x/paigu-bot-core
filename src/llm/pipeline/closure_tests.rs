@@ -172,6 +172,7 @@ async fn historical_message_outside_live_projection_can_be_opened_corrected_and_
         state.messages.clone(),
     );
     let reopened = crate::api::ApiState {
+        members_pull: Default::default(),
         cfg: state.cfg.clone(),
         gateway: crate::gateway::Gateway::new(state.cfg.clone(), pipeline.clone()),
         pipeline,
