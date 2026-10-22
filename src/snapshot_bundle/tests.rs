@@ -95,6 +95,7 @@ async fn imported_bundle_replays_to_same_board() {
         status: "Applied".to_string(),
         detail: String::new(),
         sender_user_id: None,
+        delegation: None,
         ingress: None,
         sender_nickname: None,
     };

@@ -27,7 +27,7 @@ pub async fn display_with_cursor(
         return json!({"unavailable":true,"error":"round_switching","round_id":cfg.round.round_id});
     }
     let messages = state.pipeline.messages_since(0).await;
-    let who_whats = resolve_who_whats(&cfg, state.pipeline.who_whats().await);
+    let who_whats = state.pipeline.who_whats().await;
     let (view_epoch, view_revision, previous) = state
         .pipeline
         .view_stamp(cfg.revision, &board, &messages)
@@ -42,38 +42,6 @@ pub async fn display_with_cursor(
         "board":board,"messages":if unchanged {vec![]} else {messages},
         "who_whats":who_whats,"status":status,"changed":changed
     })
-}
-
-/// 用 CN 覆盖 `who_whats` 的人名（U4）：按成员缓存 `nickname → user_id` 反查。
-fn resolve_who_whats(cfg: &crate::settings::AppConfig, who_whats: Vec<Value>) -> Vec<Value> {
-    if who_whats.is_empty() {
-        return who_whats;
-    }
-    if cfg.members.cn_overrides.is_empty() {
-        return who_whats;
-    }
-    let members = crate::services::members::cached_members(cfg);
-    let map = crate::services::members::cn_display_map(cfg, &members);
-    if map.is_empty() {
-        return who_whats;
-    }
-    who_whats
-        .into_iter()
-        .map(|mut entry| {
-            let display = entry
-                .get("display")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            if let Some(cn) = map.get(&display) {
-                if let Some(obj) = entry.as_object_mut() {
-                    obj.insert("cn".to_string(), json!(cn));
-                    obj.insert("display".to_string(), json!(cn));
-                }
-            }
-            entry
-        })
-        .collect()
 }
 
 fn board_cells(board: &Value) -> BTreeMap<String, String> {

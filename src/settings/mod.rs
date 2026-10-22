@@ -15,6 +15,9 @@ use crate::round::{ItemClass, PhaseWindow, RoundCategory};
 mod commit;
 /// 轮次库（`data/rounds/<round_id>.json`）读写与激活解析（U3）。
 pub mod rounds;
+#[cfg(test)]
+mod target_tests;
+pub mod targets;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -456,6 +459,7 @@ fn is_id_like(s: &str) -> bool {
 /// 按路径与文件 mtime 缓存；文件消失时清空，避免跨来源复用。
 struct CachedMemberNames {
     path: PathBuf,
+    group_id: String,
     modified: Option<SystemTime>,
     names: HashMap<String, String>,
 }
@@ -466,7 +470,7 @@ fn member_name_map() -> &'static MemberNameCache {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
-fn load_member_name_map(path: &str) -> HashMap<String, String> {
+fn load_member_name_map(path: &str, group_id: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let Ok(raw) = std::fs::read_to_string(path) else {
         return map;
@@ -474,6 +478,12 @@ fn load_member_name_map(path: &str) -> HashMap<String, String> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return map;
     };
+    if value
+        .get("group_id")
+        .is_some_and(|source| value_to_str(source).as_deref() != Some(group_id))
+    {
+        return map;
+    }
     let Some(list) = value.get("members").unwrap_or(&value).as_array() else {
         return map;
     };
@@ -505,6 +515,9 @@ fn value_to_str(v: &serde_json::Value) -> Option<String> {
 }
 
 fn with_member_map<T>(cfg: &AppConfig, f: impl FnOnce(&HashMap<String, String>) -> T) -> Option<T> {
+    if cfg.members.group_id != cfg.round.group_id {
+        return None;
+    }
     let path = cfg.members.cache_path.trim();
     if path.is_empty() {
         return None;
@@ -512,13 +525,14 @@ fn with_member_map<T>(cfg: &AppConfig, f: impl FnOnce(&HashMap<String, String>) 
     let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
     let mut guard = member_name_map().lock().ok()?;
     let key = PathBuf::from(path);
-    let stale = guard
-        .as_ref()
-        .is_none_or(|cached| cached.path != key || cached.modified != mtime);
+    let stale = guard.as_ref().is_none_or(|cached| {
+        cached.path != key || cached.modified != mtime || cached.group_id != cfg.round.group_id
+    });
     if stale {
-        let map = load_member_name_map(path);
+        let map = load_member_name_map(path, &cfg.round.group_id);
         *guard = Some(CachedMemberNames {
             path: key,
+            group_id: cfg.round.group_id.clone(),
             modified: mtime,
             names: map,
         });
@@ -531,19 +545,13 @@ pub fn member_display_name(cfg: &AppConfig, user_id: &str) -> Option<String> {
     with_member_map(cfg, |map| map.get(user_id.trim()).cloned()).flatten()
 }
 
-/// 反查 `user_id`：按 `card`/`nickname` 精确或包含匹配名字（用于代排群内反查）。
-pub fn member_user_id_by_name(cfg: &AppConfig, name: &str) -> Option<String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return None;
+pub fn delegation_display(cfg: &AppConfig, meta: &crate::bus::Delegation) -> Option<String> {
+    if let crate::bus::DelegationKind::Guest { label } = &meta.target {
+        let actor = resolve_cn(cfg, &meta.actor_user_id, &meta.actor_nickname)
+            .unwrap_or_else(|| meta.actor_user_id.clone());
+        return Some(format!("{actor}(代{})", label.as_deref().unwrap_or("")));
     }
-    with_member_map(cfg, |map| {
-        map.iter()
-            .find(|(_, n)| n.trim() == name)
-            .or_else(|| map.iter().find(|(_, n)| n.contains(name)))
-            .map(|(uid, _)| uid.clone())
-    })
-    .flatten()
+    None
 }
 
 /// 匿名/具名代排标签 `发送者(代…)` → 发送者基名（供权限/白名单按发送者判定）。

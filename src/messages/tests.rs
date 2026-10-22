@@ -21,6 +21,7 @@ fn record(seq: i64, text: &str) -> MessageRecord {
         status: "Applied".to_string(),
         detail: "claim".to_string(),
         sender_user_id: None,
+        delegation: None,
         ingress: None,
         sender_nickname: None,
     }

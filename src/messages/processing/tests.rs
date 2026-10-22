@@ -16,6 +16,7 @@ fn record() -> MessageRecord {
         status: "Applied".to_string(),
         detail: String::new(),
         sender_user_id: None,
+        delegation: None,
         ingress: None,
         sender_nickname: None,
         processing: None,
@@ -39,6 +40,40 @@ fn input_fingerprint_is_independent_of_execution_projection() {
         ProcessingMember::from_record(&original),
         ProcessingMember::from_record(&changed)
     );
+}
+
+#[test]
+fn old_input_hash_is_unchanged_and_new_delegation_cannot_be_swapped() {
+    let mut record = record();
+    let old = serde_json::json!([
+        record.record_id,
+        record.seq,
+        record.group_id,
+        record.user_id,
+        record.nickname,
+        record.message_id,
+        record.text,
+        record.timestamp_ms,
+        record.is_admin,
+        record.sender_user_id,
+        record.sender_nickname
+    ]);
+    assert_eq!(
+        ProcessingMember::from_record(&record).input_hash,
+        format!("{:x}", Sha256::digest(old.to_string().as_bytes()))
+    );
+    let before = ProcessingMember::from_record(&record);
+    record.delegation = Some(crate::bus::Delegation {
+        actor_user_id: "u2".into(),
+        actor_nickname: "成员02".into(),
+        source_message_id: "outer".into(),
+        source_text: "代成员01排:排 徽章 甲 1".into(),
+        target: crate::bus::DelegationKind::Member,
+    });
+    let delegated = ProcessingMember::from_record(&record);
+    assert_ne!(before, delegated);
+    record.delegation.as_mut().unwrap().actor_user_id = "u3".into();
+    assert_ne!(delegated, ProcessingMember::from_record(&record));
 }
 
 #[test]

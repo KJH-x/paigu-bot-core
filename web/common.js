@@ -817,6 +817,7 @@
     for (var i = 0; i < asArray(src).length; i++) {
       var w = src[i] || {};
       out.push({
+        user_id: w.user_id || '',
         display: w.display || w.nickname || w.name || w.user || '',
         identity: w.identity || w.user_id || '',
         items: asArray(w.items).map(function (it) {

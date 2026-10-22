@@ -69,6 +69,7 @@ impl Pipeline {
             status: "Pending".to_string(),
             detail: String::new(),
             sender_user_id: ev.sender_user_id.clone(),
+            delegation: ev.delegation.clone(),
             ingress: ev.ingress.clone(),
             sender_nickname: ev.sender_nickname.clone(),
             processing: Some(ProcessingHistory::default()),

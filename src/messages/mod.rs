@@ -20,6 +20,8 @@ pub fn new_record_id() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<crate::bus::Delegation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ingress: Option<crate::bus::IngressSource>,
     #[serde(default)]
     pub record_id: String,

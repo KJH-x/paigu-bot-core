@@ -21,6 +21,7 @@ mod admin;
 mod export;
 mod ingress;
 mod llm_parse;
+mod proxy;
 mod replay_view;
 mod state;
 mod understanding;
@@ -40,6 +41,8 @@ mod closure_tests;
 mod ingress_tests;
 #[cfg(test)]
 mod member_tests;
+#[cfg(test)]
+mod proxy_tests;
 #[cfg(test)]
 mod settlement_tests;
 #[cfg(test)]
@@ -73,6 +76,7 @@ fn unwrap_forged_envelope(ev: IncomingEvent) -> IncomingEvent {
         timestamp_ms: envelope.timestamp_ms.unwrap_or(ev.timestamp_ms),
         is_admin: envelope.is_admin.unwrap_or(false),
         sender_user_id: None,
+        delegation: None,
         ingress: ev.ingress,
         sender_nickname: None,
         raw: ev.raw,
@@ -122,6 +126,7 @@ pub(crate) fn gate_nc_multi(cfg: &AppConfig, ev: IncomingEvent) -> Vec<IncomingE
                 timestamp_ms: e.timestamp_ms.unwrap_or(outer_ts),
                 is_admin: e.is_admin.unwrap_or(false),
                 sender_user_id: None,
+                delegation: None,
                 ingress: ev.ingress.as_ref().map(|s| crate::bus::IngressSource {
                     id: s.id.clone(),
                     part: format!("{}:nc-{i}", s.part),
@@ -235,65 +240,6 @@ fn scalar_to_string(value: &Value) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-/// 代排分段：识别 `代<名称>排[:]` 标记；有标记时返回分段 `(target, text)`。
-/// `target=None` 为发信人段，`Some(名称)` 为被代理人段（标记本身被剔除）。
-fn proxy_segments(text: &str) -> Option<Vec<(Option<String>, String)>> {
-    let markers = find_proxy_markers(text);
-    if markers.is_empty() {
-        return None;
-    }
-    let mut segs: Vec<(Option<String>, String)> = Vec::new();
-    let mut pos = 0usize;
-    let mut current: Option<String> = None;
-    for (name, start, end) in markers {
-        if start > pos {
-            segs.push((current.clone(), text[pos..start].to_string()));
-        }
-        current = Some(name);
-        pos = end;
-    }
-    if pos < text.len() {
-        segs.push((current, text[pos..].to_string()));
-    }
-    segs.retain(|(_, s)| !s.trim().is_empty());
-    (!segs.is_empty()).then_some(segs)
-}
-
-fn find_proxy_markers(text: &str) -> Vec<(String, usize, usize)> {
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i].1 == '代' {
-            let mut j = i + 1;
-            while j < chars.len()
-                && !matches!(
-                    chars[j].1,
-                    '排' | ' ' | ':' | '：' | '\n' | '\t' | '，' | ','
-                )
-                && j - i <= 24
-            {
-                j += 1;
-            }
-            if j < chars.len() && chars[j].1 == '排' && j > i + 1 {
-                let name: String = chars[i + 1..j].iter().map(|(_, c)| *c).collect();
-                let start = chars[i].0;
-                let mut end = chars[j].0 + chars[j].1.len_utf8();
-                if let Some(c) = text[end..].chars().next() {
-                    if c == ':' || c == '：' {
-                        end += c.len_utf8();
-                    }
-                }
-                out.push((name, start, end));
-                i = j + 1;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out
-}
-
 /// 是否疑似排谷/撤销/改单消息（决定是否走 LLM 切分）；纯闲聊/表情不触发 LLM。
 fn looks_like_order(text: &str, rule: &crate::parser::parsed_event::ParsedMessage) -> bool {
     !rule.items.is_empty()
@@ -380,74 +326,6 @@ impl Pipeline {
         self.llm.clone()
     }
 
-    /// 代排（T-29）：把一条消息按 `代<名称>排:` 分段，逐段复用 `process`。
-    /// 发信人段归属发信人；被代理人段经成员缓存反查 QQ（群内）→ 归属被代理人，
-    /// 查不到（群外）→ 记为 `发信人(代名称)`。
-    async fn process_proxy_segments(
-        &self,
-        ev: &IncomingEvent,
-        segments: Vec<(Option<String>, String)>,
-    ) -> PipelineOutcome {
-        let cfg = self.cfg.get().await;
-        let sender_name = crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname)
-            .unwrap_or_else(|| ev.user_id.clone());
-        let mut statuses: Vec<String> = Vec::new();
-        let mut details: Vec<String> = Vec::new();
-        let mut version = 0i64;
-        let mut snapshot: Option<Value> = None;
-        for (idx, (target, text)) in segments.into_iter().enumerate() {
-            let mut seg = ev.clone();
-            seg.text = text;
-            seg.message_id = format!("{}#proxy{}", ev.message_id, idx);
-            seg.ingress = ev.ingress.as_ref().map(|s| crate::bus::IngressSource {
-                id: s.id.clone(),
-                part: format!("{}:proxy-{idx}", s.part),
-            });
-            seg.raw = None;
-            if let Some(name) = target {
-                match crate::settings::member_user_id_by_name(&cfg, &name) {
-                    Some(uid) => {
-                        seg.user_id = uid;
-                        seg.nickname = String::new();
-                    }
-                    None => {
-                        seg.user_id = format!("{sender_name}(代{name})");
-                        seg.nickname = String::new();
-                    }
-                }
-            }
-            let outcome = Box::pin(self.process_inner(seg)).await;
-            statuses.push(outcome.status.clone());
-            if !outcome.detail.is_empty() {
-                details.push(format!("{} [{}]", outcome.detail, outcome.status));
-            }
-            version = outcome.version;
-            if outcome.snapshot.is_some() {
-                snapshot = outcome.snapshot;
-            }
-            if statuses.last().is_some_and(|status| status == "Error") {
-                break;
-            }
-        }
-        let status = if statuses.iter().any(|s| s == "Error") {
-            "Error".to_string()
-        } else if statuses.iter().any(|s| s == "Applied") {
-            "Applied".to_string()
-        } else {
-            statuses
-                .last()
-                .cloned()
-                .unwrap_or_else(|| "Ignored".to_string())
-        };
-        PipelineOutcome {
-            status,
-            detail: format!("代排：{}", details.join("；")),
-            reply: None,
-            version,
-            snapshot,
-        }
-    }
-
     #[cfg(test)]
     pub async fn process(&self, ev: IncomingEvent) -> PipelineOutcome {
         let _serial = self.message_write_guard().await;
@@ -455,9 +333,20 @@ impl Pipeline {
     }
 
     async fn process_inner(&self, ev: IncomingEvent) -> PipelineOutcome {
+        self.process_one_inner(ev, None).await
+    }
+
+    async fn process_one_inner(
+        &self,
+        mut ev: IncomingEvent,
+        mut forced: Option<crate::messages::processing::ProcessingOutcome>,
+    ) -> PipelineOutcome {
         let cfg = self.cfg.get().await;
         if let Some(outcome) = self.ingress_replay(&cfg, &ev).await {
             return outcome;
+        }
+        if forced.is_none() {
+            forced = self.legacy_guest_owner(&cfg, &mut ev).await;
         }
         if let Some(raw) = &ev.raw {
             if let Err(error) = self
@@ -468,11 +357,17 @@ impl Pipeline {
                 return self.persistence_failure(&ev, false, error).await;
             }
         }
-        if let Some(segments) = proxy_segments(&ev.text) {
-            return self.process_proxy_segments(&ev, segments).await;
+        if forced.is_none() {
+            if let Some(segments) = proxy::segments(&cfg, &ev) {
+                return self.process_proxy_segments(&ev, segments).await;
+            }
         }
         let (identity, _) = crate::parser::normalize::clean_nickname(&ev.nickname);
-        let display = crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname)
+        let display = ev
+            .delegation
+            .as_ref()
+            .and_then(|d| crate::settings::delegation_display(&cfg, d))
+            .or_else(|| crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname))
             .unwrap_or_else(|| ev.user_id.clone());
         let mut context = self.processing_context(&cfg, &ev).await;
         let seq = context.record.seq;
@@ -502,6 +397,29 @@ impl Pipeline {
             }
             state.display.insert(ev.user_id.clone(), display.clone());
             state.identity.insert(ev.user_id.clone(), identity);
+        }
+        if let Some(outcome) = forced {
+            context.understanding = crate::messages::processing::Understanding::terminal(
+                crate::messages::processing::UnderstandingSource::Control,
+                &outcome.status,
+                outcome.detail.clone(),
+                outcome.reply.clone(),
+            );
+            let evaluated = crate::replay::session::evaluate_understanding(
+                &cfg,
+                &context.record,
+                &context.understanding,
+                context.manual_phase,
+            );
+            return self
+                .finish(
+                    &cfg.round.round_id,
+                    &context,
+                    &ev,
+                    &display,
+                    evaluated.outcome,
+                )
+                .await;
         }
         let text = ev.text.trim();
         if text.is_empty() || text.starts_with('/') {
@@ -668,14 +586,14 @@ impl Pipeline {
         }
         // 匿名代排 `X(代)`：席位填 `发送者(代)`，权限按发送者（`proxy_base`）。
         if crate::parser::coalesce::is_anonymous_proxy(&ev.text)
+            && proxy::segments(cfg, &ev).is_none()
+            && ev.delegation.is_none()
             && crate::settings::proxy_base(&ev.user_id).is_none()
         {
-            let base = crate::settings::resolve_cn(cfg, &ev.user_id, &ev.nickname)
-                .unwrap_or_else(|| ev.user_id.clone());
-            ev.sender_user_id = Some(ev.user_id.clone());
-            ev.sender_nickname = Some(ev.nickname.clone());
-            ev.user_id = format!("{base}(代)");
-            ev.nickname = String::new();
+            proxy::assign_guest(cfg, &mut ev, None);
+            if let Some(outcome) = self.legacy_guest_owner(cfg, &mut ev).await {
+                return self.process_one_inner(ev, Some(outcome)).await;
+            }
         }
         if !(cfg.merge.enabled && cfg.merge.same_sender) {
             return self.process_inner(ev).await;
@@ -694,7 +612,7 @@ impl Pipeline {
             .await
             .seen
             .contains(&format!("{}::{}", ev.group_id, ev.message_id));
-        if already_seen || self.is_locked().await || proxy_segments(&ev.text).is_some() {
+        if already_seen || self.is_locked().await || proxy::segments(&cfg, &ev).is_some() {
             return self.process_inner(ev).await;
         }
         let candidate = crate::parser::coalesce::Candidate {
@@ -902,6 +820,7 @@ impl Pipeline {
             status: status.to_string(),
             detail: detail.to_string(),
             sender_user_id: ev.sender_user_id.clone(),
+            delegation: ev.delegation.clone(),
             ingress: ev.ingress.clone(),
             sender_nickname: ev.sender_nickname.clone(),
         };

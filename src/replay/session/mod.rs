@@ -72,6 +72,8 @@ pub fn apply_overrides(base: &AppConfig, overrides: &ReplayOverrides) -> AppConf
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplayMessageView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<crate::bus::Delegation>,
     pub record_id: String,
     #[serde(default = "default_record_revision")]
     pub record_revision: u64,
@@ -438,6 +440,7 @@ async fn compute(
                 )
             };
             messages.push(ReplayMessageView {
+                delegation: rec.delegation.clone(),
                 original_automatic: crate::messages::processing::original_summary(rec),
                 manual_note: parse_overrides
                     .reason_for_record(&rec.record_id)
@@ -514,7 +517,12 @@ pub(crate) fn resolve_display_names(
         {
             continue;
         }
-        if let Some(name) = crate::settings::resolve_cn(cfg, &record.user_id, &record.nickname) {
+        if let Some(name) = record
+            .delegation
+            .as_ref()
+            .and_then(|d| crate::settings::delegation_display(cfg, d))
+            .or_else(|| crate::settings::resolve_cn(cfg, &record.user_id, &record.nickname))
+        {
             names.insert(UserId(record.user_id.clone()), name);
         }
     }
@@ -719,7 +727,11 @@ pub(crate) fn message_groups(
             user_id: &r.user_id,
             text: &r.text,
             is_admin: r.is_admin,
-            force_boundary: r.processing.is_some()
+            force_boundary: r
+                .delegation
+                .as_ref()
+                .is_some_and(|d| matches!(d.target, crate::bus::DelegationKind::Member))
+                || r.processing.is_some()
                 || overrides.has_record(&r.record_id)
                 || !r.routed.eq_ignore_ascii_case("message"),
         })
@@ -768,7 +780,11 @@ pub(crate) fn prospective_groups(
             user_id: &record.user_id,
             text: &record.text,
             is_admin: record.is_admin,
-            force_boundary: !record.routed.eq_ignore_ascii_case("message")
+            force_boundary: record
+                .delegation
+                .as_ref()
+                .is_some_and(|d| matches!(d.target, crate::bus::DelegationKind::Member))
+                || !record.routed.eq_ignore_ascii_case("message")
                 || overrides.has_record(&record.record_id)
                 || record.processing.as_ref().is_some_and(|p| {
                     p.results.first().is_some_and(|r| {

@@ -5,6 +5,8 @@
 
 > 当前专项（2026-10-18）：主代理按 TASKS/消息计划统一接线，无子代理。`src/services/configuration.rs` 为所有配置更新/热载与确定性投影的应用边界；`src/settings/commit.rs` 为可恢复配置/轮次落盘；`src/messages/replacement.rs` 为私有备份替换恢复；`src/persistence.rs` 提供同步原子文件替换。所有运行时消息/配置/锁/导入写操作使用同一 MessageLog writer；下方历史签名以现行 INTERFACES §8.9 为准。
 
+2026-10-22代排：`settings/targets.rs`为源群受约束的一次性确定性成员索引；`pipeline/proxy.rs`负责分段与归属，独立真实actor/资格主体。bus与MessageRecord可选delegation不改旧None指纹；session共用权限/冻结动作。展示/复盘汇总携user_id作行身份，不再按显示名重猜CN。合同见INTERFACES §8.13；不授予管理/阶段豁免。
+
 ## 0. 冻结接口（跨模块契约，改动需 A0 同意）
 
 ### `src/bus.rs` — Gateway 与 Pipeline 的解耦边界
@@ -60,7 +62,7 @@
 - `prompt.rs`：`build_system_prompt(cfg)` / `build_user_prompt(ev)`。
 - `pipeline.rs`：`Pipeline::new(cfg)` / `new_with_client(cfg, llm)`；`process(ev) -> PipelineOutcome`；`impl EventSink for Pipeline`。
   - 流程：幂等（`group_id::message_id`）→ 空文本忽略 → `/` 管理员命令 → 规则快路径（`RuleParser`，`confidence >= 0.9`）→ LLM（失败按 `fallback_to_rules` 回退）→ `EventValidator` → 权限（时段/预存）→ 写事件 → `rebuild_allocation_snapshot` → 回复文本。
-  - 状态：内存 `events/messages/seen/eligibilities/display/identity/seq/version/snapshot`（**无持久化**）。
+  - 状态：内存 `events/messages/seen/eligibilities/display/identity/seq/version/snapshot` 为投影；MessageLog保存原文/来源、冻结自动理解、人工事务及原始事件，当前会话重算/恢复。入站私有磁盘帧另有确认收据，不把内存投影当唯一真源。
 
 ## 4. HTTP API（`src/api/**`，A3）
 

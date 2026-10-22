@@ -52,6 +52,8 @@ pub fn projected(record: &MessageRecord, computed: &ReplayResult) -> Value {
         view["record_revision"] = json!(current.record_revision);
         view["status"] = json!(current.status);
         view["detail"] = json!(current.detail);
+        view["display"] = json!(current.nickname);
+        view["nickname"] = json!(current.nickname);
         view["manual_note"] = json!(current.manual_note);
         view["round_id"] = json!(computed.round_id);
     }
@@ -163,7 +165,13 @@ async fn read_locked(state: &ApiState, key: &str, round_id: &str) -> Result<Valu
     } else {
         "legacy_or_missing"
     };
-    let message = projected(record, &computed);
+    let mut message = projected(record, &computed);
+    if let Some(meta) = &record.delegation {
+        message["delegation_context"] = json!({
+            "actor_display": crate::settings::resolve_cn(&cfg, &meta.actor_user_id, &meta.actor_nickname),
+            "qualification": if matches!(meta.target, crate::bus::DelegationKind::Member) { "member" } else { "actor" },
+        });
+    }
     let current_summary = computed
         .events
         .iter()

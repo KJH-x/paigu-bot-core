@@ -39,6 +39,7 @@ pub fn message_view(rec: &MessageRecord) -> Value {
         "nickname": rec.nickname,
         "display": rec.nickname,
         "message_id": rec.message_id,
+        "delegation": rec.delegation,
         "text": rec.text,
         "timestamp_ms": rec.timestamp_ms,
         "is_admin": rec.is_admin,
@@ -83,6 +84,7 @@ pub async fn list_messages(
                     "detail",
                     "manual_note",
                     "round_id",
+                    "display",
                 ] {
                     view[key] = current[key].clone();
                 }
@@ -167,6 +169,7 @@ pub async fn create_message(state: &ApiState, body: CreateInput) -> Result<Value
         status: body.status.unwrap_or_else(|| "Pending".to_string()),
         detail: body.detail.unwrap_or_default(),
         sender_user_id: None,
+        delegation: None,
         ingress: None,
         sender_nickname: None,
     };
@@ -567,6 +570,7 @@ mod tests {
             status: "Applied".to_string(),
             detail: "claim".to_string(),
             sender_user_id: None,
+            delegation: None,
             ingress: None,
             sender_nickname: None,
         }

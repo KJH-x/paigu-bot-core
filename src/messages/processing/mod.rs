@@ -72,7 +72,7 @@ pub struct ProcessingMember {
 impl ProcessingMember {
     pub fn from_record(record: &MessageRecord) -> Self {
         // Outcome/revision/routing are projections and must not invalidate the understood input.
-        let input = serde_json::json!([
+        let mut input = serde_json::json!([
             record.record_id,
             record.seq,
             record.group_id,
@@ -85,6 +85,11 @@ impl ProcessingMember {
             record.sender_user_id,
             record.sender_nickname
         ]);
+        if let Some(delegation) = &record.delegation {
+            if let Some(fields) = input.as_array_mut() {
+                fields.push(serde_json::json!({ "delegation": delegation }));
+            }
+        }
         Self {
             record_id: record.record_id.clone(),
             input_hash: format!("{:x}", Sha256::digest(input.to_string().as_bytes())),

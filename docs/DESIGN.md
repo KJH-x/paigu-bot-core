@@ -5,14 +5,14 @@
 
 ## 1. 总体架构
 
-当前消息/桌面专项（2026-10-19）已按 [逐项台账](./VERIFICATION-msg-ia-2026-10-18.md) 收口：所有人工修订、配置/热载、轮次/锁/备份写操作共用 MessageLog writer；代填等待不占锁，返回前和浏览器交付前分别复查完整上下文。图示 Intake Queue 是既有设计目标，非当前已有独立有界 mpsc（工程项 T-23）。不因专项完成宣称远程发布、部署或旧 simulate 迁移已经完成。
+当前消息/桌面专项已按 [逐项台账](./VERIFICATION-msg-ia-2026-10-18.md) 收口：所有人工修订、配置/热载、轮次/锁/备份写操作共用 MessageLog writer；代填等待不占锁，返回前和浏览器交付前分别复查完整上下文。2026-10-22后继工程已接入私有持久帧＋容量1合并唤醒＋单业务worker，echo先处理，不在网络读任务等待业务锁（见[入站合同](./SPEC-DURABLE-INTAKE.md)）；有界的是交接内存，不是磁盘/全部历史。simulate已迁移共同会话，发布/生产迁移/部署仍未执行，后继进度见工程计划。
 
 ```
                          (真实群 123456789)
  NapCatQQ ──reverse WS──▶ Gateway  0.0.0.0:9801
                               │  白名单/drop · 心跳 · 动作回包(只读)
                               ▼
-                    Intake Queue (有界 mpsc)
+                    私有持久帧 + 容量1唤醒
                               ▼
    Pipeline:  幂等 → 规则快速路径 → LLM 清理/抽取 → 校验 → 权限 → 分配 → 回复(默认关闭)
                               │                         ▲
@@ -29,7 +29,7 @@
 ```
 
 **运行模式**：本地一个进程同时跑 Gateway + HTTP API + Pipeline；`cargo run -- run`（默认）。
-保留既有 `simulate`（离线重放验证；旧 verifier 暂留以支撑语料回归，见 T-24）与 `serve`（已并入新栈，等价 `run`）子命令；展示统一走 HTTP API。
+保留 `simulate`（显式夹具适配→当前共同确定性会话；旧ReplayEngine已移除，fixture_version=1保留历史理解限制、2使用当前规则）与 `serve`（等价 `run`）子命令；展示统一走 HTTP API。离线不加载私有缓存/ConfigStore、NapCat或真实模型，不恢复旧运行时配置键。
 
 ## 2. 目录与文件所有权
 

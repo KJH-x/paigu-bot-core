@@ -179,3 +179,56 @@ Gateway::on_text目前在网络读任务内等待MessageLog writer，再spawn si
 审查中纠正了旧请求预检失败误记为新来源失败的问题。UI测试最初碰到无user_id占位示例的只读保护，改用隔离目录内有标识的假缓存并恢复原文件，未强行启用只读行。全量曾在链接后高I/O负载下超过原8秒磁盘等待；同一测试程序单独256帧3.82秒全部到达，500ms echo断言通过。只将文件接受/排空等待改为30秒且增加实际状态诊断，**未放宽echo的500ms或FIFO/数量断言**。随后全量再次通过，不能靠重跑子集冒充全套。
 
 最终最新源码完整入口：358核心＋1公开参考＝359 Rust、完整31桌面、6入口/3文档/21隐私自测、272暂存/跟踪文件、261链接/45声明、四组公开226条、两套私有逐格及2工作簿67消息/47组，源哈希不变。fmt/严格clippy/build通过；明暗截图已实际查看，单独成员健康专项亦通过。真实配置/群/模型及常驻实例不改，不部署。T-19收口；T-14/T-16/T-17/T-25/T-26/T-29、诊断/派生缓存的有效剩余和业务待决定仍在本goal内，不宣称总体完成。
+
+## 10. E4目标身份查找（T-29完成，T-14前置，2026-10-22）
+
+基线a03bb1d（G、已推送）工作树干净。核实旧反查只匹配清洗群名片，HashMap取第一个精确/包含结果，不识别CN/别名/明确ID，不核对缓存群来源。先用占位回归复现，再实现独立确定性成员索引：明确ID优先；精确群名片/CN/别名归一化后收集全部候选，只有唯一者可归属，部分匹配或同名必须提示、不猜第一个；错误/其他群缓存不跨群套用。每条分段消息使用同一索引快照，已保存动作不因改名/缓存变化重解释。
+
+2026-10-22用户已明确：甲代乙排时，乙可唯一确认在群内（如MemberBeta）则按乙资格、归乙且表内不加“代”；匿名/群外/数字代号（代1、代X、代群外、代王哥等）按甲资格并显示甲(代标签)。数字代号不自动当QQ；明确@成员用于同名消歧。X/王哥等名字若未匹配群内成员，按群外处理；不把“群内未知”猜成某个成员。同名/部分匹配或缓存群来源错误须核对，不自动归第一人。
+
+实现将保留真实发言人与归属的独立元数据；群外合成身份由真实发送者/群/代号稳定生成，显示名与内部身份分离，避免两个同名发送者的群外订单串在一起。新元数据进入新产物指纹，旧记录缺省不改旧指纹、不重解释；优先/阶段资格按用户新定口径。群内代排不等于允许普通成员撤改他人既有订单，仍遵守D-2，管理员目标改单另由T-14实现；代排分段不执行内嵌斜杠管理命令，不获得阶段豁免。
+
+T-29同时补明确代排与已知成员行首“名字：”形式（与商品标题冲突时不猜）；所有分段归属先用同一成员索引快照，逐段持久化后实时/重放一致。管理员改单仍须真实管理身份、执行开关和持久锁；T-28阶段豁免仍待决定。全量/只读语料/文档/隐私后签名，未完成前不宣称T-29/T-14收口。
+
+### 10.1 实施合同与迁移边界
+
+```rust
+// settings::targets：一次读取索引快照；每个标签的裁定跟随分段传递，执行时不重查。
+enum MemberTarget { Known(String), Ambiguous(Vec<String>), Partial(Vec<String>), Unknown, Unavailable }
+// 新日志可选delegation；真实actor不等于资格主体，更不能从被代理人的缓存角色推导管理员。
+// Member => record.user_id为乙；Guest => sender_user_id为甲，record.user_id为稳定群外身份。
+// ProcessingMember仅在Some时追加metadata，None的旧JSON哈希数组逐字不变。
+```
+
+- 已从旧HashMap首个/包含反查复现4项失败：同名、明确ID/CN/别名、部分名字、来源群不符。成员索引改为有序候选、NFKC精确、card-first，未在缓存中的CN不冒充群成员。缺缓存为空索引；损坏/重复ID/来源错误为Unavailable而非空列表。同一分段帧只裁定一次，不依赖全局mtime缓存。
+- `pipeline/proxy.rs`按职责承接标记、已知行首名、归属和分段执行。数字代号与明确@区分；商品/成员同名和空段可观察，不以成功分段掩盖待核对。原外层正文/消息号、真实actor与目标类别进入私有日志和新产物指纹；修订窗口只读展开来源，不增加保存或模型请求。汇总按内部用户身份分组，避免同名甲相撞。
+- 普通成员不可代撤改群内他人的既有订单，只有真实管理员角色沿用已有能力；本批不实现`/改单 <目标>`、不放宽阶段或锁。成员白名单仍约束实际发言人；资格按L的已知乙/群外甲两类。不同发言人的群内代理不自动合组；同一甲的匿名同意图合并仍保留。
+- 旧已存理解不重问模型/换归属。旧匿名若明确sender且唯一，可沿用原合成身份接续/撤销，不改旧指纹；历史具名群外若没有真实actor或身份冲突，新增段标NeedConfirm，不静默建立另一身份导致旧订单遗留。没有进行真实历史迁移，这不是全部私有旧格式认证；损坏历史不跳过后猜身份。
+- 初版新增回归曾因从未成功排位时看板为null而误假定对象失败，现显式验证零事件/零分配和重算后完整看板，不放宽已有认购对照。首轮379核心＋32桌面与两套只读语料通过后，再补旧匿名接续/旧具名缺actor两项，须最终最新全套重跑后才结清T-29；T-14等其他E4项仍继续。
+
+### 10.2 直接验收清单（最终门禁结果待下节登记）
+
+| 范围 | 可重复证据 |
+| --- | --- |
+| 同名、部分名、ID/CN/别名/NFKC、card-first、错误群 | settings/target_tests七项；来源守卫也覆盖展示名缓存，防止跨群称呼借用 |
+| 坏结构/重复ID、缺缓存、快照稳定/候选顺序 | malformed_duplicate_and_missing_sources_have_distinct_safe_results；candidate_order_and_snapshot_are_stable_while_cache_and_overrides_change |
+| 乙/甲资格双向交叉、群内无代标签 | known_member_qualification_is_recipient_not_actor_and_board_has_no_proxy_label |
+| 群外/匿名/数字代号、不能误认成数字ID | guests_numeric_codes_and_anonymous_use_actor_permission_not_another_members_id；循环各标签和正反资格 |
+| 两个同名甲不串单、改名保持身份、汇总不并行 | same_name_proxy_actors_never_share_orders_and_rename_keeps_the_same_guest_identity；实际who_whats带稳定user_id，展示/复盘按它识别行 |
+| 歧义/来源/未知@不调模型；商品同名/空段可见 | ambiguity_partial_source_mismatch_and_unknown_explicit_member_do_not_ask_model_or_guess；product_name_collision_and_empty_segment_are_visible_not_silent_partial_success |
+| CN/别名/明确ID/行首名；不抢商品标题、不二次猜CN | cn_alias_explicit_id_and_known_line_prefix_resolve_without_stealing_product_headings；实际display API另覆盖其他成员card与既有CN冲突 |
+| 保存后的乙不因改名/缓存换指 | saved_recipient_does_not_retarget_after_cache_and_alias_changes |
+| 普通人不能代撤改群内他单、嵌套命令不锁团 | ordinary_proxy_cannot_cancel_or_modify_member_orders_or_execute_nested_control |
+| 阶段按乙、无管理豁免、实际actor白名单 | phase_ii_checks_the_recipient_and_not_the_priority_proxy_actor；known_recipient_phase_and_manual_lock_apply_without_admin_exemption；actor_whitelist_cannot_be_borrowed_from_recipient_even_for_ambiguous_target |
+| 隔很久撤回自己代号，不撤另一甲；匿名合并保留 | guest_cancel_after_gap_preserves_other_actor_orders_and_uses_the_same_frozen_owner；anonymous_same_actor_merge_stays_enabled_but_different_proxy_authors_never_merge |
+| 旧匿名明确actor可接续/撤销；旧具名无actor不猜 | legacy_anonymous_order_keeps_its_owner_and_can_be_cancelled_without_migrating_old_hash；legacy_named_guest_without_real_author_needs_check_instead_of_silently_splitting_orders |
+| 旧指纹不变，新actor不能替换 | old_input_hash_is_unchanged_and_new_delegation_cannot_be_swapped |
+| 桌面真实API归属、三行中两同名不丢、来源展开/关闭、明暗/无溢出/不改数据 | proxy-attribution.mjs，1920×1080/100%；既有入站子段收据测试改为调用真正生产分段器，不保留仅测试用的旧算法 |
+
+同时删除展示层按名字二次反查CN的旧链及其专用缓存包装，统一使用pipeline按ID计算结果；成员装饰/数字ID原测试继续验证真实生产入口，不保留无调用的测试专用函数。严查已捕获一处旧测试引用和一处因此变死的包装，修复后重新跑完整门禁，未压制warning或减少测试项。
+
+### 10.3 最新最终门禁与接续
+
+最新源码完整入口全部通过：381核心＋1公开结算参考＝382 Rust，32项1920×1080/100%桌面，四组公开226条、两套显式私有样本逐格及2工作簿67消息/47组（源哈希不变）；6入口/3文档/21隐私自测、277暂存/跟踪文件扫描通过。fmt/严格clippy/build通过。补文档后单跑链接/源码声明门禁，263链接/45声明通过。另单独运行真实来源桌面专项捕获群内/群外×明暗四图，已实际查看：原整条发言、资格依据、动作表单和保存/关闭完整可见，两同名汇总行同时保留，无页面横向溢出。截图留任务可视化目录，不入公开库。
+
+T-29收口，T-25本批按职责拆出代理模块、删除旧二次CN反查；不把拆分和测试总数算作全覆盖。后继goal继续T-14管理员目标命令、T-16下载形态、T-17旧diff入口审计，以及T-25/26、跨商品诊断/派生缓存有效余项。ColumnLocked、管理员阶段豁免/伪造权限、远程发布和共享历史改写仍按待决策/暂停边界处理。真实配置/群/模型、历史数据迁移与原常驻实例均未操作，不部署；本批签名/推送不代表整个goal已完成。

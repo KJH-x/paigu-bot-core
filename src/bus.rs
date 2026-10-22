@@ -33,9 +33,34 @@ pub enum Delivery {
     Deferred,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DelegationKind {
+    Member,
+    Guest { label: Option<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Delegation {
+    pub actor_user_id: String,
+    pub actor_nickname: String,
+    pub source_message_id: String,
+    pub source_text: String,
+    pub target: DelegationKind,
+}
+
+impl Delegation {
+    pub fn guest_id(&self, group_id: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let input = serde_json::json!([group_id, self.actor_user_id, self.target]);
+        format!("proxy:{:x}", Sha256::digest(input.to_string().as_bytes()))
+    }
+}
+
 /// 归一化后的入站群消息（Gateway 产出，Pipeline 消费）。
 #[derive(Debug, Clone)]
 pub struct IncomingEvent {
+    pub delegation: Option<Delegation>,
     pub ingress: Option<IngressSource>,
     pub group_id: String,
     pub user_id: String,

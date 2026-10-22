@@ -132,6 +132,7 @@ fn prepare(msg: &TestMessage, cfg: &AppConfig) -> Prepared {
         timestamp_ms,
         is_admin: msg.is_admin.unwrap_or(false),
         sender_user_id: None,
+        delegation: None,
         ingress: None,
         sender_nickname: None,
         raw: None,

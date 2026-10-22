@@ -53,6 +53,7 @@ fn record(seq: i64, user_id: &str, text: &str, ts: i64) -> MessageRecord {
         status: "Applied".to_string(),
         detail: String::new(),
         sender_user_id: None,
+        delegation: None,
         ingress: None,
         sender_nickname: None,
     }
@@ -289,6 +290,7 @@ fn incoming(message_id: &str, text: &str, ts: i64) -> crate::bus::IncomingEvent 
         timestamp_ms: ts,
         is_admin: false,
         sender_user_id: None,
+        delegation: None,
         ingress: None,
         sender_nickname: None,
         raw: None,
@@ -520,6 +522,7 @@ async fn realtime_and_replay_whitelist_decisions_match() {
             status: "Dropped".to_string(),
             detail: "not_whitelisted_member".to_string(),
             sender_user_id: None,
+            delegation: None,
             ingress: None,
             sender_nickname: None,
         },

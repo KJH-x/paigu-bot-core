@@ -242,7 +242,7 @@
   }
 
   function renderWhoWhats(list) {
-    P.syncKeyedChildren(whoEls, list, function (w) { return w.display; }, function () {
+    P.syncKeyedChildren(whoEls, list, function (w) { return w.user_id || w.display; }, function () {
       var tr = document.createElement('tr');
       tr.innerHTML = '<td class="ww-display"></td><td class="ww-identity"></td><td class="ww-items"></td>';
       tr.__d = tr.querySelector('.ww-display');

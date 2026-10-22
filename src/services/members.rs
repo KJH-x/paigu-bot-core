@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::ServiceError;
@@ -82,11 +81,6 @@ fn snapshot_from_disk(cache_path: &Path) -> MemberSnapshot {
         .or_else(|| snapshot_at(&seed_path(), "seed"))
         .or_else(|| snapshot_at(&example_path(), "example"))
         .unwrap_or_else(|| member_snapshot(vec![], "empty", None, None))
-}
-
-fn members_from_disk(cache_path: &Path) -> (Vec<Value>, &'static str) {
-    let snapshot = snapshot_from_disk(cache_path);
-    (snapshot.members, snapshot.source)
 }
 
 pub async fn get_members(state: &ApiState) -> Value {
@@ -272,48 +266,6 @@ fn decorate_member(cfg: &AppConfig, member: &Value) -> Value {
     out
 }
 
-/// 当前配置下缓存的成员名单（供展示层做 `nickname → CN` 映射）。
-pub fn cached_members(cfg: &AppConfig) -> Vec<Value> {
-    members_from_disk(Path::new(&cfg.members.cache_path)).0
-}
-
-/// 展示层人名映射：`nickname / CN / 别名 → CN`（U4，best-effort）。
-///
-/// `who_whats` 由 Pipeline 按 display 分组、不含 user_id，故此处以成员缓存
-/// 的 `nickname ↔ user_id` 反查；精确绑定仍需 Pipeline 携带 user_id（见汇报）。
-pub fn cn_display_map(cfg: &AppConfig, members: &[Value]) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for m in members {
-        let user_id = m.get("user_id").and_then(scalar_string).unwrap_or_default();
-        if user_id.is_empty() {
-            continue;
-        }
-        let Some(over) = cfg
-            .members
-            .cn_overrides
-            .iter()
-            .find(|o| o.user_id == user_id)
-        else {
-            continue;
-        };
-        let cn = over.cn.trim();
-        if cn.is_empty() {
-            continue;
-        }
-        let name = member_name(m);
-        if !name.trim().is_empty() {
-            map.insert(name.clone(), cn.to_string());
-        }
-        map.insert(over.cn.clone(), cn.to_string());
-        for alias in &over.aliases {
-            if !alias.trim().is_empty() {
-                map.insert(alias.clone(), cn.to_string());
-            }
-        }
-    }
-    map
-}
-
 pub async fn refresh_members(
     state: &ApiState,
     context: MemberContext,
@@ -445,12 +397,12 @@ mod tests {
         let cache = dir.join("members.json");
 
         // 无缓存 → 回退 seed/example（此时不应是 cache）
-        assert_ne!(members_from_disk(&cache).1, "cache");
+        assert_ne!(snapshot_from_disk(&cache).source, "cache");
 
         std::fs::write(&cache, r#"{"members":[{"user_id":"1","nickname":"n1"}]}"#).unwrap();
-        let (members, source) = members_from_disk(&cache);
-        assert_eq!(source, "cache");
-        assert_eq!(members.len(), 1);
+        let snapshot = snapshot_from_disk(&cache);
+        assert_eq!(snapshot.source, "cache");
+        assert_eq!(snapshot.members.len(), 1);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -472,10 +424,6 @@ mod tests {
         let no_cn = decorate_member(&cfg, &json!({ "user_id": null, "nickname": "成员01" }));
         assert_eq!(no_cn["cn"], Value::Null);
         assert_eq!(no_cn["resolved"], "成员01");
-
-        let cn_map = cn_display_map(&cfg, &[json!({ "user_id": "u1", "nickname": "老甲" })]);
-        assert_eq!(cn_map.get("老甲").map(String::as_str), Some("甲子"));
-        assert_eq!(cn_map.get("小甲").map(String::as_str), Some("甲子"));
     }
 
     #[test]
@@ -500,6 +448,5 @@ mod tests {
         let member = json!({"user_id":1,"card":"成员02"});
         assert_eq!(decorate_member(&cfg, &member)["user_id"], "1");
         assert_eq!(decorate_member(&cfg, &member)["resolved"], "成员01");
-        assert_eq!(cn_display_map(&cfg, &[member])["成员02"], "成员01");
     }
 }

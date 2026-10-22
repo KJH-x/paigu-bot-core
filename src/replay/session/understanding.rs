@@ -228,9 +228,12 @@ pub(crate) fn evaluate_understanding(
     {
         return Evaluation::skipped("Dropped", "非白名单/Drop");
     }
-    let mut candidates = crate::settings::priority_candidates(cfg, &rec.user_id, &rec.nickname);
-    candidates.push(sender_uid.to_string());
-    candidates.push(sender_nick.to_string());
+    let (actor_uid, actor_nick) = rec
+        .delegation
+        .as_ref()
+        .map(|d| (d.actor_user_id.as_str(), d.actor_nickname.as_str()))
+        .unwrap_or((sender_uid, sender_nick));
+    let candidates = crate::settings::priority_candidates(cfg, actor_uid, actor_nick);
     if !policy::member_allowed(
         &cfg.gateway.whitelist_members,
         &candidates.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -243,6 +246,17 @@ pub(crate) fn evaluate_understanding(
             events: vec![],
             priority_claim: false,
         };
+    }
+    if rec.delegation.as_ref().is_some_and(|d| {
+        matches!(d.target, crate::bus::DelegationKind::Member) && d.actor_user_id != rec.user_id
+    }) && !rec.is_admin
+        && (understood.is_modify
+            || understood
+                .events
+                .iter()
+                .any(|event| matches!(event.payload, DomainEvent::ClaimCancelled(_))))
+    {
+        return Evaluation::skipped("Rejected", "普通成员不可代撤改群内他人的订单");
     }
     for event in &understood.events {
         if event.round_id.0 != cfg.round.round_id

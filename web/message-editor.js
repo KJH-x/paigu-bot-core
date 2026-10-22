@@ -67,8 +67,15 @@
         return;
       }
       var src = el('section', 'ae-original');
-      src.appendChild(el('b', '', opts.message.display + ' · #' + data.message.seq));
+      src.appendChild(el('b', '', (data.message.display || opts.message.display) + ' · #' + data.message.seq));
       src.appendChild(el('p', 'ae-raw', data.message.text));
+      if(data.message.delegation && data.message.delegation_context){
+        var delegated=data.message.delegation, attribution=data.message.delegation_context;
+        var source=el('details','ae-proxy-source');
+        source.appendChild(el('summary','','代排来源 · '+(attribution.actor_display || '原发言人')));
+        source.appendChild(el('p','hint',attribution.qualification==='member'?'归属群内成员，按被代排人的资格处理。':'归属发言人的群外代号，按原发言人的资格处理。'));
+        source.appendChild(el('p','ae-raw',delegated.source_text));src.appendChild(source);
+      }
       src.appendChild(el('p', 'hint', '当前：' + (titles[data.current_outcome.status] || data.current_outcome.status) + ' · ' + (data.current_outcome.summary || data.current_outcome.detail || '')));
       if(data.current_outcome.summary && data.current_outcome.detail && data.current_outcome.detail!==data.current_outcome.summary){
         var execution=el('details','ae-execution');execution.open=/未命中|失败|不再有效/.test(data.current_outcome.detail);

@@ -280,6 +280,7 @@ async fn canonical_offline_matches_actual_live_pipeline_at_every_prefix_with_mer
                     is_admin: false,
                     raw: None,
                     sender_user_id: None,
+                    delegation: None,
                     ingress: None,
                     sender_nickname: None,
                 })

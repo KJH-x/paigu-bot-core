@@ -378,7 +378,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `RoundSettings.category` | 轮次类别 `"test" \| "normal"`（默认 `normal`）：**测试轮只绑定测试群、正常轮只绑定正常群**（`test_round_group_mismatch` / `normal_round_uses_test_group`） |
 | `MergeSettings`（`AppConfig.merge`） | **临近同发送者消息合并**（实验，默认关）：`enabled` + `same_sender`；实时/重放共用 `parser::coalesce` 分组（相邻、同人、同意图合并；代表=组内 `(ts,seq)` 最大者）；成员状态 `Merged`。 |
 | `Pipeline::ingest` | **统一接收入口**（NC `handle` 与 sim 注入共用）：`gate_nc` → 匿名代排改写 → 启用合并时 `recompute`（以日志为准），否则旧逐条 `process`。 |
-| 匿名代排 `X(代)` | 席位填 `发送者(代)`（合成 `user_id`、昵称留空）；权限按发送者（`settings::proxy_base` 取基名）；锁定仍生效。 |
+| 匿名代排 `X(代)` | 席位填 `发送者(代)`；新合成身份由群＋真实发送者＋代号生成，非显示名；sender字段保留资格主体，delegation保留真实发言来源，锁定仍生效。旧明确sender的匿名记录可沿用原身份，不改旧指纹。 |
 | 状态 `Merged` | 合并组成员行（`MessageRecord.status`）；消息流**逐条展示、不过滤**。 |
 | `GatewayConfig.react_emoji_id` | 收到**已路由**消息后以 `set_msg_emoji_like` 回应（如 `76`=👍），**不发文本**（默认 None 关闭）；经 `Gateway::dispatch` 下发（该内部路径不受 `allowed_actions` 限制，由本配置显式授权） |
 | `Pipeline::run_admin_command` | /开团 /锁位 /结团 /状态 /导出；锁定后拒绝排/撤/改 |
@@ -520,3 +520,15 @@ gateway/status及workflow.gateway、board.status新增intake：pending、pending
 `GET /api/members`新增pull_status，`GET /api/workflow`新增members_pull，同一状态：running、running_for_current_source、last_attempt、last_success_at_ms、consecutive_failures、schedule_state、next_attempt_at_ms。尝试含origin(manual/scheduled)、started_at_ms/finished_at_ms、status(running/succeeded/failed/cancelled)、通用reason和member_count；不包含名单、内部缓存路径、请求/响应载荷或原始错误。仅保留一个活动/最近尝试和最近成功；按轮次/成员群/缓存路径区分，重启即无历史，不能充当审计日志或后台一定存活的保证。
 
 每日时间严格HH:MM、本地日历下一次，启动/变更来源不立即补拉；配置时间/来源约1秒重排，改其他配置不把今日任务不断延后。失败等下次日程或明确手动拉取，无新增自动重试；非法时间schedule_state=invalid_time、无next，不回退19点。成员页复用已有workflow轮询展示，不新增名单轮询/自动覆盖草稿/模型请求；运行中禁用手动按钮，手动恢复仍经过离开草稿三选保护。取消状态提示先重读缓存，不承诺取消一定发生在缓存提交之前。
+
+### 8.13 代排来源与身份（2026-10-22）
+
+IncomingEvent/MessageRecord新增可选`delegation`，日志缺省None、序列化缺省省略：`actor_user_id/actor_nickname/source_message_id/source_text/target`；target为`{kind:"member"}`或`{kind:"guest",label:null|"1"}`。这是服务端生成的私有原发言溯源，不是用户动作编辑/测试注入可提交的授权字段。原sender字段继续表示群外代排的资格主体；已知群内被代理人不设sender以保留本人资格，真实actor另存delegation。`is_admin`始终是实际发言人的原角色。
+
+`settings::targets::MemberTargets`一次读取当前轮/配置成员群一致的缓存，包装group_id也必须一致；ID优先，清洗card（非空时不取nickname）、CN/别名按NFKC精确聚合，只有唯一Known可归成员。Partial/Ambiguous/Unavailable明确NeedConfirm，Unknown且非明确@才为群外；数字代号始终群外，`@成员ID`显式群内。无缓存为空索引，坏结构/重复ID不伪装为空。成员索引不读取seed/其他群兜底，不调用模型或NapCat。
+
+新群外身份为真实actor＋群＋label的稳定散列，与CN/昵称分离；已知成员归其user_id。所有段在同一索引快照裁定并传递，`#proxyN`/ingress子part保留顺序/收据；商品标题与成员行首冲突、缺动作、歧义不隐藏。段内不执行斜杠命令，普通人不代撤改群内他单，锁/阶段资格仍经共同evaluate。匿名同甲同意图合并保留，群内代理为组边界，避免同乙不同发言人混组。
+
+新delegation仅在Some时加入ProcessingMember输入指纹，旧None哈希不变。旧明确sender且唯一的匿名身份可接续；旧具名无actor/冲突为NeedConfirm，不自动迁移、猜归属或新建替代旧单。冻结产物不因别名/cache变化重问模型或换人，损坏历史明确错误。消息/复盘投影保留可选delegation，动作详情另附`message.delegation_context {actor_display,qualification:"member"|"actor"}`，修订窗口可展开完整源发言和资格说明；只读展开不保存、不调模型。原文来源含隐私，只留本地私有链路，不进入远程公开快照。
+
+展示/复盘who_whats附user_id作为内部行键，display/identity/items原字段仍在；同名不同人不合并消费或复用同一DOM行，不将ID额外塞进姓名格。称呼直接来自共同按ID解析/重算的结果，删除旧展示服务按nickname反查CN的best-effort覆盖，防止某人群名片恰与他人CN相同而错误改名。旧远程示例无user_id仍按display兜底，不代表它能区分没有身份的同名数据。

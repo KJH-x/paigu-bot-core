@@ -31,6 +31,7 @@ impl Pipeline {
                     json!({"record_id": m.record_id, "record_revision": m.record_revision,
                     "original_automatic":m.original_automatic,"manual_note":m.manual_note,
                     "round_id": m.round_id, "seq": m.seq, "display": m.display, "text": m.text,
+                    "delegation":m.delegation,
                     "status": m.status, "detail": m.detail})
                 })
                 .collect();
@@ -108,7 +109,7 @@ fn who_whats(board: &AllocationSnapshot) -> Vec<Value> {
         .user_summaries
         .iter()
         .map(|summary| {
-            json!({"display": summary.display_name, "identity": summary.user_id.0,
+            json!({"user_id": summary.user_id.0, "display": summary.display_name, "identity": summary.user_id.0,
             "items": summary.items.iter().map(|item| json!({"name": item.item_name,
                 "qty": item.quantity})).collect::<Vec<_>>()})
         })

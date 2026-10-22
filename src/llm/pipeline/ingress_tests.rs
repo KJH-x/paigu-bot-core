@@ -153,7 +153,7 @@ async fn proxy_children_keep_distinct_receipts_after_restart() {
     let cfg = state.cfg.get().await;
     let binding = IngressBinding::from_config(&cfg);
     let event = stamped("排 徽章 甲 1 代成员02排:徽章 甲 1", 1000);
-    assert!(proxy_segments(&event.text).is_some());
+    assert!(proxy::segments(&cfg, &event).is_some());
     state
         .pipeline
         .deliver(&binding, event.clone())

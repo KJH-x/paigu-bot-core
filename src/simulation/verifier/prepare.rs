@@ -59,6 +59,7 @@ pub(super) async fn prepare(
             status: String::new(),
             detail: String::new(),
             sender_user_id: None,
+            delegation: None,
             ingress: None,
             sender_nickname: None,
             processing: Some(ProcessingHistory::default()),

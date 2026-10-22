@@ -527,6 +527,7 @@ fn event(user_id: &str, nickname: &str, text: &str, timestamp_ms: i64) -> Incomi
         timestamp_ms,
         is_admin: false,
         sender_user_id: None,
+        delegation: None,
         ingress: None,
         sender_nickname: None,
         raw: None,
@@ -1066,13 +1067,24 @@ async fn ambiguous_bare_subitem_is_first_matched_not_need_confirm() {
 
 #[test]
 fn proxy_segments_split_mixed_message() {
-    let segs = proxy_segments("成员01：旅骨通行证1 代成员02排:人事部简历1").unwrap();
-    assert_eq!(segs.len(), 2, "{segs:?}");
-    assert!(segs[0].0.is_none());
-    assert!(segs[0].1.contains("旅骨通行证"));
-    assert_eq!(segs[1].0.as_deref(), Some("成员02"));
-    assert!(segs[1].1.contains("人事部简历"));
-    assert!(proxy_segments("排 通行证 1").is_none());
+    let mut cfg = base_config();
+    cfg.members.cache_path = std::env::temp_dir()
+        .join(format!("absent-proxy-{}", uuid::Uuid::new_v4()))
+        .display()
+        .to_string();
+    let input = event(
+        "u1",
+        "成员01",
+        "成员01：旅骨通行证1 代成员02排:人事部简历1",
+        1000,
+    );
+    let segs = proxy::segments(&cfg, &input).unwrap();
+    assert_eq!(segs.len(), 2);
+    assert!(segs[0].target.is_none());
+    assert!(segs[0].text.contains("旅骨通行证"));
+    assert_eq!(segs[1].target.as_deref(), Some("成员02"));
+    assert!(segs[1].text.contains("人事部简历"));
+    assert!(proxy::segments(&cfg, &event("u1", "成员01", "排 通行证 1", 1000)).is_none());
 }
 
 #[tokio::test]

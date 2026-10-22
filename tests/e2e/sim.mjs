@@ -17,6 +17,7 @@ import { verifyScopedSettings } from './scoped-settings.mjs';
 import { verifyPolicyReturn } from './message-policy-return.mjs';
 import { verifyMemberBoundaries } from './member-boundaries.mjs';
 import { verifyMemberPullHealth } from './member-pull.mjs';
+import { verifyProxyAttribution } from './proxy-attribution.mjs';
 import { verifySettlementReview } from './settlement-review.mjs';
 import { verifyReplayGraph } from './replay-graph.mjs';
 import { verifyDraftConcurrency } from './draft-concurrency.mjs';
@@ -732,6 +733,7 @@ function buildCases() {
     { name: '权限设置携草稿返回、筛选定位、复盘到处理与版本冲突', fn: verifyPolicyReturn },
     { name: '成员请求上下文、只读建议预览、迟到保护与断连接收器', fn: verifyMemberBoundaries },
     { name: '成员每日计划、失败恢复、忙碌状态与草稿保护', fn: verifyMemberPullHealth },
+    { name: '具名与群外代排归属、原发言溯源和资格说明', fn: verifyProxyAttribution },
     { name: '结算来源复核、保留订单、问题定位、独立规则与并发守卫', fn: verifySettlementReview },
     { name: '关系图商品聚焦分组、完整提示、键盘定位与异步视图保留', fn: verifyReplayGraph },
     { name: '代填取消、乱序迟到、记录冲突、超时与锁定只读', fn: verifyDraftConcurrency },

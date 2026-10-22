@@ -32,6 +32,7 @@ pub(super) struct State {
 
 #[derive(Clone)]
 pub(super) struct MessageRecord {
+    pub(super) delegation: Option<crate::bus::Delegation>,
     pub(super) original_automatic: Option<crate::messages::processing::AutomaticSummary>,
     pub(super) manual_note: Option<String>,
     pub(super) record_id: String,
@@ -48,6 +49,7 @@ pub(super) struct MessageRecord {
 impl MessageRecord {
     pub(super) fn from_log(record: &LogMessageRecord, round_id: &str, display: &str) -> Self {
         Self {
+            delegation: record.delegation.clone(),
             original_automatic: crate::messages::processing::original_summary(record),
             manual_note: None,
             record_id: record.record_id.clone(),
@@ -176,6 +178,7 @@ impl Pipeline {
             .messages
             .iter()
             .map(|message| MessageRecord {
+                delegation: message.delegation.clone(),
                 original_automatic: message.original_automatic.clone(),
                 manual_note: message.manual_note.clone(),
                 record_id: message.record_id.clone(),
@@ -231,6 +234,7 @@ impl Pipeline {
                     "round_id": m.round_id,
                     "seq": m.seq,
                     "user_id": m.user_id,
+                    "delegation": m.delegation,
                     "display": m.display,
                     "text": m.text,
                     "status": m.status,
@@ -246,7 +250,8 @@ impl Pipeline {
             return Vec::new();
         };
 
-        let mut grouped: BTreeMap<String, (String, BTreeMap<String, u32>)> = BTreeMap::new();
+        let mut grouped: BTreeMap<(String, String), (String, BTreeMap<String, u32>)> =
+            BTreeMap::new();
         for summary in &snapshot.user_summaries {
             let uid = summary.user_id.0.clone();
             let display = state
@@ -260,7 +265,7 @@ impl Pipeline {
                 .cloned()
                 .unwrap_or_else(|| display.clone());
             let entry = grouped
-                .entry(display)
+                .entry((display, uid))
                 .or_insert_with(|| (identity, BTreeMap::new()));
             for item in &summary.items {
                 *entry.1.entry(item.item_name.clone()).or_insert(0) += item.quantity;
@@ -269,12 +274,12 @@ impl Pipeline {
 
         grouped
             .into_iter()
-            .map(|(display, (identity, items))| {
+            .map(|((display, uid), (identity, items))| {
                 let items: Vec<Value> = items
                     .into_iter()
                     .map(|(name, qty)| json!({ "name": name, "qty": qty }))
                     .collect();
-                json!({ "display": display, "identity": identity, "items": items })
+                json!({ "user_id": uid, "display": display, "identity": identity, "items": items })
             })
             .collect()
     }
