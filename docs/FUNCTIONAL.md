@@ -10,7 +10,7 @@
 - Gateway 接收 OneBot 反向 WS，检查群消息、白名单、非空及成员限制，群名片优先。[`decide_route`](../src/gateway/onebot/mod.rs)、[`parse_identity`](../src/gateway/onebot/mod.rs)。
 - 昵称清洗统一调用 [`clean_nickname`](../src/parser/normalize.rs)：全角归一，首个括号或空白截断；代理语义另保留身份，不能靠改显示名取得管理员资格。
 - `send_*` 仅在 `reply_enabled=true` 且动作属于允许名单时才可发送；默认关闭。成员拉取是显式受限的只读动作，`reply` 字段不代表实际群回复。[`Gateway::send_action`](../src/gateway/ws_server/mod.rs)。
-- 当前 Gateway 对通过路由的消息分别派任务，业务 writer 串行不等于入站有界，也不保证任务加锁即到达顺序。有界入站仍属 E4，不能宣称已实现。[`Gateway::on_text`](../src/gateway/ws_server/mod.rs)。
+- Gateway 先本地持久接收，再以容量1合并唤醒驱动单 worker；等待业务不阻塞网络 echo，当前轮按接收提交序号处理。失败暂停保留文件，状态/重试在系统设置接入分区；磁盘不是有限队列，未落盘帧与断电不作绝对无丢失承诺。合同及隔离证据见 [持久入站](./SPEC-DURABLE-INTAKE.md)。[`Gateway::on_text`](../src/gateway/ws_server/mod.rs)。
 - HTTP 仅监听 `127.0.0.1`，默认21081；没有公网鉴权。不可直接暴露管理 API。[`serve`](../src/api/mod.rs)。
 
 ## 2. 自动理解、权限与确定性排谷

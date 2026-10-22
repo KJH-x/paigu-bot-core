@@ -156,6 +156,14 @@ pub async fn activate_round(
             "mode 必须是 continue|fresh|replay".to_string(),
         ));
     }
+    let _ingress_fence = if mode == "fresh" {
+        Some(state.messages.ingress_commit_guard().await)
+    } else {
+        None
+    };
+    if mode == "fresh" {
+        super::configuration::ensure_no_pending_ingress(&state.messages, &id)?;
+    }
 
     let mut round = rounds::read_round(&id)
         .ok_or_else(|| ServiceError::NotFound(format!("轮次不存在：{id}")))?;
@@ -320,6 +328,7 @@ pub async fn setup_round(
         }
     });
 
+    let previous_binding = (base.group_id.clone(), base.category);
     let round = merge_setup(&id, base, &body);
 
     let mut issues = check_issues(&round);
@@ -360,6 +369,10 @@ pub async fn setup_round(
     }
 
     if !is_active {
+        let _fence = state.messages.ingress_commit_guard().await;
+        if previous_binding != (round.group_id.clone(), round.category) {
+            super::configuration::ensure_no_pending_ingress(&state.messages, &id)?;
+        }
         rounds::write_round(&round).map_err(|e| ServiceError::Internal(e.into()))?;
     }
 
@@ -450,6 +463,8 @@ pub async fn delete_round(state: &ApiState, id: &str) -> Result<Value, ServiceEr
     if !path.exists() {
         return Err(ServiceError::NotFound(format!("轮次不存在：{id}")));
     }
+    let _fence = state.messages.ingress_commit_guard().await;
+    super::configuration::ensure_no_pending_ingress(&state.messages, &id)?;
     std::fs::remove_file(&path).map_err(|e| ServiceError::Internal(e.into()))?;
     Ok(json!({ "ok": true, "removed": id }))
 }

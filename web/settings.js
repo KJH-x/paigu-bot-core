@@ -7,6 +7,22 @@
   function setVal(id,value){$(id).value=value==null?'':value;}
   function setRev(){$('rev-badge').textContent='配置 v'+(state.revision==null?'—':state.revision);}
   function setConn(kind,text){$('conn-badge').textContent=text;$('conn-badge').className='status-badge '+kind;}
+  function paintIntake(workflow){
+    state.intakeContext=workflow?{round_id:workflow.round_id,config_revision:workflow.revision}:null;
+    var intake=workflow&&workflow.gateway&&workflow.gateway.intake;
+    $('intake-status').textContent=!intake?'消息处理状态不可读':
+      (intake.paused||intake.last_error?'处理已暂停：'+(intake.last_error||'等待恢复'):
+      intake.worker_running?'处理器运行中':'处理器尚未启动')+'；本轮待处理 '+((intake.pending_by_round||{})[workflow.round_id]||0)+' 条，总待处理 '+intake.pending+' 条';
+    $('intake-retry').disabled=!!state.retryingIntake||!intake||!(intake.paused||intake.last_error);
+  }
+  function retryIntake(){
+    if(state.retryingIntake||!state.intakeContext)return;
+    state.retryingIntake=true;$('intake-retry').disabled=true;
+    P.post('/api/gateway/intake/retry',state.intakeContext).then(function(){
+      P.toast('已请求继续未完成消息；请检查处理状态','ok');
+    }).catch(function(error){banner('未恢复：'+P.errorText(error),true);})
+      .finally(function(){state.retryingIntake=false;if(window.PAIGU_SHELL)window.PAIGU_SHELL.refresh();});
+  }
   var fields={
     gateway:[
       ['gw-bind','gateway.bind','text'],['gw-heartbeat','gateway.heartbeat_secs','number'],
@@ -146,6 +162,8 @@
     $('load').textContent='重新读取服务器值';
     $('load').addEventListener('click',function(){P.protectAction(load).catch(function(){});});
     $('reload').addEventListener('click',reloadDisk);
+    $('intake-retry').addEventListener('click',retryIntake);
+    if(window.PAIGU_SHELL)window.PAIGU_SHELL.onWorkflow(paintIntake);
     $('snap-export').addEventListener('click',exportSnapshot);
     $('snap-import').addEventListener('click',function(){importSnapshot(false);});
     $('snap-apply').addEventListener('click',function(){importSnapshot(true);});

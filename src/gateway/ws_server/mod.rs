@@ -16,8 +16,19 @@ use crate::messages::MessageLog;
 use crate::settings::ConfigStore;
 
 use super::onebot::{self, RouteDecision, RouteKind, RouteMessageEvent, RoutePolicy};
+mod intake;
 
 type ClientTx = mpsc::UnboundedSender<WsMessage>;
+
+impl Drop for Gateway {
+    fn drop(&mut self) {
+        if let Ok(worker) = self.worker.get_mut() {
+            if let Some(worker) = worker.take() {
+                worker.abort();
+            }
+        }
+    }
+}
 
 pub struct Gateway {
     cfg: Arc<ConfigStore>,
@@ -29,11 +40,29 @@ pub struct Gateway {
     listening: AtomicBool,
     bound_addr: Mutex<String>,
     last_error: Mutex<Option<String>>,
+    intake: Arc<intake::Intake>,
+    worker: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Gateway {
+    fn start_worker(self: &Arc<Self>) {
+        let mut worker = self.worker.lock().unwrap();
+        if worker.is_none() {
+            if let Some(receiver) = self.intake.receiver() {
+                *worker = Some(tokio::spawn(intake::run(
+                    self.intake.clone(),
+                    self.cfg.clone(),
+                    self.sink.clone(),
+                    self.messages.clone(),
+                    Arc::downgrade(self),
+                    receiver,
+                )));
+            }
+        }
+    }
     pub fn new(cfg: Arc<ConfigStore>, sink: Arc<dyn EventSink>) -> Arc<Self> {
         let messages = sink.messages();
+        let intake = intake::Intake::new(&messages);
         Arc::new(Self {
             cfg,
             sink,
@@ -44,10 +73,13 @@ impl Gateway {
             listening: AtomicBool::new(false),
             bound_addr: Mutex::new(String::new()),
             last_error: Mutex::new(None),
+            intake,
+            worker: Mutex::new(None),
         })
     }
 
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
+        self.start_worker();
         loop {
             let bind = self.cfg.get().await.gateway.bind.clone();
             let addr: SocketAddr = match bind.parse() {
@@ -130,12 +162,46 @@ impl Gateway {
     }
 
     pub async fn status(&self) -> Value {
+        let mut intake = self.intake.status().await;
+        intake["worker_running"] = json!(self
+            .worker
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|worker| !worker.is_finished()));
+        if intake["pending"].as_u64().unwrap_or(0) > 0 && intake["worker_running"] == false {
+            intake["paused"] = json!(true);
+            if intake["last_error"].is_null() {
+                intake["last_error"] =
+                    json!("消息处理器未运行；本地待处理记录已保留，请检查后重试");
+            }
+        }
         json!({
             "listening": self.listening.load(Ordering::SeqCst),
             "bound_addr": self.bound_addr.lock().unwrap().clone(),
             "clients": self.clients.lock().unwrap().len(),
             "last_error": self.last_error.lock().unwrap().clone(),
+            "intake": intake,
         })
+    }
+
+    pub async fn retry_intake(self: &Arc<Self>) -> Value {
+        self.intake.retry().await;
+        {
+            let mut worker = self.worker.lock().unwrap();
+            if worker.as_ref().is_some_and(|worker| worker.is_finished()) {
+                worker.take();
+            }
+        }
+        {
+            let mut error = self.last_error.lock().unwrap();
+            if error.as_deref() == Some("入站记录保存失败，已停止此连接；未跳过本地待处理数据")
+            {
+                *error = None;
+            }
+        }
+        self.start_worker();
+        self.status().await
     }
 
     fn set_error(&self, msg: String) {
@@ -186,7 +252,10 @@ impl Gateway {
         stream: TcpStream,
         client_id: u64,
     ) -> anyhow::Result<()> {
-        let ws = tokio_tungstenite::accept_async(stream).await?;
+        let limits = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+            .max_message_size(Some(1024 * 1024))
+            .max_frame_size(Some(1024 * 1024));
+        let ws = tokio_tungstenite::accept_async_with_config(stream, Some(limits)).await?;
         let (mut write, mut read) = ws.split();
 
         let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
@@ -222,7 +291,10 @@ impl Gateway {
                 msg = read.next() => {
                     match msg {
                         Some(Ok(WsMessage::Text(text))) => {
-                            self.on_text(text.as_str()).await;
+                            if self.on_text(text.as_str()).await.is_err() {
+                                self.set_error("入站记录保存失败，已停止此连接；未跳过本地待处理数据".into());
+                                break;
+                            }
                         }
                         Some(Ok(WsMessage::Ping(data))) => {
                             let clients = self.clients.lock().unwrap();
@@ -250,89 +322,54 @@ impl Gateway {
         Ok(())
     }
 
-    async fn on_text(self: &Arc<Self>, text: &str) {
+    async fn on_text(self: &Arc<Self>, text: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(text.len() <= 1024 * 1024, "入站帧过大，未保存");
         let val: Value = match serde_json::from_str(text) {
             Ok(v) => v,
             Err(_) => {
                 debug!(frame = %onebot::sanitize(text), "gateway drop: unparsable frame");
-                return;
+                return Ok(());
             }
         };
 
         if self.dispatch_response(&val) {
-            return;
+            return Ok(());
         }
 
         let ev: RouteMessageEvent = match serde_json::from_value(val.clone()) {
             Ok(e) => e,
             Err(_) => {
                 debug!("gateway drop: not a onebot event");
-                return;
+                return Ok(());
             }
         };
 
-        let _writer = self.messages.write_guard().await;
+        let _accept = self.messages.ingress_accept_guard().await;
         let cfg = self.cfg.get().await;
         let policy = RoutePolicy {
             whitelist_groups: cfg.gateway.whitelist_groups.clone(),
             whitelist_members: cfg.gateway.whitelist_members.clone(),
         };
 
-        match onebot::decide_route(&ev, &policy) {
-            RouteKind::Drop => {
-                let reason = match onebot::decide_route_with_reason(&ev, &policy) {
-                    RouteDecision::Drop(reason) => reason,
-                    RouteDecision::Message => "not_routable".to_string(),
-                };
-                debug!(
-                    post_type = %ev.post_type,
-                    group_id = %onebot::group_id_string(&ev).unwrap_or_default(),
-                    reason = %reason,
-                    "gateway drop: not routable"
-                );
-                let rec =
-                    onebot::to_message_record(&ev, &format!("drop:{reason}"), "Dropped", &reason);
-                if let Err(e) = self.messages.append(&cfg.round.round_id, &rec).await {
-                    warn!(error = %e, "failed to persist dropped message");
-                }
-                // C-3：被丢弃的事件同样保留原始 JSON
-                if let Ok(raw) = serde_json::to_value(&ev) {
-                    if let Err(e) = self
-                        .messages
-                        .append_raw_event(&cfg.round.round_id, &raw)
-                        .await
-                    {
-                        warn!(error = %e, "failed to persist dropped raw event");
-                    }
-                }
-            }
-            RouteKind::Message => {
-                // 以表情回应已收到的消息（`set_msg_emoji_like`），不发送文本。
-                if let (Some(emoji_id), Some(message_id)) =
-                    (cfg.gateway.react_emoji_id, ev.message_id.clone())
-                {
-                    let gw = self.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = gw
-                            .dispatch(
-                                "set_msg_emoji_like",
-                                json!({ "message_id": message_id, "emoji_id": emoji_id }),
-                            )
-                            .await
-                        {
-                            warn!(error = %e, "failed to react with emoji");
-                        }
-                    });
-                }
-                let incoming = onebot::to_incoming_event(&ev);
-                let sink = self.sink.clone();
-                tokio::spawn(async move {
-                    sink.handle(incoming).await;
-                });
-            }
+        let drop_reason = match onebot::decide_route(&ev, &policy) {
+            RouteKind::Message => None,
+            RouteKind::Drop => Some(match onebot::decide_route_with_reason(&ev, &policy) {
+                RouteDecision::Drop(reason) => reason,
+                RouteDecision::Message => "not_routable".into(),
+            }),
+        };
+        if let Err(error) = self.intake.accept_raw(&cfg, ev, drop_reason, val).await {
+            self.intake
+                .fail("入站保存失败；已保存的待处理记录未清空")
+                .await;
+            return Err(error);
         }
+        self.start_worker();
+        Ok(())
     }
 }
 
+#[cfg(test)]
+mod intake_tests;
 #[cfg(test)]
 mod tests;

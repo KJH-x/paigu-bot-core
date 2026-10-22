@@ -167,6 +167,7 @@ pub async fn create_message(state: &ApiState, body: CreateInput) -> Result<Value
         status: body.status.unwrap_or_else(|| "Pending".to_string()),
         detail: body.detail.unwrap_or_default(),
         sender_user_id: None,
+        ingress: None,
         sender_nickname: None,
     };
     validate_record(&rec).map_err(ServiceError::BadRequest)?;
@@ -566,6 +567,7 @@ mod tests {
             status: "Applied".to_string(),
             detail: "claim".to_string(),
             sender_user_id: None,
+            ingress: None,
             sender_nickname: None,
         }
     }

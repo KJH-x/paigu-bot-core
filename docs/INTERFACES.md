@@ -504,3 +504,9 @@ MP-1 核心接线已通过隔离回归，尚非完整工作流：消息日志增
 CLI参数与三个输出文件保留，输入显式 `fixture_version:2` 使用当前规则；缺省1保持历史夹具未支持改单的解释，不借迁移重解释旧样本。两者均经 `prepare_with_catalog` → `replay_prepared` → 当前compute/政策/生效行/分配；没有旧ReplayEngine执行路径。目录/初始优先权必须同轮且记录身份完整唯一，禁用模型/回复、空成员cache路径，不读ConfigStore或真实缓存。
 
 结果保留原字段，新增dropped_count/merged_count/error_count；版本从0按事件数增长，取消计入，input_message_count实际消息数，replay.final_settlement回填实际最终结算。每步diff可选subitem_id区分款式、包含消失格与同用户换认购/策略，顺序固定。CN来自显式夹具，非CN称呼按当步最新有效记录；重复/Drop不污染称呼。详情及回归边界见 [DEVELOPMENT](./DEVELOPMENT.md)。本变动不开放公网或真实接入，也不改人工事务/冻结产物HTTP合同。
+
+### 8.11 本地持久入站（2026-10-22）
+
+Gateway不再逐消息spawn业务任务或在网络读循环等共同writer；先原子保存私有接收文件，以容量1唤醒驱动单worker。`EventSink::deliver(binding,event)` 返回 Committed/Deferred 或错误；生产Pipeline在writer内重验轮次/群/类别。IncomingEvent与MessageRecord新增可选 ingress 身份，旧记录None，原自动输入指纹不改。按帧与子项身份恢复，不混同上游重复message_id；原始JSON及目标日志同步后才确认，完整失败边界见 [持久入站](./SPEC-DURABLE-INTAKE.md)。
+
+gateway/status及workflow.gateway、board.status新增intake：pending、pending_by_round、wake_capacity=1、paused、last_error、worker_running。`POST /api/gateway/intake/retry` 必需round_id/config_revision且拒绝未知字段；共同writer内上下文不符409 intake_context_changed，不切轮、不改配置、不批量重解析。前端状态警告直达系统设置接入分区，可键盘恢复。积压轮次的fresh/删除/同轮群类别变更/快照导出及应用/测试reset拒绝409 pending_ingress。快照是完成消息切面，非整个待处理区备份。

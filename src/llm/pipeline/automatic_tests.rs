@@ -96,6 +96,7 @@ pub(super) fn incoming(text: &str, ts: i64) -> IncomingEvent {
         timestamp_ms: ts,
         is_admin: false,
         sender_user_id: None,
+        ingress: None,
         sender_nickname: None,
         raw: None,
     }

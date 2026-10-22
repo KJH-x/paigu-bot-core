@@ -22,6 +22,52 @@ export async function verifyScopedSettings(page,ctx){
     await page.locator('#form:not(.hidden)').waitFor();
     await page.evaluate(()=>PAIGU_SHELL.theme.set('light'));await page.waitForTimeout(200);
     check(await page.locator('#sec-gateway').isVisible()&&!await page.locator('#sec-llm').isVisible(),'one settings task visible, gateway default');
+    await page.waitForFunction(()=>document.querySelector('#intake-status').textContent.includes('待处理'));
+    check(await page.locator('#intake-retry').isDisabled(),'healthy processing offers no needless retry');
+    const stale=await fetch(ctx.base+'/api/gateway/intake/retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({round_id:'not-current',config_revision:initial.revision})});
+    check(stale.status===409,'retry rejects a different round instead of processing its input');
+    for(const [body,status] of [
+      [{round_id:initial.config.round.round_id,config_revision:initial.revision+1},409],
+      [{round_id:initial.config.round.round_id,config_revision:initial.revision,unexpected:true},422]
+    ]){
+      const response=await fetch(ctx.base+'/api/gateway/intake/retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      check(response.status===status,'retry rejects stale revisions and unknown fields');
+    }
+    let recoveryContext=null;
+    // The fault is a UI-only fixture; real durable recovery is tested with blocked
+    // and failing sinks in Rust, never by damaging this server's message journal.
+    const pausedWorkflow=async route=>{
+      const response=await route.fetch(),body=await response.json();
+      recoveryContext={round_id:body.round_id,config_revision:body.revision};
+      body.gateway.intake={...body.gateway.intake,paused:true,last_error:'占位故障，请检查后重试',pending:2,pending_by_round:{[body.round_id]:2}};
+      await route.fulfill({response,json:body});
+    };
+    await page.route('**/api/workflow',pausedWorkflow);
+    await page.evaluate(()=>PAIGU_SHELL.refresh());
+    await page.waitForFunction(()=>!document.querySelector('#intake-retry').disabled);
+    check((await page.locator('#wf-intake').getAttribute('href')).includes('sec-gateway'),'global warning reaches the actual recovery task');
+    for(const theme of ['light','dark']){
+      await page.evaluate(t=>PAIGU_SHELL.theme.set(t),theme);
+      await page.waitForTimeout(200); // Existing controls animate their background during a theme change.
+      check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'intake warning does not overflow desktop');
+      const contrast=await page.evaluate(()=>{
+        const luminance=color=>{
+          const channels=color.match(/[\d.]+/g).slice(0,3).map(v=>Number(v)/255).map(v=>v<=0.04045?v/12.92:((v+0.055)/1.055)**2.4);
+          return channels[0]*0.2126+channels[1]*0.7152+channels[2]*0.0722;
+        };
+        return ['gw-bind','intake-retry'].map(id=>{
+          const style=getComputedStyle(document.getElementById(id)),a=luminance(style.color),b=luminance(style.backgroundColor);
+          return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
+        });
+      });
+      check(contrast.every(value=>value>=4.5),'recovery control and input text remain legible after theme transitions');
+      await capture('settings-intake-paused-'+theme);
+    }
+    const restored=page.waitForRequest(r=>r.url().endsWith('/api/gateway/intake/retry')&&r.method()==='POST');
+    await page.unroute('**/api/workflow',pausedWorkflow);
+    await page.locator('#intake-retry').focus();await page.keyboard.press('Enter');
+    check(JSON.stringify((await restored).postDataJSON())===JSON.stringify(recoveryContext),'keyboard retry submits exactly the observed round and revision');
+    await page.waitForFunction(()=>document.querySelector('#intake-retry').disabled&&!document.querySelector('#intake-status').textContent.includes('暂停'));
     const heartbeat=initial.config.gateway.heartbeat_secs+1, model=initial.config.llm.model+'-draft';
     await page.locator('#gw-heartbeat').fill(String(heartbeat));
     await page.locator('.section-nav a[href="#sec-llm"]').click();

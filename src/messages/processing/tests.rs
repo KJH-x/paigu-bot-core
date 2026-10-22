@@ -16,6 +16,7 @@ fn record() -> MessageRecord {
         status: "Applied".to_string(),
         detail: String::new(),
         sender_user_id: None,
+        ingress: None,
         sender_nickname: None,
         processing: None,
     }

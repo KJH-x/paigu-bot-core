@@ -56,6 +56,11 @@
         <div class="panel-head"><h2>接入</h2><span class="spacer"></span><button id="save-gateway" class="primary">保存接入设置</button></div>
         <div class="panel-body">
           <p class="hint">只改变接入配置，不保存其他分区。监听地址变更可能需要另行重启服务，本页不执行重启。</p>
+          <div class="workspace-notice" aria-label="消息接收处理">
+            <p id="intake-status" role="status">正在读取消息处理状态…</p>
+            <p class="hint">已接收消息先保存在本机。故障时暂停处理；恢复只继续未完成的消息，不批量重解析已有结果。尚未保存理解结果的消息可能再次请求模型，其他轮次的积压需激活该轮处理。</p>
+            <button id="intake-retry" disabled>重试未完成消息</button>
+          </div>
           <div class="split">
             <label class="field"><span>监听地址</span><input id="gw-bind" required /></label>
             <label class="field"><span>心跳间隔（秒）</span><input id="gw-heartbeat" type="number" min="1" required /></label>

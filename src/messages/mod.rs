@@ -19,6 +19,8 @@ pub fn new_record_id() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingress: Option<crate::bus::IngressSource>,
     #[serde(default)]
     pub record_id: String,
     #[serde(default = "default_record_revision")]
@@ -253,11 +255,75 @@ pub struct MessageLog {
     dir: PathBuf,
     events_dir: PathBuf,
     writer: tokio::sync::Mutex<()>,
+    ingress_fence: tokio::sync::RwLock<()>,
     #[cfg(test)]
     durable_fault: std::sync::atomic::AtomicU8,
 }
 
 impl MessageLog {
+    pub(crate) fn ingress_dir(&self) -> PathBuf {
+        self.events_dir.join("_ingress")
+    }
+
+    pub(crate) async fn ingress_accept_guard(&self) -> tokio::sync::RwLockReadGuard<'_, ()> {
+        self.ingress_fence.read().await
+    }
+    pub(crate) async fn ingress_commit_guard(&self) -> tokio::sync::RwLockWriteGuard<'_, ()> {
+        self.ingress_fence.write().await
+    }
+    /// Caller holds the common writer. Flush both durable destinations before
+    /// removing the independent intake copy, including a previous partial commit.
+    pub(crate) fn sync_ingress_commit(&self, round: &str) -> anyhow::Result<()> {
+        for path in [self.store_for(round).path, self.event_path_for(round)] {
+            match std::fs::OpenOptions::new().write(true).open(path) {
+                Ok(file) => file.sync_all()?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    }
+    pub(crate) async fn read_ingress_records(
+        &self,
+        round: &str,
+    ) -> anyhow::Result<Vec<MessageRecord>> {
+        let path = self.store_for(round).path;
+        if path.exists() {
+            for line in std::fs::read_to_string(path)?
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+            {
+                anyhow::ensure!(
+                    serde_json::from_str::<MessageRecord>(line).is_ok(),
+                    "消息日志有损坏行；未跳过后重试入站消息"
+                );
+            }
+        }
+        self.read_events_strict(round).await?;
+        let records = self.read_only(round).await?;
+        let mut ids = std::collections::HashSet::new();
+        anyhow::ensure!(
+            records.iter().all(|record| ids.insert(&record.record_id)),
+            "消息日志身份重复；未重试入站消息"
+        );
+        Ok(records)
+    }
+    pub(crate) fn has_pending_ingress(&self, round: &str) -> anyhow::Result<bool> {
+        anyhow::ensure!(
+            crate::settings::rounds::is_valid_round_id(round),
+            "待处理轮次标识无效"
+        );
+        let directory = self.ingress_dir().join(round);
+        if !directory.exists() {
+            return Ok(false);
+        }
+        for entry in std::fs::read_dir(directory)? {
+            if entry?.path().extension().and_then(|e| e.to_str()) != Some("tmp") {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
     pub(crate) async fn write_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.writer.lock().await
     }
@@ -283,6 +349,7 @@ impl MessageLog {
             dir,
             events_dir: events_dir.into(),
             writer: tokio::sync::Mutex::new(()),
+            ingress_fence: tokio::sync::RwLock::new(()),
             #[cfg(test)]
             durable_fault: std::sync::atomic::AtomicU8::new(0),
         })

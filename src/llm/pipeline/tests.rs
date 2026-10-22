@@ -526,6 +526,7 @@ fn event(user_id: &str, nickname: &str, text: &str, timestamp_ms: i64) -> Incomi
         timestamp_ms,
         is_admin: false,
         sender_user_id: None,
+        ingress: None,
         sender_nickname: None,
         raw: None,
     }

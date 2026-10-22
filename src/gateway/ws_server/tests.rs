@@ -11,7 +11,7 @@ impl EventSink for NullSink {
     async fn handle(&self, _ev: IncomingEvent) {}
 
     fn messages(&self) -> Arc<MessageLog> {
-        let dir = std::env::temp_dir().join("paigu-null-sink");
+        let dir = std::env::temp_dir().join(format!("paigu-null-sink-{}", uuid::Uuid::new_v4()));
         MessageLog::new(dir.clone(), dir.join("events"))
     }
 }
@@ -26,7 +26,7 @@ fn test_gateway() -> Arc<Gateway> {
     Gateway::new(test_store(), Arc::new(NullSink))
 }
 
-fn test_store_with(f: impl FnOnce(&mut crate::settings::AppConfig)) -> Arc<ConfigStore> {
+pub(super) fn test_store_with(f: impl FnOnce(&mut crate::settings::AppConfig)) -> Arc<ConfigStore> {
     let mut cfg = crate::settings::default_config();
     f(&mut cfg);
     let path =
@@ -144,7 +144,7 @@ async fn reacts_with_emoji_on_routed_message() {
         "sender": { "user_id": 10000, "nickname": "甲", "role": "member" },
         "time": 1000
     });
-    gw.on_text(&event.to_string()).await;
+    gw.on_text(&event.to_string()).await.unwrap();
 
     let mut frame = None;
     while let Ok(Some(WsMessage::Text(text))) =
@@ -181,7 +181,7 @@ async fn no_emoji_reaction_when_disabled() {
         "sender": { "user_id": 10000, "nickname": "甲", "role": "member" },
         "time": 1000
     });
-    gw.on_text(&event.to_string()).await;
+    gw.on_text(&event.to_string()).await.unwrap();
 
     let sent = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await;
     assert!(sent.is_err(), "关闭时不应发出任何动作");

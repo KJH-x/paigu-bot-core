@@ -19,6 +19,7 @@ use super::client::{LlmClient, OpenAiClient};
 
 mod admin;
 mod export;
+mod ingress;
 mod llm_parse;
 mod replay_view;
 mod state;
@@ -35,6 +36,8 @@ mod automatic_tests;
 mod boundary_tests;
 #[cfg(test)]
 mod closure_tests;
+#[cfg(test)]
+mod ingress_tests;
 #[cfg(test)]
 mod member_tests;
 #[cfg(test)]
@@ -70,6 +73,7 @@ fn unwrap_forged_envelope(ev: IncomingEvent) -> IncomingEvent {
         timestamp_ms: envelope.timestamp_ms.unwrap_or(ev.timestamp_ms),
         is_admin: envelope.is_admin.unwrap_or(false),
         sender_user_id: None,
+        ingress: ev.ingress,
         sender_nickname: None,
         raw: ev.raw,
     }
@@ -118,6 +122,10 @@ pub(crate) fn gate_nc_multi(cfg: &AppConfig, ev: IncomingEvent) -> Vec<IncomingE
                 timestamp_ms: e.timestamp_ms.unwrap_or(outer_ts),
                 is_admin: e.is_admin.unwrap_or(false),
                 sender_user_id: None,
+                ingress: ev.ingress.as_ref().map(|s| crate::bus::IngressSource {
+                    id: s.id.clone(),
+                    part: format!("{}:nc-{i}", s.part),
+                }),
                 sender_nickname: None,
                 raw: None,
             })
@@ -391,6 +399,10 @@ impl Pipeline {
             let mut seg = ev.clone();
             seg.text = text;
             seg.message_id = format!("{}#proxy{}", ev.message_id, idx);
+            seg.ingress = ev.ingress.as_ref().map(|s| crate::bus::IngressSource {
+                id: s.id.clone(),
+                part: format!("{}:proxy-{idx}", s.part),
+            });
             seg.raw = None;
             if let Some(name) = target {
                 match crate::settings::member_user_id_by_name(&cfg, &name) {
@@ -413,8 +425,13 @@ impl Pipeline {
             if outcome.snapshot.is_some() {
                 snapshot = outcome.snapshot;
             }
+            if statuses.last().is_some_and(|status| status == "Error") {
+                break;
+            }
         }
-        let status = if statuses.iter().any(|s| s == "Applied") {
+        let status = if statuses.iter().any(|s| s == "Error") {
+            "Error".to_string()
+        } else if statuses.iter().any(|s| s == "Applied") {
             "Applied".to_string()
         } else {
             statuses
@@ -431,6 +448,7 @@ impl Pipeline {
         }
     }
 
+    #[cfg(test)]
     pub async fn process(&self, ev: IncomingEvent) -> PipelineOutcome {
         let _serial = self.message_write_guard().await;
         self.process_inner(ev).await
@@ -438,13 +456,16 @@ impl Pipeline {
 
     async fn process_inner(&self, ev: IncomingEvent) -> PipelineOutcome {
         let cfg = self.cfg.get().await;
+        if let Some(outcome) = self.ingress_replay(&cfg, &ev).await {
+            return outcome;
+        }
         if let Some(raw) = &ev.raw {
             if let Err(error) = self
                 .messages
                 .append_raw_event(&cfg.round.round_id, raw)
                 .await
             {
-                warn!("原始事件写入失败: {error}");
+                return self.persistence_failure(&ev, false, error).await;
             }
         }
         if let Some(segments) = proxy_segments(&ev.text) {
@@ -593,11 +614,19 @@ impl Pipeline {
 
     /// 统一接收入口（NC / 测试注入共用，R6）。
     pub async fn ingest(&self, ev: IncomingEvent) -> PipelineOutcome {
+        let _serial = self.message_write_guard().await;
         let cfg = self.cfg.get().await;
-        let events = gate_nc_multi(&cfg, ev);
+        self.ingest_locked(&cfg, ev).await
+    }
+
+    async fn ingest_locked(&self, cfg: &AppConfig, ev: IncomingEvent) -> PipelineOutcome {
+        let events = gate_nc_multi(cfg, ev);
         let mut last: Option<PipelineOutcome> = None;
         for e in events {
-            last = Some(self.ingest_one(&cfg, e).await);
+            last = Some(self.ingest_one(cfg, e).await);
+            if last.as_ref().is_some_and(|o| o.status == "Error") {
+                break;
+            }
         }
         last.unwrap_or(PipelineOutcome {
             status: "Ignored".to_string(),
@@ -610,6 +639,9 @@ impl Pipeline {
 
     /// 单条入站（批次解包后逐条调用）。
     async fn ingest_one(&self, cfg: &AppConfig, mut ev: IncomingEvent) -> PipelineOutcome {
+        if let Some(outcome) = self.ingress_replay(cfg, &ev).await {
+            return outcome;
+        }
         // 非群消息（私聊/临时会话无群号）一律 Dropped，不进入处理（防御性；网关已先拦）。
         if ev.group_id.trim().is_empty() {
             if let Err(error) = self
@@ -646,15 +678,16 @@ impl Pipeline {
             ev.nickname = String::new();
         }
         if !(cfg.merge.enabled && cfg.merge.same_sender) {
-            return self.process(ev).await;
+            return self.process_inner(ev).await;
         }
         self.ingest_merged(cfg.clone(), ev).await
     }
 
     /// 合并摄取（急切 + 更新，R5）：以日志为准 `recompute`，保证 测试==实际、追加==新消息。
-    async fn ingest_merged(&self, _cfg: AppConfig, ev: IncomingEvent) -> PipelineOutcome {
-        let _serial = self.message_write_guard().await;
-        let cfg = self.cfg.get().await;
+    async fn ingest_merged(&self, cfg: AppConfig, ev: IncomingEvent) -> PipelineOutcome {
+        if let Some(outcome) = self.ingress_replay(&cfg, &ev).await {
+            return outcome;
+        }
         let already_seen = self
             .state
             .lock()
@@ -687,12 +720,26 @@ impl Pipeline {
         }
         let mut context = self.processing_context(&cfg, &ev).await;
         let new_record_id = context.record.record_id.clone();
-        if let Err(error) = self
-            .messages
-            .append(&cfg.round.round_id, &context.record)
-            .await
-        {
-            return self.persistence_failure(&ev, false, error).await;
+        let resumed = if let Some(source) = &ev.ingress {
+            self.state.lock().await.ingress_pending.contains_key(source)
+        } else {
+            false
+        };
+        if !resumed {
+            if let Err(error) = self
+                .messages
+                .append(&cfg.round.round_id, &context.record)
+                .await
+            {
+                return self.persistence_failure(&ev, false, error).await;
+            }
+        }
+        if let Some(source) = &ev.ingress {
+            self.state
+                .lock()
+                .await
+                .ingress_pending
+                .insert(source.clone(), context.record.clone());
         }
         let result = async {
             let records = self.messages.read_all(&cfg.round.round_id).await?;
@@ -855,9 +902,11 @@ impl Pipeline {
             status: status.to_string(),
             detail: detail.to_string(),
             sender_user_id: ev.sender_user_id.clone(),
+            ingress: ev.ingress.clone(),
             sender_nickname: ev.sender_nickname.clone(),
         };
         self.messages.append(round_id, &rec).await?;
+        self.mark_ingress(&rec).await;
         Ok(rec)
     }
 
@@ -926,6 +975,31 @@ impl Pipeline {
 impl EventSink for Pipeline {
     async fn handle(&self, ev: IncomingEvent) {
         self.ingest(ev).await;
+    }
+
+    async fn deliver(
+        &self,
+        binding: &crate::bus::IngressBinding,
+        ev: IncomingEvent,
+    ) -> anyhow::Result<crate::bus::Delivery> {
+        let _serial = self.message_write_guard().await;
+        let cfg = self.cfg.get().await;
+        if !binding.matches(&cfg) {
+            return Ok(crate::bus::Delivery::Deferred);
+        }
+        let outcome = self.ingest_locked(&cfg, ev).await;
+        if outcome.status == "Error" {
+            // A failed append may have changed transient seen/sequence state, or
+            // committed an earlier child of this frame. Recover from disk on retry.
+            let mut state = self.state.lock().await;
+            state.ingress_loaded = false;
+            state.ingress_dirty = true;
+        }
+        anyhow::ensure!(
+            outcome.status != "Error",
+            "入站处理未完成，保留本地待处理记录"
+        );
+        Ok(crate::bus::Delivery::Committed)
     }
 
     fn messages(&self) -> Arc<MessageLog> {

@@ -54,6 +54,10 @@ pub struct ExportBody {
 pub async fn snapshot_export(state: &ApiState, body: ExportBody) -> Result<Value, ServiceError> {
     let _serial = state.pipeline.message_write_guard().await;
     let cfg = state.cfg.read().await;
+    {
+        let _fence = state.messages.ingress_commit_guard().await;
+        super::configuration::ensure_no_pending_ingress(&state.messages, &cfg.round.round_id)?;
+    }
     let records = state
         .messages
         .read_only(&cfg.round.round_id)
@@ -237,6 +241,8 @@ pub async fn snapshot_import(state: &ApiState, body: ImportBody) -> Result<Value
     if state.pipeline.is_locked().await || super::settlement::round_locked(&cfg.round.round_id)? {
         return Err(ServiceError::Locked("轮次已锁定，不能应用备份".into()));
     }
+    let _ingress_fence = state.messages.ingress_commit_guard().await;
+    super::configuration::ensure_no_pending_ingress(&state.messages, &cfg.round.round_id)?;
     let audit = crate::domain::event::EventEnvelope {
         event_id: crate::domain::ids::EventId(uuid::Uuid::new_v4().to_string()),
         round_id: crate::domain::ids::RoundId(cfg.round.round_id.clone()),

@@ -76,12 +76,13 @@
   function renderBadges(wf,down){
     var host=$('wf-status');if(!host)return;
     if(down || !wf){host.innerHTML=badge('wf-api','bad','API 未连接')+badge('wf-clients','warn','接收器状态未知');return;}
-    var gw=wf.gateway || {}, clients=gw.clients, locked=!!wf.locked;
+    var gw=wf.gateway || {}, intake=gw.intake||{}, clients=gw.clients, locked=!!wf.locked;
     host.innerHTML=
       badge('wf-round','','激活轮：'+(wf.title || wf.round_id || '—')+(wf.category==='test'?' · 测试':' · 正常'))+
       badge('wf-api','ok','API 正常')+
       badge('wf-listening',gw.listening?'ok':'warn',gw.listening?'接入监听中':'接入未监听')+
       badge('wf-clients',Number(clients)>0?'ok':'warn',Number(clients)>0?'接收器 '+clients:'未连接接收器')+
+      ((intake.paused||intake.last_error||intake.pending)?'<a class="status-badge warn" href="'+esc(window.PAIGU.pageHref('settings.html#sec-gateway'))+'" id="wf-intake">'+esc(intake.paused||intake.last_error?'消息处理暂停':'待处理 '+intake.pending)+'</a>':'')+
       badge('wf-version','','版本 v'+(wf.version == null?'—':wf.version))+
       badge('wf-locked',locked?'warn':'',wf.lock_error?'锁状态不可读 · 暂停写入':'锁定：'+(locked?'是':'否'))+
       badge('wf-phase',wf.phase==null?'warn':'',wf.phase_label || wf.phase || '阶段未配置');

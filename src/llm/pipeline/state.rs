@@ -12,6 +12,11 @@ use super::Pipeline;
 
 #[derive(Default, Clone)]
 pub(super) struct State {
+    pub(super) ingress_seen: HashSet<crate::bus::IngressSource>,
+    pub(super) ingress_pending:
+        std::collections::HashMap<crate::bus::IngressSource, LogMessageRecord>,
+    pub(super) ingress_loaded: bool,
+    pub(super) ingress_dirty: bool,
     pub(super) events: Vec<EventEnvelope>,
     pub(super) messages: Vec<MessageRecord>,
     pub(super) seen: HashSet<String>,
@@ -156,7 +161,9 @@ impl Pipeline {
         let mut seen = HashSet::new();
         let mut identity = std::collections::HashMap::new();
         for record in records {
-            seen.insert(format!("{}::{}", record.group_id, record.message_id));
+            if record.status != "Pending" {
+                seen.insert(format!("{}::{}", record.group_id, record.message_id));
+            }
             let (clean, _) = crate::parser::normalize::clean_nickname(&record.nickname);
             identity.insert(record.user_id.clone(), clean);
         }
@@ -183,6 +190,18 @@ impl Pipeline {
             })
             .collect();
         *state = State {
+            ingress_seen: records
+                .iter()
+                .filter(|r| r.status != "Pending")
+                .filter_map(|r| r.ingress.clone())
+                .collect(),
+            ingress_pending: records
+                .iter()
+                .filter(|r| r.status == "Pending")
+                .filter_map(|r| r.ingress.clone().map(|source| (source, r.clone())))
+                .collect(),
+            ingress_loaded: true,
+            ingress_dirty: false,
             events: result.events.clone(),
             messages,
             seen,

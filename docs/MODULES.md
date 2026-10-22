@@ -12,7 +12,7 @@
 | 项 | 契约 |
 |---|---|
 | `IncomingEvent` | `group_id: String`、`user_id: String`、`nickname: String`（已清洗的 display）、`message_id: String`、`text: String`、`timestamp_ms: i64`、`is_admin: bool`、`raw: serde_json::Value` |
-| `trait EventSink` | `async fn handle(&self, ev: IncomingEvent)`；Gateway 只依赖此 trait |
+| `trait EventSink` | `handle(ev)`；持久入站用 `deliver(binding,ev) -> Result<Delivery>`，生产Pipeline在共同writer内重验绑定；Gateway只依赖此trait |
 | `PipelineOutcome` | `status: String`、`detail: String`、`reply: Option<String>`、`version: i64`、`snapshot: Option<serde_json::Value>`（`serde::Serialize`） |
 
 `status` 取值：`Applied | Duplicate | Ignored | Rejected | NeedConfirm | Error | Merged`（`Merged` = 合并组成员行，2026-10-13）。
@@ -47,7 +47,7 @@
   - 类型 `RouteMessageEvent`（`post_type/message_type/self_id/user_id/group_id/message_id/raw_message/message/sender`）、`RoutePolicy { whitelist_groups }`、`RouteKind { Drop, Message }`。
   - `decide_route(ev, policy) -> RouteKind`：非 `message` / 非 `group` / 非白名单 / 空文本 → `Drop`。
   - `normalize_message`：CQ 码/消息段 → 纯文本；`clean_nickname`：全角归一 + 去括号备注 + 代理写法 `A(代B)`（**昵称清洗的单一真源**，Pipeline 复用）；`parse_identity`、`to_incoming_event`。
-- `ws_server.rs`：`Gateway::new(cfg, sink)`、`run()`（绑定 `gateway.bind`，失败每 2s 重试）、`send_action(action, params)`、`status()`。
+- `ws_server/mod.rs`：Gateway连接/echo/只读动作；`intake.rs` 为本地持久帧、容量1唤醒和单worker，按轮次绑定、失败暂停；`status()` / `retry_intake()` 暴露本地管理状态。完整约束见 [持久入站](./SPEC-DURABLE-INTAKE.md)。
   - **安全**：`send_*` 仅当 `reply_enabled == true` **且** `action ∈ allowed_actions` 时放行，否则 `Err` + `warn!`；非 `send_*` 动作须在 `allowed_actions` 内。
 - `action.rs`：只读动作封装（`get_group_member_list` 等）。
 

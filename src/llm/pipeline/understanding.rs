@@ -49,7 +49,12 @@ impl Pipeline {
         cfg: &AppConfig,
         ev: &IncomingEvent,
     ) -> ProcessingContext {
-        let record = MessageRecord {
+        let pending = if let Some(source) = &ev.ingress {
+            self.state.lock().await.ingress_pending.get(source).cloned()
+        } else {
+            None
+        };
+        let record = pending.unwrap_or_else(|| MessageRecord {
             record_id: crate::messages::new_record_id(),
             record_revision: 1,
             seq: crate::messages::next_seq(),
@@ -64,9 +69,10 @@ impl Pipeline {
             status: "Pending".to_string(),
             detail: String::new(),
             sender_user_id: ev.sender_user_id.clone(),
+            ingress: ev.ingress.clone(),
             sender_nickname: ev.sender_nickname.clone(),
             processing: Some(ProcessingHistory::default()),
-        };
+        });
         let manual_phase =
             crate::replay::session::load_manual_phase(&self.messages, &cfg.round.round_id)
                 .await
@@ -185,7 +191,22 @@ impl Pipeline {
         outcome: ProcessingOutcome,
     ) -> anyhow::Result<MessageRecord> {
         let record = context.completed_record(outcome);
-        self.messages.append(round_id, &record).await?;
+        let resumed = if let Some(source) = &record.ingress {
+            self.state.lock().await.ingress_pending.contains_key(source)
+        } else {
+            false
+        };
+        if resumed {
+            self.messages
+                .update(round_id, &record.record_id, |pending| {
+                    *pending = record.clone()
+                })
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("待恢复消息缺失"))?;
+        } else {
+            self.messages.append(round_id, &record).await?;
+        }
+        self.mark_ingress(&record).await;
         Ok(record)
     }
 }

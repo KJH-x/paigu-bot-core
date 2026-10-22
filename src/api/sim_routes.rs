@@ -132,6 +132,7 @@ fn prepare(msg: &TestMessage, cfg: &AppConfig) -> Prepared {
         timestamp_ms,
         is_admin: msg.is_admin.unwrap_or(false),
         sender_user_id: None,
+        ingress: None,
         sender_nickname: None,
         raw: None,
     }))
@@ -286,6 +287,12 @@ async fn sim_reset(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, Ap
     if !state.cfg.get().await.round.category.is_test() {
         return Err(api_bad_request("仅测试轮可重置模拟状态"));
     }
+    let _fence = state.messages.ingress_commit_guard().await;
+    crate::services::configuration::ensure_no_pending_ingress(
+        &state.messages,
+        &state.cfg.get().await.round.round_id,
+    )
+    .map_err(crate::services::ServiceError::into_api)?;
     state.pipeline.reset_locked().await;
     clear_identities();
     let (version, _) = state.pipeline.board().await;

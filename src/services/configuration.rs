@@ -6,6 +6,18 @@ pub fn business_inputs(cfg: &AppConfig) -> Value {
     crate::messages::transactions::policies(cfg)
 }
 
+pub(crate) fn ensure_no_pending_ingress(
+    messages: &crate::messages::MessageLog,
+    round: &str,
+) -> Result<(), ServiceError> {
+    if messages.has_pending_ingress(round)? {
+        return Err(ServiceError::Conflict(
+            json!({"error":"pending_ingress","message":"该轮次仍有待处理接收消息；请先完成接收处理，未清空或覆盖原数据"}),
+        ));
+    }
+    Ok(())
+}
+
 /// Caller holds the common writer. Prepare the complete next view before the
 /// recoverable config/round commit, then publish only that prepared generation.
 pub(crate) async fn apply_locked(
@@ -61,6 +73,17 @@ pub(crate) async fn apply_locked(
     } else {
         None
     };
+    let identity_changed = previous.round.round_id == next.round.round_id
+        && crate::bus::IngressBinding::from_config(&previous)
+            != crate::bus::IngressBinding::from_config(&next);
+    let _ingress_fence = if identity_changed {
+        Some(state.messages.ingress_commit_guard().await)
+    } else {
+        None
+    };
+    if identity_changed {
+        ensure_no_pending_ingress(&state.messages, &previous.round.round_id)?;
+    }
     let revision = state
         .cfg
         .put(next.clone(), expected)
