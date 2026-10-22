@@ -21,9 +21,11 @@ mod admin;
 mod export;
 mod ingress;
 mod llm_parse;
+mod names;
 mod proxy;
 mod replay_view;
 mod state;
+mod target_modify;
 mod understanding;
 mod view;
 
@@ -49,6 +51,8 @@ mod settlement_tests;
 mod snapshot_tests;
 #[cfg(test)]
 mod suggest_tests;
+#[cfg(test)]
+mod target_modify_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -358,11 +362,13 @@ impl Pipeline {
             }
         }
         if forced.is_none() {
+            forced = target_modify::prepare(&cfg, &mut ev);
+        }
+        if forced.is_none() {
             if let Some(segments) = proxy::segments(&cfg, &ev) {
                 return self.process_proxy_segments(&ev, segments).await;
             }
         }
-        let (identity, _) = crate::parser::normalize::clean_nickname(&ev.nickname);
         let display = ev
             .delegation
             .as_ref()
@@ -370,6 +376,24 @@ impl Pipeline {
             .or_else(|| crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname))
             .unwrap_or_else(|| ev.user_id.clone());
         let mut context = self.processing_context(&cfg, &ev).await;
+        let modify_body = ev
+            .delegation
+            .as_ref()
+            .and_then(|d| d.modify_body())
+            .map(str::to_string);
+        if modify_body.is_some() {
+            match crate::services::settlement::round_locked(&cfg.round.round_id) {
+                Ok(true) => context.manual_phase = Some(crate::round::RoundPhase::Locked),
+                Ok(false) => {}
+                Err(_) => {
+                    forced = Some(crate::messages::processing::ProcessingOutcome::new(
+                        "Error",
+                        "结算锁状态无法验证，未执行管理员改单",
+                        None,
+                    ))
+                }
+            }
+        }
         let seq = context.record.seq;
         {
             let mut state = self.state.lock().await;
@@ -395,8 +419,6 @@ impl Pipeline {
                     )
                     .await;
             }
-            state.display.insert(ev.user_id.clone(), display.clone());
-            state.identity.insert(ev.user_id.clone(), identity);
         }
         if let Some(outcome) = forced {
             context.understanding = crate::messages::processing::Understanding::terminal(
@@ -422,15 +444,15 @@ impl Pipeline {
                 .await;
         }
         let text = ev.text.trim();
-        if text.is_empty() || text.starts_with('/') {
-            if text.starts_with('/') && ev.is_admin && cfg.gateway.admin_commands_enabled {
+        if text.is_empty() || (text.starts_with(['/', '／']) && modify_body.is_none()) {
+            if text.starts_with(['/', '／']) && ev.is_admin && cfg.gateway.admin_commands_enabled {
                 return self
                     .run_admin_command(
                         &cfg.round.round_id,
                         &ev,
                         &display,
                         seq,
-                        text.trim_start_matches('/').trim(),
+                        text.trim_start_matches(['/', '／']).trim(),
                     )
                     .await;
             }
@@ -445,7 +467,7 @@ impl Pipeline {
                 crate::messages::processing::UnderstandingSource::Control,
                 status,
                 detail,
-                text.starts_with('/').then(|| detail.to_string()),
+                text.starts_with(['/', '／']).then(|| detail.to_string()),
             );
             return self
                 .finish(
@@ -457,7 +479,13 @@ impl Pipeline {
                 )
                 .await;
         }
-        context.understanding = self.understand(&cfg, &ev, &context, false).await;
+        let mut understanding_input = ev.clone();
+        if let Some(body) = modify_body {
+            understanding_input.text = format!("改 {body}");
+        }
+        context.understanding = self
+            .understand(&cfg, &understanding_input, &context, false)
+            .await;
         let mut evaluated = crate::replay::session::evaluate_understanding(
             &cfg,
             &context.record,
@@ -488,7 +516,7 @@ impl Pipeline {
                     &ev.user_id,
                 ));
             }
-            let names = state
+            let mut names: std::collections::HashMap<UserId, String> = state
                 .display
                 .iter()
                 .filter_map(|(uid, raw)| {
@@ -496,6 +524,7 @@ impl Pipeline {
                         .map(|name| (UserId(uid.clone()), name))
                 })
                 .collect();
+            names.insert(UserId(ev.user_id.clone()), display.clone());
             let snapshot =
                 rebuild_allocation_snapshot(&cfg.round.to_items(), &events, &eligibilities, &names);
             (events, eligibilities, snapshot)
@@ -516,6 +545,7 @@ impl Pipeline {
         state.eligibilities = eligibilities;
         state.version = version;
         state.snapshot = Some(snapshot);
+        state.remember_name(&cfg, &record, &display, &outcome.status);
         state.messages.push(MessageRecord::from_log(
             &record,
             &cfg.round.round_id,
@@ -586,6 +616,7 @@ impl Pipeline {
         }
         // 匿名代排 `X(代)`：席位填 `发送者(代)`，权限按发送者（`proxy_base`）。
         if crate::parser::coalesce::is_anonymous_proxy(&ev.text)
+            && !ev.text.trim_start().starts_with(['/', '／'])
             && proxy::segments(cfg, &ev).is_none()
             && ev.delegation.is_none()
             && crate::settings::proxy_base(&ev.user_id).is_none()
@@ -612,7 +643,11 @@ impl Pipeline {
             .await
             .seen
             .contains(&format!("{}::{}", ev.group_id, ev.message_id));
-        if already_seen || self.is_locked().await || proxy::segments(&cfg, &ev).is_some() {
+        if already_seen
+            || self.is_locked().await
+            || ev.text.trim_start().starts_with(['/', '／'])
+            || proxy::segments(&cfg, &ev).is_some()
+        {
             return self.process_inner(ev).await;
         }
         let candidate = crate::parser::coalesce::Candidate {
@@ -873,7 +908,11 @@ impl Pipeline {
                     .await
             }
         };
+        let cfg = self.cfg.get().await;
         let mut state = self.state.lock().await;
+        if state.remember_name(&cfg, &record, display, &outcome.status) {
+            state.refresh_snapshot_names(&cfg);
+        }
         state
             .messages
             .push(MessageRecord::from_log(&record, round_id, display));

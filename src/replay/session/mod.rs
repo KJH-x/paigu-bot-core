@@ -512,6 +512,12 @@ pub(crate) fn resolve_display_names(
                 )
             });
         if duplicate
+            || record.status == "Dropped"
+            || record
+                .processing
+                .as_ref()
+                .and_then(|history| history.results.first())
+                .is_some_and(|result| result.original_outcome.status == "Dropped")
             || record.routed.to_ascii_lowercase().starts_with("drop")
             || !policy::group_allowed(&cfg.gateway.whitelist_groups, &record.group_id)
         {
@@ -622,7 +628,7 @@ async fn process_one(
     }
     // Historical logs without an automatic artifact remain a visibly separate compatibility path.
     let text = rec.text.trim();
-    let understood = if text.is_empty() || text.starts_with('/') {
+    let understood = if text.is_empty() || text.starts_with(['/', '／']) {
         Understanding::terminal(
             UnderstandingSource::Control,
             if text.is_empty() {
@@ -727,10 +733,7 @@ pub(crate) fn message_groups(
             user_id: &r.user_id,
             text: &r.text,
             is_admin: r.is_admin,
-            force_boundary: r
-                .delegation
-                .as_ref()
-                .is_some_and(|d| matches!(d.target, crate::bus::DelegationKind::Member))
+            force_boundary: r.delegation.as_ref().is_some_and(|d| d.is_member_target())
                 || r.processing.is_some()
                 || overrides.has_record(&r.record_id)
                 || !r.routed.eq_ignore_ascii_case("message"),
@@ -783,7 +786,7 @@ pub(crate) fn prospective_groups(
             force_boundary: record
                 .delegation
                 .as_ref()
-                .is_some_and(|d| matches!(d.target, crate::bus::DelegationKind::Member))
+                .is_some_and(|d| d.is_member_target())
                 || !record.routed.eq_ignore_ascii_case("message")
                 || overrides.has_record(&record.record_id)
                 || record.processing.as_ref().is_some_and(|p| {

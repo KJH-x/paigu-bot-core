@@ -141,6 +141,23 @@ impl Pipeline {
             );
         };
 
+        if ev
+            .delegation
+            .as_ref()
+            .is_some_and(|d| d.modify_body().is_some())
+        {
+            if !matches!(parsed.intent, ParsedIntent::Claim | ParsedIntent::Modify) {
+                let mut result = Understanding::terminal(
+                    source,
+                    "NeedConfirm",
+                    "指定成员改单需填写更改后的商品与数量，当前理解不是修改订单",
+                    None,
+                );
+                result.parsed = Some(parsed);
+                return result;
+            }
+            parsed.intent = ParsedIntent::Modify;
+        }
         if matches!(parsed.intent, ParsedIntent::Claim | ParsedIntent::Modify) {
             let original_intent = parsed.intent.clone();
             parsed.intent = ParsedIntent::Claim;

@@ -49,6 +49,9 @@ fn classify_keywords_and_chatter() {
     );
     assert_eq!(classify(&cand("u", "   "), &[]), Classification::Boundary);
     assert_eq!(classify(&cand("u", "/锁位"), &[]), Classification::Boundary);
+    for text in ["／锁位", "／改单@u2 通行证 3", "／改单 @u2 通行证 3"] {
+        assert_eq!(classify(&cand("u", text), &[]), Classification::Boundary);
+    }
 }
 
 #[test]

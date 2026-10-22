@@ -38,6 +38,7 @@ pub enum Delivery {
 pub enum DelegationKind {
     Member,
     Guest { label: Option<String> },
+    AdminModify { body: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -50,6 +51,21 @@ pub struct Delegation {
 }
 
 impl Delegation {
+    pub fn is_member_target(&self) -> bool {
+        matches!(
+            self.target,
+            DelegationKind::Member | DelegationKind::AdminModify { .. }
+        )
+    }
+
+    pub fn modify_body(&self) -> Option<&str> {
+        if let DelegationKind::AdminModify { body } = &self.target {
+            Some(body)
+        } else {
+            None
+        }
+    }
+
     pub fn guest_id(&self, group_id: &str) -> String {
         use sha2::{Digest, Sha256};
         let input = serde_json::json!([group_id, self.actor_user_id, self.target]);

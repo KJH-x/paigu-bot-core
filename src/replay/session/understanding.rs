@@ -240,6 +240,14 @@ pub(crate) fn evaluate_understanding(
     ) {
         return Evaluation::skipped("Dropped", "成员不在白名单");
     }
+    if rec
+        .delegation
+        .as_ref()
+        .is_some_and(|d| d.modify_body().is_some())
+        && !rec.is_admin
+    {
+        return Evaluation::skipped("Rejected", "指定成员改单缺少真实管理员身份");
+    }
     if understood.events.is_empty() {
         return Evaluation {
             outcome: understood.validation.clone(),
@@ -247,9 +255,11 @@ pub(crate) fn evaluate_understanding(
             priority_claim: false,
         };
     }
-    if rec.delegation.as_ref().is_some_and(|d| {
-        matches!(d.target, crate::bus::DelegationKind::Member) && d.actor_user_id != rec.user_id
-    }) && !rec.is_admin
+    if rec
+        .delegation
+        .as_ref()
+        .is_some_and(|d| d.is_member_target() && d.actor_user_id != rec.user_id)
+        && !rec.is_admin
         && (understood.is_modify
             || understood
                 .events

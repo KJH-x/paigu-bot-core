@@ -206,7 +206,7 @@ enum MemberTarget { Known(String), Ambiguous(Vec<String>), Partial(Vec<String>),
 - 旧已存理解不重问模型/换归属。旧匿名若明确sender且唯一，可沿用原合成身份接续/撤销，不改旧指纹；历史具名群外若没有真实actor或身份冲突，新增段标NeedConfirm，不静默建立另一身份导致旧订单遗留。没有进行真实历史迁移，这不是全部私有旧格式认证；损坏历史不跳过后猜身份。
 - 初版新增回归曾因从未成功排位时看板为null而误假定对象失败，现显式验证零事件/零分配和重算后完整看板，不放宽已有认购对照。首轮379核心＋32桌面与两套只读语料通过后，再补旧匿名接续/旧具名缺actor两项，须最终最新全套重跑后才结清T-29；T-14等其他E4项仍继续。
 
-### 10.2 直接验收清单（最终门禁结果待下节登记）
+### 10.2 直接验收清单（最终结果见§10.3）
 
 | 范围 | 可重复证据 |
 | --- | --- |
@@ -232,3 +232,55 @@ enum MemberTarget { Known(String), Ambiguous(Vec<String>), Partial(Vec<String>),
 最新源码完整入口全部通过：381核心＋1公开结算参考＝382 Rust，32项1920×1080/100%桌面，四组公开226条、两套显式私有样本逐格及2工作簿67消息/47组（源哈希不变）；6入口/3文档/21隐私自测、277暂存/跟踪文件扫描通过。fmt/严格clippy/build通过。补文档后单跑链接/源码声明门禁，263链接/45声明通过。另单独运行真实来源桌面专项捕获群内/群外×明暗四图，已实际查看：原整条发言、资格依据、动作表单和保存/关闭完整可见，两同名汇总行同时保留，无页面横向溢出。截图留任务可视化目录，不入公开库。
 
 T-29收口，T-25本批按职责拆出代理模块、删除旧二次CN反查；不把拆分和测试总数算作全覆盖。后继goal继续T-14管理员目标命令、T-16下载形态、T-17旧diff入口审计，以及T-25/26、跨商品诊断/派生缓存有效余项。ColumnLocked、管理员阶段豁免/伪造权限、远程发布和共享历史改写仍按待决策/暂停边界处理。真实配置/群/模型、历史数据迁移与原常驻实例均未操作，不部署；本批签名/推送不代表整个goal已完成。
+
+## 11. E4管理员指定成员改单（T-14完成，2026-10-22）
+
+基线4fee3b2（G，本地/远程相同），工作树干净；T-29已提供唯一当前群成员索引和实际发言来源，但`run_admin_command`仍不支持`/改单`。本批实现既有D-2，不恢复已舍弃的人工原文重写/批量LLM重解析，也不以普通代理改他人来冒充管理员命令。
+
+1. 语法`/改单 <唯一群名片|CN|别名|成员ID|@成员ID> <更改后的商品与数量>`，目标单token，含空格称呼可用明确ID。中文全角输入归一化用于找目标；原始整条文本/时间/消息号不改，未知/同名/部分名/错误群来源及缺少参数明确核对，不产生群外代号订单。数字在此为明确成员ID，不套用代理数字代号语义。
+2. **实际发言人**须为原消息管理员且执行开关开启；关闭只记录、不执行、不能因之后开启再重放生效。成员白名单先按实际发言人判断，不借目标资格进入系统。目标归属与实际actor独立记录为`delegation.target.kind=admin_modify`，模型不能选人/授角色。
+3. 在分段/seen/上下文建立前完成目标规范化；保留同一message_id/ingress，不合组、不额外插一条伪造目标发言。规范化body只用于规则/模型理解，MessageRecord.text仍为原命令，实际actor和完整来源留私有日志。默认规则可理解则不调模型，复杂body走现有可替身的理解链。
+4. 明确命令的语义为Modify：有效Claim/Modify抽取统一为修改（撤目标本人对应商品原认购＋新完整认购），模型不能把它变成独立加排；Cancel/Admin/Unknown等冲突结果只核对不执行。不支持0数量、嵌套斜杠/多目标控制语法，保持现有数量/商品/款式校验和first-match，不绕开原阶段/持久锁。
+5. 资格按目标已知群成员，与T-29/D-2一致；管理员阶段豁免T-28仍未决定。保存权限前完整动作，当前政策拒绝可只逻辑重算；关命令执行开关不撤销已执行历史。目标/动作一旦保存不因名单/别名改名重新指派/问模型。
+6. 实时、逐prefix、重算/重启、原自动/人工修订/单步撤回、后续成员自己撤改单、持久入站重试都验证同一原位置与目标。来源窗口显示“管理员改单来源”，可展开原命令和资格依据；32桌面基础上补真实点击/键盘、明暗/滚动/不改数据核对。全部占位/隔离，不调用真实模型/群/配置，不部署。
+
+```rust
+// 本批工程草案：权限和唯一目标先于规范化，record.text保持原命令。
+// event.user_id = resolved_member_id;
+// event.delegation = Some(Delegation { actor_*, source_*, target: AdminModify { body } });
+// understand_input.text = format!("改 {body}"); // 仅理解视图，不写回原文
+// understood.parsed.intent = Modify; // 仅在抽取为Claim/Modify且正常校验后
+// evaluate_understanding(cfg, original_record, understood, phase) -> shared replay
+```
+
+### 11.1 已实施与直接回归（最终完整门禁见§11.2）
+
+先以真实隔离Pipeline复现“未支持的管理员命令：改单”，未把计划当完成。新target_modify入口在原始日志后、seen/上下文前校验actor/开关和唯一目标，保留原text/seq/message_id/time/ingress；仅理解视图加“改”，新admin_modify来源进指纹。模型Claim强制Modify、冲突意图只核对；来源窗明确管理发言、不重复原话。执行开关、无目标、错群/白名单均在模型前结束，不调用真实模型/接收器。
+
+首轮回归揭示两处名字漂移（即时拒绝或模型冲突时，旧实时snapshot姓名未随已保存来源更新；重放采用新姓名），不只是测试数量对不上。已把名字接线独立为names：有动作时持久化后才提交姓名，无动作但合法来源同步刷新姓名快照且不增加领域版本，Drop/重复不覆盖。另用实际写故障证明未保存命令不能发表新名/部分认购；原有按ID归属/冻结不变，不以删除姓名比较放行。
+
+审查同时发现全角斜杠在merge开启时可能落入普通Modify。现入口/coalesce/历史控制兼容统一将其视为控制边界，错误`／改单@u2`明确拒绝，不按发言人自己订单执行或与下一条合组；新增目标索引仍唯一，不放宽权限。核心首轮399＋1公开参考、33桌面和两套只读语料已通过，后补整个商品/多款式/其他商品不被抹去的第19项后须再跑最新完整门禁。
+
+| 直接范围 | target_modify_tests证据 |
+| --- | --- |
+| 原位置/目标替换，不改原文时间；管理员/其他成员订单不受影响 | admin_target_modify_replaces_only_the_selected_members_order_at_the_original_position；target_modify_preserves_actor_and_other_members_orders_and_real_command_source |
+| 非管理员/开关关闭不执行，之后开关不补做 | non_admin_and_disabled_command_never_execute_even_after_switch_is_enabled |
+| 歧义/部分/群外/来源错/坏缓存、缺参数/嵌套/错误全角前缀0模型 | explicit_target_lookup_and_argument_errors_do_not_call_model_or_create_guests |
+| CN/别名/明确数字ID/@ID/NFKC与merge开启 | exact_id_cn_alias_and_fullwidth_commands_have_the_same_member_owner |
+| 优先/PhaseII正反资格、actor白名单和活动群 | target_modify_priority_and_phase_use_recipient_and_do_not_borrow_admin_eligibility；target_modify_preflight_enforces_actual_actor_and_active_group_before_model |
+| 模型误判Claim不变加排，冲突意图不执行；冻结/改名/关闭/重启0重问 | model_claim_is_forced_to_modify_and_saved_actions_survive_disable_rename_and_restart；conflicting_model_intent_never_turns_a_target_modify_into_cancel_or_admin_action |
+| 手动锁/解锁历史、持久结算锁及坏锁文件 | locking_rejects_target_modify_without_discarding_understood_actions_or_later_unlocking_it；persisted_settlement_lock_and_bad_lock_state_cannot_be_bypassed_with_empty_runtime_state |
+| 同一持久接收收据不重复，后续自撤原位执行/不合组 | target_modify_is_one_durable_receipt_and_retry_does_not_reapply_or_reask_model；later_self_cancel_keeps_its_position_after_target_modify_and_is_never_coalesced |
+| 手工override/单步撤回保留后续消息和完整原来源 | target_command_manual_override_and_single_undo_keep_original_source_and_later_messages |
+| 数量/商品校验不部分撤单 | target_modify_reuses_quantity_and_item_validation_without_partially_cancelling_old_claims |
+| 真写故障不能提前发表新名；重复/Drop不能改旧名 | failed_target_modify_persistence_cannot_publish_new_names_or_partial_state；dropped_and_duplicate_names_never_replace_the_published_member_name |
+| 元数据本身不授管理角色 | fabricated_target_metadata_does_not_grant_a_non_admin_role |
+| 共享Modify替换目标的整个商品而保留其他款式购买者、其他商品 | target_modify_replaces_that_members_whole_product_without_erasing_other_products_or_users |
+
+新增target-modify.mjs桌面真实API证明只记一条原命令/只改目标，键盘进出和来源展开、预填Modify/数量、明暗/滚动/无溢出、关闭返回原行且不保存；执行开关关闭后原三份不变、新五份不执行。测试只写隔离目录中的假缓存并恢复，常驻实例始终不变。
+
+### 11.2 最终证据与后续
+
+最后一次最新源码完整入口通过：400核心＋1公开参考＝401 Rust、完整33项桌面（1920×1080/100%），公开CLI三条＋四组226条逐格、两套显式私有样本、2工作簿67消息/47组（源哈希不变），6入口/3文档/21隐私自测和281暂存/跟踪文件通过；fmt/严格clippy/build通过。另单独再次运行管理员目标桌面专项，捕获并实际查看明暗两图：原命令只出现一次、实际管理员和资格依据、Modify/三份预填、保存关闭都可见，原行键盘返回通过，未保存/改数据。
+
+T-14收口；当前分支仍不部署、不重启常驻实例、不调用真实群/配置/模型。文档将T-28/ColumnLocked明确改为待确认、T-27明确暂缓，未改变它们的业务口径，也不把它们当已实现。接续T-16私有备份浏览器下载形态、T-17旧diff API审计及其他有效E4项；T-25/26仍按职责/性质审计，不因测试数量或此一批签名宣称整个goal完成。

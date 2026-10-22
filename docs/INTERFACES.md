@@ -382,6 +382,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | 状态 `Merged` | 合并组成员行（`MessageRecord.status`）；消息流**逐条展示、不过滤**。 |
 | `GatewayConfig.react_emoji_id` | 收到**已路由**消息后以 `set_msg_emoji_like` 回应（如 `76`=👍），**不发文本**（默认 None 关闭）；经 `Gateway::dispatch` 下发（该内部路径不受 `allowed_actions` 限制，由本配置显式授权） |
 | `Pipeline::run_admin_command` | /开团 /锁位 /结团 /状态 /导出；锁定后拒绝排/撤/改 |
+| `/改单 <目标> <商品与数量>` | `pipeline/target_modify::prepare`先验真实管理角色/开关、当前群和实际actor白名单，再以唯一成员索引规范化目标；保留原text/message_id/time/ingress，在共同understand/evaluate路径执行Modify，不走无目标的run_admin_command分支。不创建群外身份、不提供阶段豁免。详见§8.14。 |
 | `ParsedIntent::Modify` | 改单：撤销本人该商品既有认购 + 重新认购（cancel_for_modify） |
 
 ### 8.6 工作流（`src/services/workflow.rs`、`src/api/board_routes.rs`）
@@ -532,3 +533,13 @@ IncomingEvent/MessageRecord新增可选`delegation`，日志缺省None、序列�
 新delegation仅在Some时加入ProcessingMember输入指纹，旧None哈希不变。旧明确sender且唯一的匿名身份可接续；旧具名无actor/冲突为NeedConfirm，不自动迁移、猜归属或新建替代旧单。冻结产物不因别名/cache变化重问模型或换人，损坏历史明确错误。消息/复盘投影保留可选delegation，动作详情另附`message.delegation_context {actor_display,qualification:"member"|"actor"}`，修订窗口可展开完整源发言和资格说明；只读展开不保存、不调模型。原文来源含隐私，只留本地私有链路，不进入远程公开快照。
 
 展示/复盘who_whats附user_id作为内部行键，display/identity/items原字段仍在；同名不同人不合并消费或复用同一DOM行，不将ID额外塞进姓名格。称呼直接来自共同按ID解析/重算的结果，删除旧展示服务按nickname反查CN的best-effort覆盖，防止某人群名片恰与他人CN相同而错误改名。旧远程示例无user_id仍按display兜底，不代表它能区分没有身份的同名数据。
+
+### 8.14 管理员目标改单（2026-10-22）
+
+新增delegation.target形态`{kind:"admin_modify",body:"徽章 甲 3"}`，actor/source字段同§8.13。body只是规范化的理解视图，MessageRecord.text始终为原命令。语法目标为单token，群名片/CN/别名/明确ID唯一匹配，称呼带空格用@ID；数字在明确目标命令中可作已知成员ID，不按群外代号解释。NFKC用于规范化目标/正文，但原字符不改；斜杠（含全角）为控制边界，错误前缀不能落入普通改单或自动合组。
+
+入口顺序：原始事件保存→实际发言人/当前群/执行开关→唯一目标→原身份/消息号上下文→理解视图`改 {body}`→共同校验/权限/保存/发布。无授权/开关关闭/歧义/参数错误不调用模型或执行；关开关只影响新命令，冻结历史不重解释。有效Claim/Modify抽取统一Modify；Cancel/Admin/Unknown冲突为NeedConfirm零动作，不让模型改变命令语义或目标；商品/数量/first-match沿用原规则，不部分撤单后再拒绝。实际管理员身份仍在evaluate重验，元数据本身不能授管理员角色。
+
+资格按目标成员，实际actor白名单另验；阶段/手动锁及当前持久结算锁均不豁免，锁状态损坏为Error，不当未锁。权限前完整动作与当时manual_phase进入原自动产物；关执行开关不取消历史，锁期被拒绝者也不因后来解锁自动生效。保存后姓名/缓存不换目标、不问模型；人工作为完整override的改动和单步撤回继续沿用共同事务，不修改管理员原话。source窗口明确“管理员改单来源”，完整原话已展示时不重复同一段文字。
+
+`pipeline/names`统一提交后的姓名投影：新动作成功持久化后才更新公开名字，无动作但有效的拒绝/待核对消息若更新称呼，同步刷新看板姓名而不增加领域版本；Dropped/Duplicate不污染名称，写失败不发布新称呼/部分状态。重放也忽略原Dropped/重复来源，不能通过只比较数量掩盖姓名漂移。该小型投影刷新不是旧UP磁盘computed缓存/尾组增量已经实现。

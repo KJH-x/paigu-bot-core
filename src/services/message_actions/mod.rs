@@ -169,7 +169,7 @@ async fn read_locked(state: &ApiState, key: &str, round_id: &str) -> Result<Valu
     if let Some(meta) = &record.delegation {
         message["delegation_context"] = json!({
             "actor_display": crate::settings::resolve_cn(&cfg, &meta.actor_user_id, &meta.actor_nickname),
-            "qualification": if matches!(meta.target, crate::bus::DelegationKind::Member) { "member" } else { "actor" },
+            "qualification": if meta.is_member_target() { "member" } else { "actor" },
         });
     }
     let current_summary = computed

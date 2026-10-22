@@ -76,8 +76,12 @@ impl Pipeline {
             Ok(record) => record,
             Err(error) => return self.persistence_failure(ev, false, error).await,
         };
+        let cfg = self.cfg.get().await;
         let (version, snapshot_value) = {
             let mut st = self.state.lock().await;
+            if st.remember_name(&cfg, &record, display, status) {
+                st.refresh_snapshot_names(&cfg);
+            }
             st.messages
                 .push(MessageRecord::from_log(&record, round_id, display));
             (

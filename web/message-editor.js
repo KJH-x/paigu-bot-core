@@ -72,9 +72,10 @@
       if(data.message.delegation && data.message.delegation_context){
         var delegated=data.message.delegation, attribution=data.message.delegation_context;
         var source=el('details','ae-proxy-source');
-        source.appendChild(el('summary','','代排来源 · '+(attribution.actor_display || '原发言人')));
-        source.appendChild(el('p','hint',attribution.qualification==='member'?'归属群内成员，按被代排人的资格处理。':'归属发言人的群外代号，按原发言人的资格处理。'));
-        source.appendChild(el('p','ae-raw',delegated.source_text));src.appendChild(source);
+        var adminModify=delegated.target.kind==='admin_modify';
+        source.appendChild(el('summary','',(adminModify?'管理员改单来源 · ':'代排来源 · ')+(attribution.actor_display || '原发言人')));
+        source.appendChild(el('p','hint',adminModify?'归属目标成员，按目标成员的资格处理；阶段与锁定限制仍然有效。':(attribution.qualification==='member'?'归属群内成员，按被代排人的资格处理。':'归属发言人的群外代号，按原发言人的资格处理。')));
+        if(delegated.source_text!==data.message.text)source.appendChild(el('p','ae-raw',delegated.source_text));src.appendChild(source);
       }
       src.appendChild(el('p', 'hint', '当前：' + (titles[data.current_outcome.status] || data.current_outcome.status) + ' · ' + (data.current_outcome.summary || data.current_outcome.detail || '')));
       if(data.current_outcome.summary && data.current_outcome.detail && data.current_outcome.detail!==data.current_outcome.summary){

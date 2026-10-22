@@ -46,7 +46,7 @@ pub fn is_anonymous_proxy(text: &str) -> bool {
 /// 分类：先取规则解析意图；仅 `Unknown` 时才用关键词/代排标记升级为 Claim。
 pub fn classify(c: &Candidate<'_>, items: &[Item]) -> Classification {
     let t = c.text.trim();
-    if c.force_boundary || c.is_admin || t.starts_with('/') || t.is_empty() {
+    if c.force_boundary || c.is_admin || t.starts_with(['/', '／']) || t.is_empty() {
         return Classification::Boundary;
     }
     match RuleParser::parse(t, items, c.is_admin).intent {

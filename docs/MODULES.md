@@ -7,6 +7,8 @@
 
 2026-10-22代排：`settings/targets.rs`为源群受约束的一次性确定性成员索引；`pipeline/proxy.rs`负责分段与归属，独立真实actor/资格主体。bus与MessageRecord可选delegation不改旧None指纹；session共用权限/冻结动作。展示/复盘汇总携user_id作行身份，不再按显示名重猜CN。合同见INTERFACES §8.13；不授予管理/阶段豁免。
 
+同日T-14接线：`pipeline/target_modify.rs`只负责命令授权/唯一目标和规范化视图，不另造分配器；body/actor/source保存在admin_modify来源，原text不改，共用understanding及session权限。`pipeline/names.rs`统一提交后的称呼更新、无动作时同代快照同步，失败/Drop/重复不提升姓名真源；不是持久computed缓存。主代理统一修改common coalesce的全角斜杠控制边界，防止命令混进同语义组，详见INTERFACES §8.14。
+
 ## 0. 冻结接口（跨模块契约，改动需 A0 同意）
 
 ### `src/bus.rs` — Gateway 与 Pipeline 的解耦边界
