@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  var P=window.PAIGU, M=window.PAIGU_MANAGE, state={config:null,revision:null,baselines:{},server:{},saving:{}};
+  var P=window.PAIGU, M=window.PAIGU_MANAGE, backupUI=null, state={config:null,revision:null,baselines:{},server:{},saving:{}};
   function $(id){return document.getElementById(id);}
   function banner(message,bad){var b=$('banner');b.textContent=message || '';b.className='banner'+(message?' show':'')+(bad?' bad':'');}
   function val(id){return $(id).value;}
@@ -88,10 +88,10 @@
     var controls=Array.from($('form').querySelectorAll('input,select,textarea,button')), disabled=controls.map(function(n){var value=n.disabled;n.disabled=true;return value;});
     state.loadPromise=P.get('/api/config').then(function(res){
       state.config=res.config;state.revision=res.revision;Object.keys(fields).forEach(function(scope){paintScope(scope,res.config);});
-      state.importPreflight=null;$('snap-apply').disabled=true;setRev();banner('');setConn('ok','已连接');
+      if(backupUI)backupUI.reset();setRev();banner('');setConn('ok','已连接');
       $('form').classList.remove('hidden');$('loading').classList.add('hidden');
     }).catch(function(e){banner('读取失败，保留现有输入：'+P.errorText(e),true);setConn('bad','未连接');$('loading').textContent='读取失败，可重试';throw e;})
-      .finally(function(){$('form').inert=false;controls.forEach(function(n,i){n.disabled=disabled[i];});$('snap-apply').disabled=!state.importPreflight;delete state.loadPromise;});
+      .finally(function(){$('form').inert=false;controls.forEach(function(n,i){n.disabled=disabled[i];});if(backupUI)backupUI.refresh();delete state.loadPromise;});
     return state.loadPromise;
   }
   function reloadDisk(){
@@ -101,57 +101,6 @@
         .catch(function(e){banner('磁盘重载未完成：'+P.errorText(e),true);throw e;}).finally(function(){$('reload').disabled=false;});
     }).catch(function(){});
   }
-  function exportSnapshot() {
-    var out = val('snap-out').trim();
-    var body = { format: 'file' };
-    if (out) body.out_dir = out;
-    $('snap-export').disabled = true;
-    $('snap-export-info').textContent = '导出中…';
-    P.post('/api/snapshot/export', body).then(function (res) {
-      var path = res && res.path ? res.path : '(未返回路径)';
-      var extra = '';
-      if (res && res.manifest) {
-        extra = '（manifest: round_id=' + (res.manifest.round_id || '?') + '，revision=' + (res.manifest.revision != null ? res.manifest.revision : '?') + '）';
-      }
-      $('snap-export-info').textContent = '已导出：' + path + ' ' + extra;
-      if (res && res.path) setVal('snap-path', res.path);
-      banner('');
-      P.toast('快照已导出', 'ok');
-    }).catch(function (err) {
-      $('snap-export-info').textContent = '导出失败：' + P.errorText(err);
-      banner('快照导出失败：' + P.errorText(err), true);
-    }).then(function () { $('snap-export').disabled = false; });
-  }
-
-  function importSnapshot(apply, protectedDrafts) {
-    if(apply && !protectedDrafts) return P.protectAction(function(){return importSnapshot(true,true);}).catch(function(e){banner(P.errorText(e),true);});
-    var path = val('snap-path').trim();
-    if (!path) { banner('请填写要导入的 path', true); return; }
-    var preflight=state.importPreflight;
-    if (apply && (!preflight || preflight.path!==path)) { banner('请先预检当前路径的备份。',true);return; }
-    var body = { path: path, apply: !!apply,revision:apply?preflight.config_revision:state.revision };
-    if(apply){body.round_id=preflight.target_round_id;body.preflight_token=preflight.preflight_token;}
-    $('snap-import').disabled = true;
-    $('snap-apply').disabled=true;
-    $('snap-import-result').textContent = apply?'正在应用…':'正在预检，不改数据…';
-    P.post('/api/snapshot/import', body).then(function (res) {
-      var applied = !!(res && res.applied);
-      if(!applied && val('snap-path').trim()!==path) { state.importPreflight=null;$('snap-import-result').textContent='路径已变化，请重新预检。';return; }
-      state.importPreflight=applied?null:Object.assign({path:path},res);
-      $('snap-apply').disabled=applied||!res.applicable;
-      $('snap-import-result').textContent = applied?'已应用并重算；原完整日志备份：'+res.backup_path:
-        '备份轮次：'+res.manifest.round_id+' → 当前轮：'+res.target_round_id+'；消息 '+res.current_messages+' → '+res.import_messages+'。'+res.effect+(res.applicable?'':' 请先手动激活匹配轮次，再预检。');
-      banner('');
-      P.toast(applied?'备份已应用':'预检完成，尚未应用', 'ok');
-      if (applied && window.PAIGU_SHELL) window.PAIGU_SHELL.refresh();
-    }).catch(function (err) {
-      if (err.status === 409) banner('导入冲突（HTTP 409）：revision 已变化，请先「重新载入」配置。', true);
-      else banner('快照导入失败：' + P.errorText(err), true);
-      $('snap-import-result').textContent = '导入失败：' + P.errorText(err);
-    }).then(function () { $('snap-import').disabled = false; });
-  }
-
-
   function init(){
     $('api').value=P.resolveApiBase();
     Object.keys(fields).forEach(function(scope){
@@ -164,10 +113,7 @@
     $('reload').addEventListener('click',reloadDisk);
     $('intake-retry').addEventListener('click',retryIntake);
     if(window.PAIGU_SHELL)window.PAIGU_SHELL.onWorkflow(paintIntake);
-    $('snap-export').addEventListener('click',exportSnapshot);
-    $('snap-import').addEventListener('click',function(){importSnapshot(false);});
-    $('snap-apply').addEventListener('click',function(){importSnapshot(true);});
-    $('snap-path').addEventListener('input',function(){state.importPreflight=null;$('snap-apply').disabled=true;});
+    backupUI=P.mountPrivateBackups({context:function(){return state.config?{round_id:state.config.round.round_id,revision:state.revision}:null;},report:banner,onApplied:load});
     load().catch(function(){});
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

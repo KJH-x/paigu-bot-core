@@ -23,7 +23,7 @@ export function isolatedEnvironment(directory,repository,inherited={}){
   for(const [key,value] of Object.entries({
     PAIGU_CONFIG_PATH:path.join(store,'config','app.json'),PAIGU_ROUNDS_DIR:path.join(store,'rounds'),
     PAIGU_MESSAGES_DIR:path.join(store,'messages'),PAIGU_EVENTS_DIR:path.join(store,'events'),
-    PAIGU_SETTLEMENT_DIR:path.join(store,'settlement'),PAIGU_MEMBERS_SEED_PATH:path.join(store,'missing.seed.json'),
+    PAIGU_SETTLEMENT_DIR:path.join(store,'settlement'),PAIGU_SNAPSHOT_DIR:path.join(store,'snapshots'),PAIGU_MEMBERS_SEED_PATH:path.join(store,'missing.seed.json'),
     PAIGU_MEMBERS_EXAMPLE_PATH:path.join(repository,'data','members.example.json'),PAIGU_WEB_DIR:path.join(repository,'web'),
     PAIGU_UI_CAPTURE_DIR:path.join(directory,'ui-captures'),CARGO_TARGET_DIR:path.join(repository,'target'),
     TMP:path.join(directory,'temp'),TEMP:path.join(directory,'temp'),TMPDIR:path.join(directory,'temp'),RUST_LOG:'warn'
@@ -57,4 +57,17 @@ export function managedDirectory(directory,parent,prefix){
 
 export async function runSteps(steps,execute){
   for(const step of steps)await execute(step);
+}
+
+export function cargoDiagnostics(output){
+  const limit=16*1024,parts=[];let length=0;
+  for(const line of output.split(/\r?\n/)){
+    let record;try{record=JSON.parse(line);}catch{continue;}
+    const message=record?.reason==='compiler-message'?record.message:null;
+    if(!['error','failure-note'].includes(message?.level)||typeof message.rendered!=='string')continue;
+    const remaining=limit-length;
+    if(message.rendered.length>remaining){parts.push(message.rendered.slice(0,remaining),'\n[compiler diagnostics truncated]\n');break;}
+    parts.push(message.rendered);length+=message.rendered.length;
+  }
+  return parts.join('');
 }

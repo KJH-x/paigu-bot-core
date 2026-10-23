@@ -197,7 +197,6 @@ async fn publish(
         .await?;
     // Everything after the durable record is a rebuildable projection, not another filesystem commit.
     state.pipeline.apply_replay(&computed, records).await;
-    replay::remember_replay(&computed);
     let mut next = events.to_vec();
     next.push(event);
     Ok(

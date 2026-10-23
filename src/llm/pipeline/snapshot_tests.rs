@@ -18,6 +18,7 @@ async fn export(state: &crate::api::ApiState) -> String {
             overrides: Default::default(),
             out_dir: Some(path.to_string_lossy().into()),
             format: Some("file".into()),
+            ..Default::default()
         },
     )
     .await

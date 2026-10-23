@@ -40,13 +40,19 @@ mod boundary_tests;
 #[cfg(test)]
 mod closure_tests;
 #[cfg(test)]
+mod export_command_tests;
+#[cfg(test)]
 mod ingress_tests;
 #[cfg(test)]
 mod member_tests;
 #[cfg(test)]
 mod proxy_tests;
 #[cfg(test)]
+mod replay_diff_tests;
+#[cfg(test)]
 mod settlement_tests;
+#[cfg(test)]
+mod snapshot_download_tests;
 #[cfg(test)]
 mod snapshot_tests;
 #[cfg(test)]

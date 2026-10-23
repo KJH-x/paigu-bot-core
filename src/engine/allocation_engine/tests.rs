@@ -287,3 +287,71 @@ fn snapshot_order_is_deterministic() {
     assert_eq!(users(&first), users(&second));
     assert_eq!(users(&first), users(&third));
 }
+
+#[test]
+fn one_users_multiple_products_and_mixed_claim_types_have_stable_separate_summaries() {
+    let mut badge = split_item("badge", "徽章", 1);
+    badge.sort_order = 1;
+    badge.subitems = vec![
+        ItemSubitem {
+            subitem_id: "a".into(),
+            name: "甲".into(),
+            unit_price: MoneyCents(100),
+            aliases: vec![],
+            capacity: Some(1),
+        },
+        ItemSubitem {
+            subitem_id: "b".into(),
+            name: "乙".into(),
+            unit_price: MoneyCents(100),
+            aliases: vec![],
+            capacity: Some(1),
+        },
+    ];
+    let mut stand = split_item("stand", "立牌", 1);
+    stand.kind = ItemKind::Single;
+    stand.sort_order = 0;
+    let items = vec![badge, stand];
+    let mut single = line("u1", "badge", Some("a"), 2, SlotPolicy::Normal, 1);
+    single.claim_type = ClaimType::Single;
+    let lines = vec![
+        single,
+        line("u1", "badge", Some("b"), 3, SlotPolicy::Normal, 2),
+        line("u1", "stand", None, 1, SlotPolicy::Normal, 3),
+    ];
+    let mut baseline = None;
+    for _ in 0..64 {
+        let result = AllocationEngine::new()
+            .allocate(&items, &lines, &[])
+            .unwrap();
+        let summary = &result.user_summaries[0];
+        assert_eq!(
+            summary.items[0].item_id.0, "stand",
+            "catalog order, not randomized map order"
+        );
+        assert_eq!(
+            summary
+                .items
+                .iter()
+                .filter(|line| line.item_id.0 == "badge" && line.claim_type == ClaimType::Split)
+                .map(|line| line.quantity)
+                .sum::<u32>(),
+            3
+        );
+        assert_eq!(
+            summary
+                .items
+                .iter()
+                .filter(|line| line.item_id.0 == "badge" && line.claim_type == ClaimType::Single)
+                .map(|line| line.quantity)
+                .sum::<u32>(),
+            2
+        );
+        let actual = serde_json::to_value(&result.user_summaries).unwrap();
+        if let Some(expected) = &baseline {
+            assert_eq!(&actual, expected);
+        } else {
+            baseline = Some(actual);
+        }
+    }
+}

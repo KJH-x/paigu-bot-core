@@ -11,6 +11,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
+#[cfg(test)]
+mod export_tests;
+
 use crate::bus::EventSink;
 use crate::messages::MessageLog;
 use crate::settings::ConfigStore;

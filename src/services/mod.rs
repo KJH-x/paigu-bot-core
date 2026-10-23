@@ -27,6 +27,7 @@ use crate::api::{api_bad_request, api_internal, api_not_found, api_stale_revisio
 #[derive(Debug)]
 pub enum ServiceError {
     BadRequest(String),
+    PayloadTooLarge(String),
     NotFound(String),
     /// 乐观并发：`revision` 不一致 → 409 `stale_revision`。
     StaleRevision(u64),
@@ -42,6 +43,10 @@ impl ServiceError {
     pub fn into_api(self) -> ApiError {
         match self {
             ServiceError::BadRequest(message) => api_bad_request(message),
+            ServiceError::PayloadTooLarge(message) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(json!({"error":message})),
+            ),
             ServiceError::NotFound(message) => api_not_found(message),
             ServiceError::StaleRevision(revision) => api_stale_revision(revision),
             ServiceError::Conflict(value) => (StatusCode::CONFLICT, Json(value)),

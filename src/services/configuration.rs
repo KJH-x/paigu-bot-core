@@ -102,7 +102,6 @@ pub(crate) async fn apply_locked(
     }
     if let Some(computed) = computed {
         state.pipeline.apply_replay(&computed, &records).await;
-        super::replay::remember_replay(&computed);
         state
             .pipeline
             .restore_settlement_lock(persistent_lock)

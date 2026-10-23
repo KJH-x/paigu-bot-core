@@ -263,6 +263,23 @@ pub struct MessageLog {
 }
 
 impl MessageLog {
+    pub(crate) fn snapshot_dir(&self) -> PathBuf {
+        let configured = std::env::var("PAIGU_SNAPSHOT_DIR").ok();
+        self.snapshot_dir_override(configured.as_deref())
+    }
+
+    fn snapshot_dir_override(&self, configured: Option<&str>) -> PathBuf {
+        configured
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                self.dir
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .join("snapshots")
+            })
+    }
+
     pub(crate) fn ingress_dir(&self) -> PathBuf {
         self.events_dir.join("_ingress")
     }

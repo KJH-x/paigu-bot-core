@@ -367,6 +367,16 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `SnapshotBundle::{export_file, import_file}` | 单文件导出/导入（校验哈希与格式） |
 | `POST /api/snapshot/export`（format="file"） | 单文件；缺省目录式 |
 | `POST /api/snapshot/import` | path 为文件时自动走 import_file |
+| `POST /api/snapshot/download` | JSON `{round_id,config_revision,private_ack:true}`（严格字段）；共同writer内复核上下文与待处理入站。返回完整SnapshotFile原字节附件，无服务端临时路径 |
+| `POST /api/snapshot/import-file?round_id=...&revision=...&apply=false` | body为原文件JSON字节（不是bundle包装）；严格query，服务端校验format/hash后复用已有导入。显式应用还需`apply=true&preflight_token=...`，保护与path入口相同 |
+
+各导出与导入共用完成记录验证：坏消息/事件行失败，任何Pending消息返回409 `pending_saved_message`（包括hash有效的旧导入文件），不替未完成输入生成动作。默认主机路径按消息存储私有根下snapshots、轮次/时间/UUID创建；PAIGU_SNAPSHOT_DIR明确覆盖优先，显式out_dir行为保留。浏览器下载仍只返回Blob附件、不创建主机副本。
+
+管理员`/导出`内部调用`export_completed_locked`，保留本控制记录保存前的已完成动作切面，并使用相同封包/文件写入；完成后记录本条控制收据。原始journal保留完整帧，可能含未执行文本，但导入只恢复保存的消息/动作、不重新处理原始帧、不恢复待处理队列。开关关闭仍按既有合同仅记录控制（status=Applied，不表示执行），非管理员拒绝；可只读导出锁定轮而不解锁。没有公开跳idle参数，HTTP导出/导入守卫不变。
+
+新私有文件端点上限64MiB（超限413，无截断）；下载文件名为`paigu-private-<64位内容摘要>.snapshot.json`，不带成员/轮次名称。成功/错误均`Cache-Control: no-store, private`、`Pragma: no-cache`、`X-Content-Type-Options: nosniff`；成功下载含JSON Content-Type及attachment Content-Disposition，跨本机端口可读取附件头。客户端直接下载Blob/上传File，禁止JSON.parse→JSON.stringify完整备份（避免原事件u64丢精度）。文件选择不自动上传，预检不应用；源/上下文变化使旧证明失效，下载可取消/超时且迟到不交付。
+
+这两个端点拒绝null、外站及异常/重复Origin，允许HTTP localhost/127.0.0.1页面和无Origin本机CLI；客户端也只向本机HTTP API传输。这不是通用认证，不准据此公开管理API。原路径入口保留并可附round_id/config_revision观察保护；备份不是公开展示格式、不含页面未保存输入/未完成接收帧/独立成员缓存。未部署，验收进度见工程计划§12。
 
 ### 8.5 配置与命令（src/api/config_routes.rs、src/llm/pipeline.rs）
 
@@ -396,7 +406,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 
 ### 8.7 2026-09-24 新增/变更接口（U1–U9）
 
-> 均已落地；源码 `src/api/rounds_routes.rs`、`src/services/rounds.rs`、`src/settings/rounds.rs`、`src/services/workflow.rs`、`src/services/members.rs`、`src/services/display.rs`、`src/domain/event.rs`。
+> 均已落地；源码 `src/api/rounds_routes.rs`、`src/services/rounds/mod.rs`（生命周期/IO）、`src/services/rounds/check.rs`（纯诊断）、`src/settings/rounds.rs`、`src/services/workflow.rs`、`src/services/members.rs`、`src/services/display.rs`、`src/domain/event.rs`。
 
 **轮次库（U3）**
 
@@ -409,6 +419,8 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `POST /api/rounds/:id/check` | `{ok,issues:[{level,code,message,where}]}`；含 `duplicate_item_id`/`alias_conflict`/`name_conflict`/`category_subitem_mismatch`/`class_derived_mismatch`（warn）等 |
 | `DELETE /api/rounds/:id` | `{ok,removed}`；激活中的轮次拒绝 |
 | `data/rounds/<round_id>.json` | 轮次文件（内容 = `RoundSettings`）；`PAIGU_ROUNDS_DIR` 可覆盖目录 |
+
+`check`/`setup`共用纯结构诊断，原`level/code/message/where`及ok=无error合同保持：商品名/商品别名与别家商品或款式名称/别名重合为error；款式↔款式跨商品复用不报错，不增加噪声警告；同商品自己的名字与别名不自撞。身份唯一性是item_id全目录、subitem_id同一商品；缺价/class推导不符为warn，不自动修正class或改变first-match/已保存动作。有限4×4来源组合与实际目录顺序回归见工程计划§14。
 | `AppConfig.active_round_id` | `config/app.json` 当前激活轮次 id；启动/热载据此覆盖 `round`（`settings::rounds::resolve_active`） |
 | `GET /api/workflow.phases` | 数组 `[{phase,label,start_ms,end_ms}]`；仅供前端 Stepper **弱阶段进度**使用 |
 
@@ -439,6 +451,10 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 历史步骤按**当前目录配置**解释已接受事件，不宣称还原各时刻的旧目录版本；末步采用当前实时快照，保证与实际排位一致。接口不从落盘原始消息重新启动处理管线，重启后能否看到历史取决于当前管线是否已恢复。
 
 `GET /api/replay/view` 是只读接口，返回 `{round_id,title,revision,version,items,messages,steps,board,who_whats,source:"active_round",message_count}`。每个步骤含 `{index,message_seq,board,who_whats}`，`board` 为该消息之后的完整 `AllocationSnapshot`。步骤使用当前管线已接受的领域事件前缀计算，不重新解析消息、不调用 LLM、不改配置/日志/实时排位；消息列表不包含 Drop。读取时轮次或配置发生变化返回错误，前端不混用跨轮次数据。
+
+`GET /api/replay/diff`保留为只读诊断，返回原`version/base_version/diff/live_version/live_diff`并增加`round_id/revision/source:"active_round"/comparison:"saved_actions_vs_live_allocation"/message_count/live_available/consistent`。在同一实例writer及配置读锁内严格读消息/事件、按当前默认配置重放已存自动/人工动作，与同一切面的实时板比较；`diff`是默认基线比较（不携带上次overrides），`live_diff`为实时→已存动作重放。`consistent`依既有ReplayDiff的位次/认领/汇总/结算与领域版本判断，不包含时间戳/昵称样式等展示元信息。实时板未初始化时`live_available:false,consistent:null,live_diff:null`，即使磁盘有消息也不暗中恢复。当前板属于另一轮、未完成接收或日志损坏明确错误，不能拼接/跳坏行后声称一致。
+
+`POST /api/replay`仍返回本次明确overrides预览及diff，不写消息/配置/实时板，也不影响后续GET；源损坏失败。进程全局“同round_id最后一次预览”与各写入口remember钩子已移除，调用者若要显示预览应持有该次POST结果；现行复盘三视图继续使用`/api/replay/view`，不改成旧诊断入口。仅本机可信管理使用，未部署。
 
 复盘默认显示最新一步，并在工作流的轮次、配置版本、排位版本或消息数量变化时刷新。当前步成员汇总与所选步同步。接口失败/空轮次不回退占位示例；旧服务缺少该接口时，只读显示当前排位并明确提示逐步历史尚不可用。手动导入文件后停止自动跟随，点击“当前轮次 · 刷新”恢复。
 
@@ -510,7 +526,7 @@ CLI参数与三个输出文件保留，输入显式 `fixture_version:2` 使用�
 
 Gateway不再逐消息spawn业务任务或在网络读循环等共同writer；先原子保存私有接收文件，以容量1唤醒驱动单worker。`EventSink::deliver(binding,event)` 返回 Committed/Deferred 或错误；生产Pipeline在writer内重验轮次/群/类别。IncomingEvent与MessageRecord新增可选 ingress 身份，旧记录None，原自动输入指纹不改。按帧与子项身份恢复，不混同上游重复message_id；原始JSON及目标日志同步后才确认，完整失败边界见 [持久入站](./SPEC-DURABLE-INTAKE.md)。
 
-gateway/status及workflow.gateway、board.status新增intake：pending、pending_by_round、wake_capacity=1、paused、last_error、worker_running。`POST /api/gateway/intake/retry` 必需round_id/config_revision且拒绝未知字段；共同writer内上下文不符409 intake_context_changed，不切轮、不改配置、不批量重解析。前端状态警告直达系统设置接入分区，可键盘恢复。积压轮次的fresh/删除/同轮群类别变更/快照导出及应用/测试reset拒绝409 pending_ingress。快照是完成消息切面，非整个待处理区备份。
+gateway/status及workflow.gateway、board.status新增intake：pending、pending_by_round、wake_capacity=1、paused、last_error、worker_running。`POST /api/gateway/intake/retry` 必需round_id/config_revision且拒绝未知字段；共同writer内上下文不符409 intake_context_changed，不切轮、不改配置、不批量重解析。前端状态警告直达系统设置接入分区，可键盘恢复。积压轮次的fresh/删除/同轮群类别变更/HTTP快照导出及应用/测试reset拒绝409 pending_ingress。管理员控制导出仅取本条收据前的已完成动作，不删除/确认帧、不能恢复队列；所有快照都非整个待处理区灾备。
 
 ### 8.12 成员拉取健康（2026-10-22，已通过隔离门禁）
 

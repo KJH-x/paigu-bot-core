@@ -17,6 +17,7 @@
 <script defer src="./common.js"></script>
   <script defer src="shell.js"></script>
   <script defer src="./manage.js"></script>
+  <script defer src="./private-backup.js"></script>
   <script defer src="./settings.js"></script>
 </head>
 <body data-page="settings">
@@ -120,19 +121,25 @@
         <section class="panel admin-section" id="sec-snapshot" hidden>
           <div class="panel-head"><h2>数据维护 · 私有备份与恢复</h2></div>
           <div class="panel-body">
-            <div class="maintenance-action"><button id="reload" class="small">从磁盘重载服务配置</button><span class="hint">重新读取本机配置文件并确定性重算；先处理未保存草稿。</span></div><p class="hint">完整备份含成员、原消息与管理记录，只保存到本机路径，不用于公开分享。应用仅替换当前同一轮消息与审计，保留当前配置和订单草稿。</p>
+            <div class="maintenance-action"><button id="reload" class="small">从磁盘重载服务配置</button><span class="hint">重新读取本机配置文件并确定性重算；先处理未保存草稿。</span></div><p class="hint">完整私有备份包含成员信息、消息原文、管理记录和本地配置，不可上传公开Issue、PR或网盘分享链接。应用仅替换当前同一轮消息与审计，保留当前配置和订单草稿；不是接收器灾备。</p>
+            <p id="snap-context" class="hint"></p>
+            <label class="checkline"><input id="snap-private-ack" type="checkbox" />我了解备份包含隐私，只用于本机保存或私下交给明确授权的人。</label>
+            <div class="row"><button id="snap-download" class="primary" disabled>下载完整私有备份</button><button id="snap-download-cancel" class="small" hidden>取消下载交付</button></div>
+            <div class="hint" id="snap-download-info" role="status" aria-live="polite"></div>
             <div class="row">
-              <label class="field" style="flex:1;margin:0"><span>out_dir（可选；留空用后端默认目录）</span><input id="snap-out" placeholder="例如 data/snapshots" /></label>
-              <button id="snap-export" class="primary">保存完整私有备份</button>
+              <label class="field" style="flex:1;margin:0"><span>处理主机保存位置（可选；留空使用默认目录）</span><input id="snap-out" placeholder="例如 data/snapshots" /></label>
+              <button id="snap-export" class="small">保存到处理主机</button>
             </div>
             <div class="hint" id="snap-export-info"></div>
             <hr style="border:none;border-top:1px solid var(--border);margin:10px 0" />
-            <label class="field"><span>path（.snapshot.json 文件或目录）</span><input id="snap-path" placeholder="上一步导出返回的路径" /></label>
+            <label class="field"><span>选择浏览器下载的私有备份（最多64MiB）</span><input id="snap-file" type="file" accept=".json,application/json" /></label>
+            <p id="snap-file-info" class="hint" role="status"></p>
+            <label class="field"><span>或使用处理主机上的备份路径（文件或目录）</span><input id="snap-path" placeholder="只选文件或路径其中一种；不会自动应用" /></label>
             <div class="row">
               <button id="snap-import" class="small">预检备份</button>
               <button id="snap-apply" class="danger" disabled>应用已预检备份</button>
             </div>
-            <div id="snap-import-result" class="hint"></div>
+            <div id="snap-import-result" class="hint" role="status" aria-live="polite"></div>
           </div>
         </section>
 

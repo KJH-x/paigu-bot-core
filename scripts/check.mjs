@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {options,isolatedEnvironment,testExecutables,managedDirectory,runSteps,REFERENCE_TEST,REFERENCE_PATH} from './check-lib.mjs';
+import {options,isolatedEnvironment,testExecutables,managedDirectory,runSteps,cargoDiagnostics,REFERENCE_TEST,REFERENCE_PATH} from './check-lib.mjs';
 
 const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const node=process.execPath,manifest=path.join(repository,'Cargo.toml');
@@ -28,7 +28,10 @@ async function execute(label,command,args,{cwd,env,capture=false,privateOutput=f
     child.on('error',error=>{if(active===child)active=null;reject(new Error(label+' could not start ('+error.code+')'));});
     child.on('close',code=>{
       if(active===child)active=null;
-      if(code!==0||interrupted||bytes>32*1024*1024){reject(new Error(label+' failed; later checks were not run'+(privateOutput?' (private diagnostics withheld)':'')));return;}
+      if(code!==0||interrupted||bytes>32*1024*1024){
+        if(capture&&!privateOutput&&command==='cargo')process.stderr.write(cargoDiagnostics(Buffer.concat(stdout).toString('utf8')));
+        reject(new Error(label+' failed; later checks were not run'+(privateOutput?' (private diagnostics withheld)':'')));return;
+      }
       resolve({stdout:Buffer.concat(stdout).toString('utf8'),stderr:Buffer.concat(stderr).toString('utf8')});
     });
   });

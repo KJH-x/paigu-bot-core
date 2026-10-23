@@ -1,5 +1,11 @@
 # 模块契约与文件所有权（MODULES）
 
+T-16 / T-25（2026-10-23，主代理统一接线）：`services/snapshot/mod.rs`持有严格完成记录/完整bundle构建与路径导出，`restore.rs`持有受保护预检/应用，`transfer.rs`持有浏览器文件限额与上下文，`api/snapshot_transfer_routes.rs`仅做私有传输头/Origin和HTTP映射；`web/private-backup.js`是系统数据维护的唯一文件交互控制器，复用既有草稿保护，不在admin另造编辑器。旧斜杠导出在§12.1尚未迁移，现由§15内部`export_completed_locked`复用完成动作构建/写文件（HTTP仍须idle），`pipeline/export.rs`不再另造宽松封包；`MessageLog::snapshot_dir`集中私有默认根/显式覆盖，检查入口与桌面均隔离该路径。
+
+T-17（2026-10-23，已验收）：主代理统一修改`services/replay.rs`及配置/轮次/人工事务/恢复中旧remember调用。诊断只在当前实例共同writer下计算，不维护进程全局最后预览缓存；显式预览、诊断和实时应用分开。`llm/pipeline/replay_diff_tests.rs`按真实共享状态/HTTP验证，不新增业务权限或前端真源。
+
+W-G2-07 / T-25（2026-10-23，主代理统一审计）：`services/rounds/mod.rs`保留轮次创建/设置/激活/删除/文件IO；`check.rs`纯结构/类别诊断，从原rounds.rs移动函数体而非复制真源；原超过120行内联测试移`tests.rs`，有限来源组合/first-match/不改目录性质在`catalog_tests.rs`。`rounds::category_issues`仍为原crate导出路径，外部handler/配置校验不改调用，源码链接同步。
+
 > 配套 [DESIGN.md](./DESIGN.md) §2、[TASKS.md](./TASKS.md)。本文件汇总各模块的**职责、对外契约、文件归属**。
 > 规则：子 agent **只改自己名下的文件**；跨模块改动先在 [TASKS.md](./TASKS.md) 追加「待 A0 处理」，由 A0 统一接线。
 

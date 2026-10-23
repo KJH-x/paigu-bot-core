@@ -19,6 +19,7 @@ import { verifyMemberBoundaries } from './member-boundaries.mjs';
 import { verifyMemberPullHealth } from './member-pull.mjs';
 import { verifyProxyAttribution } from './proxy-attribution.mjs';
 import { verifyTargetModify } from './target-modify.mjs';
+import { verifyPrivateBackup } from './private-backup.mjs';
 import { verifySettlementReview } from './settlement-review.mjs';
 import { verifyReplayGraph } from './replay-graph.mjs';
 import { verifyDraftConcurrency } from './draft-concurrency.mjs';
@@ -109,6 +110,7 @@ function startServer(port, cfgPath) {
       PAIGU_MESSAGES_DIR: path.join(path.dirname(cfgPath), 'messages'),
       PAIGU_EVENTS_DIR: path.join(path.dirname(cfgPath), 'events'),
       PAIGU_SETTLEMENT_DIR: path.join(path.dirname(cfgPath), 'settlement'),
+      PAIGU_SNAPSHOT_DIR: path.join(path.dirname(cfgPath), 'snapshots'),
       PAIGU_WEB_DIR: path.join(REPO_ROOT, 'web'),
       PAIGU_MEMBERS_SEED_PATH: path.join(path.dirname(cfgPath), 'members.seed.json'),
       PAIGU_MEMBERS_EXAMPLE_PATH: path.join(REPO_ROOT, 'data', 'members.example.json'),
@@ -561,6 +563,18 @@ function buildCases() {
         await page.click('#tab-column');
         const readable = await page.locator('.col-table th').first().evaluate(el => getComputedStyle(el).color !== 'rgb(255, 255, 255)');
         assert(readable, '浅色表头不能为白字');
+        const selectedStep = await page.textContent('#step-info');
+        const diagnostic = await api(ctx.base, 'GET', '/api/replay/diff');
+        assertEq(diagnostic.round_id, view.round_id, '诊断明确当前轮次，不借旧预览');
+        assertEq(diagnostic.revision, view.revision, '诊断配置上下文');
+        assertEq(diagnostic.comparison, 'saved_actions_vs_live_allocation', '诊断比较范围明确');
+        assertEq(diagnostic.live_version, before.version, '诊断同切面当前实时版本');
+        const preview = await api(ctx.base, 'POST', '/api/replay', {overrides:{items:[]}});
+        assert(preview.diff.changed, '显式空目录预览确实与默认不同');
+        const current = await api(ctx.base, 'GET', '/api/replay/diff');
+        assertEq(current.diff.changed, false, 'GET不能继承覆盖预览');
+        assertEq(JSON.stringify((await api(ctx.base, 'GET', '/api/board')).board), JSON.stringify(before.board), '预览/诊断不能暗中应用或重载排表');
+        assertEq(await page.textContent('#step-info'), selectedStep, '诊断/预览不改变用户当前复盘步');
         await page.route('**/api/replay/view', route => route.fulfill({status:404,body:'接口尚未启用'}));
         await page.click('#active-refresh');
         await page.waitForFunction(() => document.querySelector('#step-info')?.textContent.includes('逐步历史尚未启用'));
@@ -736,6 +750,7 @@ function buildCases() {
     { name: '成员每日计划、失败恢复、忙碌状态与草稿保护', fn: verifyMemberPullHealth },
     { name: '具名与群外代排归属、原发言溯源和资格说明', fn: verifyProxyAttribution },
     { name: '管理员目标改单、原命令追溯、键盘返回与开关历史边界', fn: verifyTargetModify },
+    { name: '私有备份原字节下载、文件预检应用、取消与迟到保护', fn: verifyPrivateBackup },
     { name: '结算来源复核、保留订单、问题定位、独立规则与并发守卫', fn: verifySettlementReview },
     { name: '关系图商品聚焦分组、完整提示、键盘定位与异步视图保留', fn: verifyReplayGraph },
     { name: '代填取消、乱序迟到、记录冲突、超时与锁定只读', fn: verifyDraftConcurrency },

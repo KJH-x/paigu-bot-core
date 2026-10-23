@@ -8,6 +8,7 @@ pub mod replay_routes;
 pub mod rounds_routes;
 pub mod settlement_routes;
 pub mod sim_routes;
+pub mod snapshot_transfer_routes;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -51,6 +52,7 @@ fn cors_layer() -> CorsLayer {
         }))
         .allow_methods(Any)
         .allow_headers(Any)
+        .expose_headers([header::CONTENT_DISPOSITION])
 }
 
 pub(crate) type ApiError = (StatusCode, Json<Value>);
@@ -103,6 +105,7 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .merge(member_routes::routes())
         .merge(message_routes::routes())
         .merge(replay_routes::routes())
+        .merge(snapshot_transfer_routes::routes())
         .merge(rounds_routes::routes())
         .merge(settlement_routes::routes())
         .route("/", get_service(display_page.clone()))
@@ -120,7 +123,8 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .layer(map_response(|mut resp: Response| async move {
             // 静态资源（JS/CSS/HTML）每次刷新都重新校验，避免改动后浏览器用旧缓存。
             resp.headers_mut()
-                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+                .entry(header::CACHE_CONTROL)
+                .or_insert(HeaderValue::from_static("no-cache"));
             resp
         }))
         .layer(cors_layer())

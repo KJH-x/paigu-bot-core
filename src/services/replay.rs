@@ -1,21 +1,13 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tracing::warn;
 
 use crate::api::ApiState;
 use crate::domain::snapshot::AllocationSnapshot;
 use crate::replay::session::{self, ReplayDiff, ReplayOverrides, ReplayResult};
 
 use super::ServiceError;
-
-/// 最近一次重放结果，按 `round_id` 分键存储，避免跨轮次互相污染。
-fn last_replays() -> &'static Mutex<HashMap<String, ReplayResult>> {
-    static LAST: OnceLock<Mutex<HashMap<String, ReplayResult>>> = OnceLock::new();
-    LAST.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 pub fn replay_result_json(result: &ReplayResult) -> Value {
     json!({
@@ -31,22 +23,17 @@ pub fn replay_result_json(result: &ReplayResult) -> Value {
     })
 }
 
-/// 记录一次重放结果（按 `round_id` 归档，供 `/api/replay/diff` 与 activate replay 复用）。
-pub fn remember_replay(result: &ReplayResult) {
-    if let Ok(mut map) = last_replays().lock() {
-        map.insert(result.round_id.clone(), result.clone());
-    }
-}
-
 pub async fn do_replay(
     state: &ApiState,
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
     let _serial = state.pipeline.message_write_guard().await;
     let cfg = state.cfg.read().await;
-    let result = session::replay(state.messages.as_ref(), &cfg, overrides).await?;
-    remember_replay(&result);
-    Ok(result)
+    state
+        .messages
+        .read_ingress_records(&cfg.round.round_id)
+        .await?;
+    session::replay(state.messages.as_ref(), &cfg, overrides).await
 }
 
 /// 消息变更后的权威重算：原消息不改写，一次发布派生投影。
@@ -57,7 +44,6 @@ pub(crate) async fn recompute_locked(
 ) -> anyhow::Result<Value> {
     let started = std::time::Instant::now();
     let result = state.pipeline.recompute_locked(cfg).await?;
-    remember_replay(&result);
 
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for outcome in &result.outcomes {
@@ -97,31 +83,43 @@ pub async fn active_view(state: &ApiState) -> Result<Value, ServiceError> {
 }
 
 pub async fn replay_diff(state: &ApiState) -> Result<Value, ServiceError> {
-    let cfg = state.cfg.get().await;
-    let round_id = cfg.round.round_id.clone();
-    let stored = last_replays()
-        .lock()
-        .ok()
-        .and_then(|map| map.get(&round_id).cloned());
-    let result = match stored {
-        Some(result) => result,
-        None => do_replay(state, ReplayOverrides::default())
-            .await
-            .map_err(ServiceError::from)?,
-    };
-
+    let _serial = state.pipeline.message_write_guard().await;
+    let cfg = state.cfg.read().await;
+    {
+        let _fence = state.messages.ingress_commit_guard().await;
+        super::configuration::ensure_no_pending_ingress(&state.messages, &cfg.round.round_id)?;
+    }
+    state
+        .messages
+        .read_ingress_records(&cfg.round.round_id)
+        .await?;
+    let result = session::replay(&state.messages, &cfg, ReplayOverrides::default()).await?;
     let (live_version, live_board) = state.pipeline.board().await;
-    let live_snapshot: Option<AllocationSnapshot> = match serde_json::from_value(live_board) {
-        Ok(board) => Some(board),
-        Err(e) => {
-            warn!("实时 board 反序列化失败: {e}");
-            None
-        }
+    let live_snapshot: Option<AllocationSnapshot> = if live_board.is_null() {
+        None
+    } else {
+        Some(serde_json::from_value(live_board).map_err(anyhow::Error::from)?)
     };
+    if live_snapshot
+        .as_ref()
+        .is_some_and(|board| board.round_id.0 != cfg.round.round_id)
+    {
+        return Err(ServiceError::Conflict(
+            json!({"error":"replay_context_changed",
+            "message":"当前实时排表不属于激活轮次，未拼接不同轮次；请重新读取"}),
+        ));
+    }
     let live_diff: Option<ReplayDiff> =
         live_snapshot.map(|board| ReplayDiff::from_boards(&board, &result.board));
 
     Ok(json!({
+        "round_id": cfg.round.round_id,
+        "revision": cfg.revision,
+        "source": "active_round",
+        "comparison": "saved_actions_vs_live_allocation",
+        "message_count": result.messages.len(),
+        "live_available": live_diff.is_some(),
+        "consistent": live_diff.as_ref().map(|diff| !diff.changed),
         "version": result.version,
         "base_version": result.diff.base_version,
         "diff": result.diff,

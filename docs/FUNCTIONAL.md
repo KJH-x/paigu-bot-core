@@ -47,7 +47,9 @@
 
 七个工作区固定同序互达：总览、轮次与商品、排谷、结算与下单、复盘、成员、系统设置。旧admin/消息/成员入口只作兼容跳转，不能成为另一个编辑真源；模拟器页已移除。路由装配：[`build_router`](../src/api/mod.rs)，桌面说明：[web/README](../web/README.md)。
 
-轮次库以 `active_round_id` 指向私有 `data/rounds/<id>.json`。创建/阶段/当前设置归轮次管理；商品四类目录独立编辑。切换与重放解耦；界面不提供“激活并清空”，已有后台fresh合同不等于日常推荐操作。[`activate_round`](../src/services/rounds.rs)、[`setup_round`](../src/services/rounds.rs)。
+轮次库以 `active_round_id` 指向私有 `data/rounds/<id>.json`。创建/阶段/当前设置归轮次管理；商品四类目录独立编辑。切换与重放解耦；界面不提供“激活并清空”，已有后台fresh合同不等于日常推荐操作。[`activate_round`](../src/services/rounds/mod.rs)、[`setup_round`](../src/services/rounds/mod.rs)。
+
+目录结构诊断与匹配分开：跨商品款式名/款式别名复用合法，仍按既定目录first-match；同商品自己的名称/别名不自撞。真正跨商品涉及商品名/商品别名的冲突、重复身份和种类结构不符为error；显式class与推导不符和缺价为warn，不自动改目录/价格/class，不重解释已存动作。[`check_issues`](../src/services/rounds/check.rs)。
 
 系统设置分接入、消息理解、展示默认、数据维护，一次显示一组。业务区显式独立保存，在最新配置上合并该区允许字段；同区冲突保留输入，不顺带提交其他区草稿。轮次/成员/结算/消息亦有统一离开草稿保护；此时才询问保存/放弃/继续，不给每次消息保存增加确认。
 
@@ -73,13 +75,17 @@
 
 复盘默认读取当前激活轮次实际消息/动作，最新步、成员汇总、表格/列/图，追溯可去同一消息处理。关系图默认当前商品，支持分组全部、单领/等待、姓名/款式定位、键盘与明暗；绘图本地无CDN。视图切换保留各自视区/步骤；当前轮旧条改解释也刷新。手动导入明确只读，不改当前排位，不回退假示例。[`active_view`](../src/services/replay.rs)、[`Pipeline::replay_view`](../src/llm/pipeline/replay_view.rs)。
 
+旧差异入口另明确为当前激活轮已保存动作与实时投影的一致性诊断，共同writer/配置读锁内重新计算，不借其他实例或上次预览；未初始化实时板明确不可比较，不自动恢复/应用。显式覆盖预览仍在本次POST响应中，不污染后续诊断；时间戳/昵称样式不作为业务差异，比较范围为既有位次/认领/汇总/结算及领域版本。[`replay_diff`](../src/services/replay.rs)、[`do_replay`](../src/services/replay.rs)。本批验收见工程计划§13。
+
 ## 7. 结算、下单与备份
 
 结算真源是 [`evaluate`](../src/settlement/engine.rs)。目录仅子项调价，调价不参与折扣/减均/特典档位；规则只试算与显式独立保存，不顺带保存订单。
 
 排位/权限/目录/称呼/规则变化，旧订单保留但提示需重新核对、旧来源试算。普通后台保存不能清掉标记；管理员显式保留当前订单复核才记录新来源基线。锁定前检查数量、目标/价格和唯一订单号，问题可定位实际输入。重排包单独显式触发；正式页面不注入演示订单。[`put_draft`](../src/services/settlement/mod.rs)、[`lock_draft`](../src/services/settlement/mod.rs)，来源守卫见 [结算模块](../src/services/settlement/)。
 
-私有导出/预检/显式应用支持完整日志和人工选择，保留当前配置/订单草稿；恢复可重试，不重注入NC或请求模型。备份不能上传公开Issue/PR；浏览器下载形态仍是差距。[`snapshot_export`](../src/services/snapshot.rs)、[`snapshot_import`](../src/services/snapshot.rs)。
+私有导出/预检/显式应用支持完整日志和人工选择，保留当前配置/订单草稿；恢复可重试，不重注入NC或请求模型。系统数据维护另提供明确隐私确认后的浏览器附件下载及选择文件预检；文件/路径互斥、明确应用，原字节不经浏览器JSON重打包，64MiB以上改用主机路径，不截断。下载只含已保存数据、不含页面草稿或待处理帧，不是成员缓存灾备；仅本机可信环境，不能上传公开Issue/PR。[`snapshot_export`](../src/services/snapshot/mod.rs)、[`snapshot_import`](../src/services/snapshot/restore.rs)、[文件传输](../src/services/snapshot/transfer.rs)。本批验收状态见工程计划§12。
+
+管理员“导出”复用同一严格读取/完整审计与草稿/封包/文件写入，但保留本控制记录保存前的已完成动作切面，不等待或确认自身NC收据。原始审计可含未执行帧，不恢复待处理队列，不是接收器灾备；HTTP导出与破坏性应用仍保留idle守卫。损坏行或Pending消息拒绝导出/应用，不跳坏行写空备份。默认目录随私有消息存储根（或明确PAIGU_SNAPSHOT_DIR），每次唯一目录避免覆盖；显式路径合同保留。[`Pipeline::export_snapshot`](../src/llm/pipeline/export.rs)。
 
 ## 8. 测试与仍未完成项
 

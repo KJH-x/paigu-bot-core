@@ -148,7 +148,17 @@ impl AllocationEngine {
         let mut user_summaries_map: HashMap<UserId, Vec<UserItemAllocation>> = HashMap::new();
         let warnings = Vec::new();
 
-        for ((item_id, subitem_id), state) in &item_states {
+        let mut ordered_states: Vec<_> = item_states.iter().collect();
+        ordered_states.sort_by(|((a, sub_a), _), ((b, sub_b), _)| {
+            item_map
+                .get(a)
+                .map(|item| item.sort_order)
+                .unwrap_or(0)
+                .cmp(&item_map.get(b).map(|item| item.sort_order).unwrap_or(0))
+                .then_with(|| a.0.cmp(&b.0))
+                .then_with(|| sub_a.cmp(sub_b))
+        });
+        for ((item_id, subitem_id), state) in ordered_states {
             let item = item_map.get(item_id);
             let item_name = item.map(|i| i.name.clone()).unwrap_or_default();
             let kind = item
@@ -170,7 +180,9 @@ impl AllocationEngine {
                     if let Some(ref uid) = slot.user_id {
                         if let Some(item) = item {
                             let entry = user_summaries_map.entry(uid.clone()).or_default();
-                            if let Some(existing) = entry.iter_mut().find(|e| e.item_id == *item_id)
+                            if let Some(existing) = entry
+                                .iter_mut()
+                                .find(|e| e.item_id == *item_id && e.claim_type == ClaimType::Split)
                             {
                                 existing.quantity += 1;
                                 existing.gross = existing

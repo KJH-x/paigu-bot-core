@@ -165,9 +165,9 @@ impl SnapshotBundle {
     }
 
     /// 导出为**单一 JSON 文件**（C-2）：原始消息 + 计算结果缓存 + 计算版本与时间。
-    pub fn export_file(&self, path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+    pub fn as_file(&self) -> anyhow::Result<SnapshotFile> {
         let manifest = self.manifest_typed()?;
-        let file = SnapshotFile {
+        Ok(SnapshotFile {
             format: FILE_FORMAT.to_string(),
             computed_at: chrono::Utc::now().to_rfc3339(),
             computed_by: format!("paigu-bot-core/{}", env!("CARGO_PKG_VERSION")),
@@ -178,7 +178,11 @@ impl SnapshotBundle {
             events: self.events.clone(),
             snapshot: self.snapshot.clone(),
             settlement: self.settlement.clone(),
-        };
+        })
+    }
+
+    pub fn export_file(&self, path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+        let file = self.as_file()?;
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -193,6 +197,10 @@ impl SnapshotBundle {
     pub fn import_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path.as_ref())?;
         let file: SnapshotFile = serde_json::from_str(&raw)?;
+        Self::from_file(file)
+    }
+
+    pub fn from_file(file: SnapshotFile) -> anyhow::Result<Self> {
         if file.format != FILE_FORMAT {
             anyhow::bail!("unsupported snapshot format: {}", file.format);
         }

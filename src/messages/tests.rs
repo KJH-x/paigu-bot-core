@@ -1,5 +1,29 @@
 use super::*;
 
+#[test]
+fn private_snapshot_root_follows_the_message_store_unless_explicitly_overridden() {
+    let normal = MessageLog::new("data/messages", "data/events");
+    assert_eq!(
+        normal.snapshot_dir_override(None),
+        PathBuf::from("data/snapshots")
+    );
+    let isolated = MessageLog::new("owned/messages", "owned/events");
+    assert_eq!(
+        isolated.snapshot_dir_override(None),
+        PathBuf::from("owned/snapshots")
+    );
+    for empty in ["", "  "] {
+        assert_eq!(
+            isolated.snapshot_dir_override(Some(empty)),
+            PathBuf::from("owned/snapshots")
+        );
+    }
+    assert_eq!(
+        isolated.snapshot_dir_override(Some("explicit/private")),
+        PathBuf::from("explicit/private")
+    );
+}
+
 fn temp_dir() -> PathBuf {
     std::env::temp_dir().join(format!("paigu-msgs-test-{}", uuid::Uuid::new_v4()))
 }
