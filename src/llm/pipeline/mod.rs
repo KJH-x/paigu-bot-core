@@ -20,6 +20,7 @@ use super::client::{LlmClient, OpenAiClient};
 mod admin;
 mod export;
 mod ingress;
+mod live;
 mod llm_parse;
 mod names;
 mod proxy;
@@ -43,6 +44,8 @@ mod closure_tests;
 mod computed_tests;
 #[cfg(test)]
 mod export_command_tests;
+#[cfg(test)]
+mod incremental_tests;
 #[cfg(test)]
 mod ingress_tests;
 #[cfg(test)]
@@ -703,7 +706,11 @@ impl Pipeline {
                 .insert(source.clone(), context.record.clone());
         }
         let result = async {
-            let records = self.messages.read_all(&cfg.round.round_id).await?;
+            let records = self
+                .messages
+                .read_ingress_records(&cfg.round.round_id)
+                .await?;
+            let records = self.select_live_records(records).await;
             let mut ordered: Vec<_> = records.iter().collect();
             ordered.sort_by_key(|record| (record.timestamp_ms, record.seq));
             let overrides =
@@ -784,7 +791,7 @@ impl Pipeline {
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("新消息已不存在"))?;
             }
-            self.recompute_locked(&cfg).await?;
+            self.advance_locked(&cfg).await?;
             anyhow::Ok(())
         }
         .await;

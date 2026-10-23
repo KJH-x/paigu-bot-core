@@ -19,7 +19,9 @@ use crate::round::{PhaseWindow, RoundPhase};
 use crate::settings::{AppConfig, ItemConfig};
 use crate::settlement::SettlementConfig;
 
+mod incremental;
 mod understanding;
+pub(crate) use incremental::{replay_incremental, Memo};
 pub(crate) use understanding::{
     evaluate_understanding, prepare_understanding, prepare_with_catalog, Evaluation,
 };
@@ -190,6 +192,13 @@ pub(crate) async fn replay_from_journal(
     journal: &[serde_json::Value],
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
+    let (parse_overrides, manual_phase) = journal_context(journal)?;
+    replay_messages_with_parse(base, records, overrides, &parse_overrides, manual_phase).await
+}
+
+fn journal_context(
+    journal: &[serde_json::Value],
+) -> anyhow::Result<(ParseOverrides, Option<RoundPhase>)> {
     let events: Vec<EventEnvelope> = journal
         .iter()
         .filter(|value| value.get("event_type").is_some())
@@ -205,7 +214,7 @@ pub(crate) async fn replay_from_journal(
             DomainEvent::RoundPhaseSet(set) => set.phase,
             _ => None,
         });
-    replay_messages_with_parse(base, records, overrides, &parse_overrides, manual_phase).await
+    Ok((parse_overrides, manual_phase))
 }
 
 /// 从内存消息列表重放（快照导入 / 单测复用）；不消费 `ParseOverride` 事件。
@@ -370,6 +379,30 @@ async fn compute(
     items: &[Item],
     initial_eligibility: &[Eligibility],
 ) -> Computation {
+    compute_with_memo(
+        cfg,
+        records,
+        parse_overrides,
+        manual_phase,
+        items,
+        initial_eligibility,
+        None,
+    )
+    .await
+    .0
+}
+
+async fn compute_with_memo(
+    cfg: &AppConfig,
+    records: &[MessageRecord],
+    parse_overrides: &ParseOverrides,
+    manual_phase: Option<RoundPhase>,
+    items: &[Item],
+    initial_eligibility: &[Eligibility],
+    memo: Option<(&Memo, String)>,
+) -> (Computation, Memo) {
+    let previous = memo.as_ref().map(|(previous, _)| *previous);
+    let context = memo.map(|(_, context)| context);
     let round_id = RoundId(cfg.round.round_id.clone());
 
     let display_names = resolve_display_names(cfg, records);
@@ -384,8 +417,16 @@ async fn compute(
     let mut messages = Vec::with_capacity(ordered.len());
     let mut outcomes = Vec::with_capacity(ordered.len());
     let mut latest_ts: i64 = 0;
+    let mut reusable = context
+        .as_ref()
+        .is_some_and(|key| previous.and_then(|memo| memo.context.as_ref()) == Some(key));
+    let capture = context.is_some();
+    let mut next = Memo {
+        context,
+        ..Memo::default()
+    };
 
-    for group in &groups {
+    for (group_index, group) in groups.iter().enumerate() {
         // 代表 = 组内 `(timestamp_ms, seq)` 最大者。
         let rep_pos = group
             .iter()
@@ -401,6 +442,32 @@ async fn compute(
         );
 
         let members: Vec<_> = group.iter().map(|&index| ordered[index]).collect();
+        let key = if capture {
+            incremental::group_key(&members, parse_overrides)
+        } else {
+            None
+        };
+        if reusable {
+            if let Some(cached) = previous
+                .and_then(|memo| memo.groups.get(group_index))
+                .filter(|cached| key.as_ref() == Some(&cached.key))
+            {
+                events.extend(cached.events.clone());
+                eligibilities.extend(cached.eligibility.clone());
+                messages.extend(cached.messages.clone());
+                outcomes.extend(cached.outcomes.clone());
+                next.groups.push(cached.clone());
+                next.work.reused_groups += 1;
+                continue;
+            }
+        }
+        reusable = false;
+        let start = (
+            events.len(),
+            eligibilities.len(),
+            messages.len(),
+            outcomes.len(),
+        );
         let automatic = ordered[rep_pos]
             .processing
             .as_ref()
@@ -421,6 +488,7 @@ async fn compute(
             automatic,
         )
         .await;
+        next.work.evaluated_groups += 1;
         processed.explain_cancellations(&events, cfg);
 
         let rep_uid = ordered[rep_pos].user_id.clone();
@@ -484,6 +552,35 @@ async fn compute(
                 detail,
             });
         }
+        if capture {
+            if key.is_none() {
+                next.context = None;
+            }
+            next.groups.push(incremental::GroupProjection {
+                key: key.unwrap_or_default(),
+                events: events[start.0..].to_vec(),
+                eligibility: eligibilities[start.1..].to_vec(),
+                messages: messages[start.2..].to_vec(),
+                outcomes: outcomes[start.3..].to_vec(),
+            });
+        }
+    }
+
+    let raw_names: HashMap<_, _> = records
+        .iter()
+        .map(|r| (r.record_id.as_str(), r.nickname.as_str()))
+        .collect();
+    for message in &mut messages {
+        message.nickname = display_names
+            .get(&UserId(message.user_id.clone()))
+            .cloned()
+            .unwrap_or_else(|| {
+                raw_names
+                    .get(message.record_id.as_str())
+                    .copied()
+                    .unwrap_or("")
+                    .to_string()
+            });
     }
 
     let mut board = rebuild_allocation_snapshot(items, &events, &eligibilities, &display_names);
@@ -496,16 +593,19 @@ async fn compute(
         Some(RoundPhase::Settling) | Some(RoundPhase::Locked)
     );
 
-    Computation {
-        messages,
-        outcomes,
-        events,
-        eligibilities,
-        display_names,
-        board,
-        version,
-        locked,
-    }
+    (
+        Computation {
+            messages,
+            outcomes,
+            events,
+            eligibilities,
+            display_names,
+            board,
+            version,
+            locked,
+        },
+        next,
+    )
 }
 
 pub(crate) fn resolve_display_names(
@@ -877,5 +977,7 @@ fn priority_eligibility(round_id: &RoundId, user_id: &str) -> Eligibility {
     }
 }
 
+#[cfg(test)]
+mod incremental_tests;
 #[cfg(test)]
 mod tests;

@@ -41,7 +41,7 @@ impl Pipeline {
                 return Some(self.persistence_failure(ev, false, error).await);
             }
             if dirty || records.iter().any(|r| r.ingress.as_ref() == Some(source)) {
-                if let Err(error) = self.recompute_locked(cfg).await {
+                if let Err(error) = self.advance_locked(cfg).await {
                     return Some(self.persistence_failure(ev, false, error).await);
                 }
             } else {
@@ -72,7 +72,7 @@ impl Pipeline {
         {
             return Some(self.persistence_failure(ev, false, error).await);
         }
-        if let Err(error) = self.recompute_locked(cfg).await {
+        if let Err(error) = self.advance_locked(cfg).await {
             return Some(self.persistence_failure(ev, false, error).await);
         }
         let state = self.state.lock().await;

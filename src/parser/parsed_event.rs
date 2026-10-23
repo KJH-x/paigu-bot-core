@@ -142,6 +142,17 @@ pub struct ParseOverrides {
 }
 
 impl ParseOverrides {
+    pub(crate) fn input_for(&self, record_id: &str, message_id: &str) -> serde_json::Value {
+        serde_json::json!((
+            self.records.get(record_id),
+            self.selections.get(record_id),
+            self.invalid_selections.get(record_id),
+            self.versions.get(record_id),
+            self.choices.get(record_id),
+            self.messages.get(message_id)
+        ))
+    }
+
     pub fn record_revision(&self, record_id: &str, stored_revision: u64) -> u64 {
         let revision = self
             .records

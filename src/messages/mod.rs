@@ -410,6 +410,7 @@ impl MessageLog {
         self.store_for(round_id).append(rec).await
     }
 
+    #[cfg(test)]
     pub async fn read_all(&self, round_id: &str) -> anyhow::Result<Vec<MessageRecord>> {
         self.ensure_no_replacement(round_id)?;
         self.store_for(round_id).read_all().await

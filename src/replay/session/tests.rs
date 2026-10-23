@@ -7,7 +7,7 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("paigu-session-{tag}-{}", uuid::Uuid::new_v4()))
 }
 
-fn test_config() -> AppConfig {
+pub(super) fn test_config() -> AppConfig {
     let mut cfg = default_config();
     cfg.llm.enabled = false;
     cfg.round.round_id = "test_round".to_string();
@@ -36,7 +36,7 @@ fn test_config() -> AppConfig {
     cfg
 }
 
-fn record(seq: i64, user_id: &str, text: &str, ts: i64) -> MessageRecord {
+pub(super) fn record(seq: i64, user_id: &str, text: &str, ts: i64) -> MessageRecord {
     MessageRecord {
         record_id: format!("record-{seq}-{user_id}"),
         record_revision: 1,

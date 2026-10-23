@@ -294,7 +294,20 @@ async fn sim_reset(State(state): State<Arc<ApiState>>) -> Result<Json<Value>, Ap
         &state.cfg.get().await.round.round_id,
     )
     .map_err(crate::services::ServiceError::into_api)?;
-    state.pipeline.reset_locked().await;
+    let cfg = state.cfg.get().await;
+    let records = state
+        .messages
+        .read_ingress_records(&cfg.round.round_id)
+        .await
+        .map_err(crate::api::api_internal)?;
+    let persistent_lock = crate::services::settlement::round_locked(&cfg.round.round_id)
+        .map_err(crate::services::ServiceError::into_api)?;
+    state.pipeline.fresh_cut_locked(&records).await;
+    crate::replay::computed::invalidate(&state.messages, &cfg.round.round_id);
+    state
+        .pipeline
+        .restore_settlement_lock(persistent_lock)
+        .await;
     clear_identities();
     let (version, _) = state.pipeline.board().await;
     Ok(Json(json!({ "ok": true, "version": version })))

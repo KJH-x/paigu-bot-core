@@ -20,6 +20,7 @@ import { verifyMemberPullHealth } from './member-pull.mjs';
 import { verifyProxyAttribution } from './proxy-attribution.mjs';
 import { verifyTargetModify } from './target-modify.mjs';
 import { verifyPrivateBackup } from './private-backup.mjs';
+import { verifyIncrementalFresh } from './incremental-fresh.mjs';
 import { verifySettlementReview } from './settlement-review.mjs';
 import { verifyReplayGraph } from './replay-graph.mjs';
 import { verifyDraftConcurrency } from './draft-concurrency.mjs';
@@ -752,6 +753,7 @@ function buildCases() {
     { name: '具名与群外代排归属、原发言溯源和资格说明', fn: verifyProxyAttribution },
     { name: '管理员目标改单、原命令追溯、键盘返回与开关历史边界', fn: verifyTargetModify },
     { name: '私有备份原字节下载、文件预检应用、取消与迟到保护', fn: verifyPrivateBackup },
+    { name: '真实合并尾组、fresh切面与逐条复盘、HTTP重置', fn: verifyIncrementalFresh },
     { name: '结算来源复核、保留订单、问题定位、独立规则与并发守卫', fn: verifySettlementReview },
     { name: '关系图商品聚焦分组、完整提示、键盘定位与异步视图保留', fn: verifyReplayGraph },
     { name: '代填取消、乱序迟到、记录冲突、超时与锁定只读', fn: verifyDraftConcurrency },

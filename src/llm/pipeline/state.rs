@@ -12,6 +12,8 @@ use super::Pipeline;
 
 #[derive(Default, Clone)]
 pub(super) struct State {
+    pub(super) source_cut: Option<HashSet<String>>,
+    pub(super) memo: crate::replay::session::Memo,
     pub(super) ingress_seen: HashSet<crate::bus::IngressSource>,
     pub(super) ingress_pending:
         std::collections::HashMap<crate::bus::IngressSource, LogMessageRecord>,
@@ -72,9 +74,18 @@ impl Pipeline {
         self.reset_locked().await;
     }
 
+    #[cfg(test)]
     pub(crate) async fn reset_locked(&self) {
         let mut state = self.state.lock().await;
         *state = State::default();
+    }
+
+    pub(crate) async fn fresh_cut_locked(&self, records: &[LogMessageRecord]) {
+        *self.state.lock().await = State {
+            source_cut: (!records.is_empty())
+                .then(|| records.iter().map(|r| r.record_id.clone()).collect()),
+            ..State::default()
+        };
     }
 
     /// Continue switches use the selected round's own in-process cache, never the
@@ -197,6 +208,8 @@ impl Pipeline {
             })
             .collect();
         *state = State {
+            source_cut: None,
+            memo: Default::default(),
             ingress_seen: records
                 .iter()
                 .filter(|r| r.status != "Pending")

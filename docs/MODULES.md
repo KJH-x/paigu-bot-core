@@ -1,5 +1,7 @@
 # 模块契约与文件所有权（MODULES）
 
+B1（2026-10-23，主代理统一接线）：`session/incremental.rs`只持有逐组输出备忘/签名与入口，`session/mod.rs`的同一compute/evaluate承担全量与后缀执行，不复制分配器；`ParseOverrides::input_for`封装完整有效覆盖键。`pipeline/live.rs`持有受共同writer保护的实时推进/完整收据/部分投影不落盘边界，`State`持有随轮parked的memo/cut；轮次fresh和测试reset在提交前准备记录身份，不删源。原`MessageLog::read_all`迁移式包装现仅测试使用，生产合并路径改严格只读源；内部query的既有迁移合同不变。普通非合并持续发布仍待B2，不把本批称全部完成。
+
 UP-02基础（2026-10-23，主代理统一接线）：`replay/computed`只管私有完整上下文、内部字段封包、校验/有界加载/可丢弃原子写；仍调用`session::replay_from_journal`，不另造解析/分配器。`MessageLog::computed_path`校验轮次及私有根；`build.rs`以全部Rust源/Cargo文件计算源码依赖指纹，复用既有sha2作构建依赖，无新下载包。启动/冷轮恢复、事务/配置/导入提交检查点与显式replay边界由主代理统一装配；普通入站及尾组增量仍见工程计划§16的B批，不能把基础缓存当完整统一栈完成。
 
 T-16 / T-25（2026-10-23，主代理统一接线）：`services/snapshot/mod.rs`持有严格完成记录/完整bundle构建与路径导出，`restore.rs`持有受保护预检/应用，`transfer.rs`持有浏览器文件限额与上下文，`api/snapshot_transfer_routes.rs`仅做私有传输头/Origin和HTTP映射；`web/private-backup.js`是系统数据维护的唯一文件交互控制器，复用既有草稿保护，不在admin另造编辑器。旧斜杠导出在§12.1尚未迁移，现由§15内部`export_completed_locked`复用完成动作构建/写文件（HTTP仍须idle），`pipeline/export.rs`不再另造宽松封包；`MessageLog::snapshot_dir`集中私有默认根/显式覆盖，检查入口与桌面均隔离该路径。

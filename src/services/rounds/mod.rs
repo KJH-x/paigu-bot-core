@@ -202,6 +202,11 @@ pub async fn activate_round(
     }
     let persistent_lock = super::settlement::round_locked(&id)?;
     cfg.revision = revision.saturating_add(1);
+    let fresh_records = if mode == "fresh" {
+        Some(state.messages.read_ingress_records(&id).await?)
+    } else {
+        None
+    };
     let cold_continue =
         mode == "continue" && previous_round != id && !state.pipeline.has_parked_round(&id).await;
     let prepared = if mode == "replay" || cold_continue {
@@ -237,6 +242,14 @@ pub async fn activate_round(
     match mode.as_str() {
         "fresh" => {
             reset = true;
+            state
+                .pipeline
+                .fresh_cut_locked(
+                    fresh_records
+                        .as_ref()
+                        .expect("fresh prepared before config commit"),
+                )
+                .await;
             crate::replay::computed::invalidate(&state.messages, &id);
         }
         "replay" => {

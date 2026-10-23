@@ -106,6 +106,13 @@ fn context_at(
     ))
 }
 
+pub(super) fn incremental_context(
+    cfg: &AppConfig,
+    phase: Option<crate::round::RoundPhase>,
+) -> anyhow::Result<String> {
+    digest(&(context(cfg, &[], &[])?, phase))
+}
+
 fn load(
     path: &std::path::Path,
     key: &str,
