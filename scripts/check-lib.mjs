@@ -23,7 +23,7 @@ export function isolatedEnvironment(directory,repository,inherited={}){
   for(const [key,value] of Object.entries({
     PAIGU_CONFIG_PATH:path.join(store,'config','app.json'),PAIGU_ROUNDS_DIR:path.join(store,'rounds'),
     PAIGU_MESSAGES_DIR:path.join(store,'messages'),PAIGU_EVENTS_DIR:path.join(store,'events'),
-    PAIGU_SETTLEMENT_DIR:path.join(store,'settlement'),PAIGU_SNAPSHOT_DIR:path.join(store,'snapshots'),PAIGU_MEMBERS_SEED_PATH:path.join(store,'missing.seed.json'),
+    PAIGU_SETTLEMENT_DIR:path.join(store,'settlement'),PAIGU_SNAPSHOT_DIR:path.join(store,'snapshots'),PAIGU_COMPUTED_DIR:path.join(store,'computed'),PAIGU_MEMBERS_SEED_PATH:path.join(store,'missing.seed.json'),
     PAIGU_MEMBERS_EXAMPLE_PATH:path.join(repository,'data','members.example.json'),PAIGU_WEB_DIR:path.join(repository,'web'),
     PAIGU_UI_CAPTURE_DIR:path.join(directory,'ui-captures'),CARGO_TARGET_DIR:path.join(repository,'target'),
     TMP:path.join(directory,'temp'),TEMP:path.join(directory,'temp'),TMPDIR:path.join(directory,'temp'),RUST_LOG:'warn'

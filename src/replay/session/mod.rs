@@ -180,7 +180,22 @@ pub async fn replay(
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
     let records = store.read_only(&base.round.round_id).await?;
-    let events = store.domain_events(&base.round.round_id).await?;
+    let journal = store.read_events_strict(&base.round.round_id).await?;
+    replay_from_journal(base, &records, &journal, overrides).await
+}
+
+pub(crate) async fn replay_from_journal(
+    base: &AppConfig,
+    records: &[MessageRecord],
+    journal: &[serde_json::Value],
+    overrides: ReplayOverrides,
+) -> anyhow::Result<ReplayResult> {
+    let events: Vec<EventEnvelope> = journal
+        .iter()
+        .filter(|value| value.get("event_type").is_some())
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<Result<_, _>>()?;
     let parse_overrides = collect_parse_overrides(&events);
     let manual_phase = events
         .iter()
@@ -190,7 +205,7 @@ pub async fn replay(
             DomainEvent::RoundPhaseSet(set) => set.phase,
             _ => None,
         });
-    replay_messages_with_parse(base, &records, overrides, &parse_overrides, manual_phase).await
+    replay_messages_with_parse(base, records, overrides, &parse_overrides, manual_phase).await
 }
 
 /// 从内存消息列表重放（快照导入 / 单测复用）；不消费 `ParseOverride` 事件。

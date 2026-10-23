@@ -5,7 +5,7 @@
 
 ## 1. 运行与接收
 
-`run`（默认）与 `serve` 装配同一 Gateway、Pipeline 和本地 HTTP 服务，不连接 PostgreSQL。启动先从持久消息/人工审计恢复，再接受入站；坏日志或不能恢复的结算锁明确失败，不猜测恢复成功。入口：[`run_gateway_stack`](../src/main.rs)、[`restore_persistent_lock`](../src/services/settlement/mod.rs)。
+`run`（默认）与 `serve` 装配同一 Gateway、Pipeline 和本地 HTTP 服务，不连接 PostgreSQL。启动先严格核验持久消息/人工审计，再使用有效派生缓存或确定性重算，并恢复持久结算锁后才启动接收；坏日志或不能恢复的结算锁明确失败，不猜测恢复成功。入口：[`run_gateway_stack`](../src/main.rs)、[`Pipeline::restore`](../src/llm/pipeline/mod.rs)、[`restore_persistent_lock`](../src/services/settlement/mod.rs)。
 
 - Gateway 接收 OneBot 反向 WS，检查群消息、白名单、非空及成员限制，群名片优先。[`decide_route`](../src/gateway/onebot/mod.rs)、[`parse_identity`](../src/gateway/onebot/mod.rs)。
 - 昵称清洗统一调用 [`clean_nickname`](../src/parser/normalize.rs)：全角归一，首个括号或空白截断；代理语义另保留身份，不能靠改显示名取得管理员资格。
@@ -95,7 +95,9 @@
 
 消息、每步/最终排位与结算显示CN；无CN按对应步骤最新有效称呼回退，重复/Drop不污染当前名。报告版本按实际事件数从0起，取消也增长；input_message_count与最终结算不再返回旧默认空值。步骤diff按商品/款式/盒/格比较，包含撤空消失格、同人换认购/状态变化，顺序固定；款式差异附可选subitem_id。原result/outcomes/report与步骤字段保留，新增Dropped/Merged/Error计数。格式与验证见 [DEVELOPMENT](./DEVELOPMENT.md)。
 
-管理员目标改单语法、完整具名代理歧义、有界入站、调度可观测性及跨商品提示分级等仍以 [TODOS](./TODOS.md)/工程计划为准；ColumnLocked与管理员阶段豁免仍需业务决策。远程发布暂停，未部署或重启常驻实例。
+管理员目标改单、具名代理、有界入站、调度可观测性及跨商品分级已分批验收，证据见 [TODOS](./TODOS.md)/工程计划。私有派生缓存基础与恢复已接线，完整来源/配置/成员内容/当前阶段/源码依赖指纹及payload哈希失效，坏缓存回退、坏真源失败。人工事务、配置业务重算和私有导入提交后更新检查点；只读预览/诊断不因此写缓存。普通入站每步检查点和尾组增量仍在下一批，不把文件命中当作增量完成。[`checkpoint`](../src/replay/computed/mod.rs)。
+
+派生文件默认在私有消息根旁computed，最多读取64MiB，可删除重建，不是备份或待处理队列。continue保留本轮进程内状态；冷轮从有效缓存/完整真源恢复，fresh清空当前投影并移除该轮缓存，显式replay跳过读取全算。复盘仍逐原消息可达、步骤不折叠，模式/游标不落缓存。ColumnLocked与管理员阶段豁免仍需业务决策；远程发布暂停，未部署或重启常驻实例。
 
 ## 9. 已放弃／历史内容（不可据此重新执行）
 

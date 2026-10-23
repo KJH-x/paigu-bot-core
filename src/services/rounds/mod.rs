@@ -202,12 +202,18 @@ pub async fn activate_round(
     }
     let persistent_lock = super::settlement::round_locked(&id)?;
     cfg.revision = revision.saturating_add(1);
-    let prepared = if mode == "replay" {
+    let cold_continue =
+        mode == "continue" && previous_round != id && !state.pipeline.has_parked_round(&id).await;
+    let prepared = if mode == "replay" || cold_continue {
         let records = state.messages.read_only(&id).await?;
-        let result = crate::replay::session::replay(
+        let (result, _) = crate::replay::computed::replay(
             &state.messages,
             &cfg,
-            crate::replay::session::ReplayOverrides::default(),
+            if mode == "replay" {
+                crate::replay::computed::ReadPolicy::Force
+            } else {
+                crate::replay::computed::ReadPolicy::Prefer
+            },
         )
         .await?;
         Some((records, result))
@@ -231,6 +237,7 @@ pub async fn activate_round(
     match mode.as_str() {
         "fresh" => {
             reset = true;
+            crate::replay::computed::invalidate(&state.messages, &id);
         }
         "replay" => {
             reset = true;
@@ -238,7 +245,11 @@ pub async fn activate_round(
             state.pipeline.apply_replay(&result, &records).await;
             replayed = Some(replay::replay_result_json(&result));
         }
-        _ => {}
+        _ => {
+            if let Some((records, result)) = prepared {
+                state.pipeline.apply_replay(&result, &records).await;
+            }
+        }
     }
     state
         .pipeline

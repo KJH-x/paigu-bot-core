@@ -183,6 +183,7 @@ pub async fn snapshot_import(state: &ApiState, body: ImportBody) -> Result<Value
         .replace_round_durable(&cfg.round.round_id, &records, &events)
         .await?;
     state.pipeline.apply_replay(&computed, &records).await;
+    crate::replay::computed::checkpoint(&state.messages, &cfg, &computed, &records).await;
     Ok(
         json!({"ok":true,"verified":true,"applied":true,"manifest":manifest,"backup_path":backup,"result":replay_result_json(&computed)}),
     )

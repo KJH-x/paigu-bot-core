@@ -79,6 +79,10 @@ impl Pipeline {
 
     /// Continue switches use the selected round's own in-process cache, never the
     /// previous round's board. Replay remains an explicit, separate operation.
+    pub(crate) async fn has_parked_round(&self, round: &str) -> bool {
+        self.parked.lock().await.contains_key(round)
+    }
+
     pub(crate) async fn switch_round_locked(&self, previous: &str, next: &str, fresh: bool) {
         let mut parked = self.parked.lock().await;
         let mut state = self.state.lock().await;

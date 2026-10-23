@@ -62,19 +62,10 @@ async fn run_gateway_stack() -> Result<()> {
         Arc::new(llm::client::OpenAiClient::new()),
         messages.clone(),
     );
-    // Rebuild from the durable message/audit journal before accepting any new input.
+    // Verify durable sources before accepting input; derived data is disposable.
     // A corrupt/torn journal stops startup instead of silently reviving old choices.
-    pipeline.recompute().await?;
+    pipeline.restore().await?;
     let gateway = gateway::Gateway::new(store.clone(), pipeline.clone());
-
-    {
-        let gw = gateway.clone();
-        tokio::spawn(async move {
-            if let Err(e) = gw.run().await {
-                tracing::error!("gateway stopped: {e}");
-            }
-        });
-    }
 
     let port: u16 = std::env::var("PAIGU_HTTP_PORT")
         .ok()
@@ -96,6 +87,14 @@ async fn run_gateway_stack() -> Result<()> {
     services::settlement::restore_persistent_lock(&state)
         .await
         .map_err(|error| anyhow::anyhow!("恢复结算锁定状态失败：{error:?}"))?;
+    {
+        let gw = gateway.clone();
+        tokio::spawn(async move {
+            if let Err(e) = gw.run().await {
+                tracing::error!("gateway stopped: {e}");
+            }
+        });
+    }
     let watcher_state = Arc::downgrade(&state);
     store.spawn_watch(move || {
         let weak = watcher_state.clone();

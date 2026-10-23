@@ -111,6 +111,7 @@ function startServer(port, cfgPath) {
       PAIGU_EVENTS_DIR: path.join(path.dirname(cfgPath), 'events'),
       PAIGU_SETTLEMENT_DIR: path.join(path.dirname(cfgPath), 'settlement'),
       PAIGU_SNAPSHOT_DIR: path.join(path.dirname(cfgPath), 'snapshots'),
+      PAIGU_COMPUTED_DIR: path.join(path.dirname(cfgPath), 'computed'),
       PAIGU_WEB_DIR: path.join(REPO_ROOT, 'web'),
       PAIGU_MEMBERS_SEED_PATH: path.join(path.dirname(cfgPath), 'members.seed.json'),
       PAIGU_MEMBERS_EXAMPLE_PATH: path.join(REPO_ROOT, 'data', 'members.example.json'),

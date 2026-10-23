@@ -295,7 +295,7 @@ fn member_cache_path_and_missing_file_cannot_reuse_another_group_name_map() {
         r#"{"group_id":"123456789","members":[{"user_id":1,"card":"成员02（备注）"}]}"#,
     )
     .unwrap();
-    let stamp = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1000);
+    let stamp = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1000);
     for path in [&first, &second] {
         std::fs::File::options()
             .write(true)

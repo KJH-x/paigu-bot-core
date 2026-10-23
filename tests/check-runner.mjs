@@ -18,13 +18,14 @@ test('check flags are explicit and paths are resolved without changing the calle
 });
 test('all runtime stores, OS temp and UI filters are isolated, without mutating parent env',()=>{
   const directory=path.resolve('owned-check'),repo=path.resolve('source');
-  const original={PATH:'public-path',PAIGU_CONFIG_PATH:'unwanted',PAIGU_ROUNDS_DIR:'unwanted',PAIGU_SNAPSHOT_DIR:'unwanted',PAIGU_UI_CAPTURE_DIR:'unwanted',PAIGU_E2E_FILTER:'subset',DEEPSEEK_API_KEY:'not-real',PAIGU_TEST_KEY_UNSET:'not-real'};
+  const original={PATH:'public-path',PAIGU_CONFIG_PATH:'unwanted',PAIGU_ROUNDS_DIR:'unwanted',PAIGU_SNAPSHOT_DIR:'unwanted',PAIGU_COMPUTED_DIR:'unwanted',PAIGU_UI_CAPTURE_DIR:'unwanted',PAIGU_E2E_FILTER:'subset',DEEPSEEK_API_KEY:'not-real',PAIGU_TEST_KEY_UNSET:'not-real'};
   const env=isolatedEnvironment(directory,repo,original);
-  for(const key of ['PAIGU_CONFIG_PATH','PAIGU_ROUNDS_DIR','PAIGU_MESSAGES_DIR','PAIGU_EVENTS_DIR','PAIGU_SETTLEMENT_DIR','PAIGU_SNAPSHOT_DIR','PAIGU_MEMBERS_SEED_PATH','PAIGU_UI_CAPTURE_DIR','TMP','TEMP','TMPDIR'])assert.ok(env[key].startsWith(directory+path.sep),key);
+  for(const key of ['PAIGU_CONFIG_PATH','PAIGU_ROUNDS_DIR','PAIGU_MESSAGES_DIR','PAIGU_EVENTS_DIR','PAIGU_SETTLEMENT_DIR','PAIGU_SNAPSHOT_DIR','PAIGU_COMPUTED_DIR','PAIGU_MEMBERS_SEED_PATH','PAIGU_UI_CAPTURE_DIR','TMP','TEMP','TMPDIR'])assert.ok(env[key].startsWith(directory+path.sep),key);
   assert.equal(env.PAIGU_E2E_FILTER,undefined);assert.equal(env.DEEPSEEK_API_KEY,undefined);assert.equal(env.PAIGU_TEST_KEY_UNSET,undefined);
   assert.equal(env.PAIGU_WEB_DIR,path.join(repo,'web'));assert.equal(env.CARGO_TARGET_DIR,path.join(repo,'target'));assert.equal(env.PATH,'public-path');
   assert.equal(original.PAIGU_CONFIG_PATH,'unwanted');assert.equal(original.PAIGU_E2E_FILTER,'subset');
   assert.equal(original.PAIGU_SNAPSHOT_DIR,'unwanted');
+  assert.equal(original.PAIGU_COMPUTED_DIR,'unwanted');
 });
 test('Cargo JSON selects actual test binaries, not build scripts, and fails closed',()=>{
   const target=path.resolve('target'),exe=path.join(target,'debug','deps','tests.exe');

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::SystemTime;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -456,11 +455,11 @@ fn is_id_like(s: &str) -> bool {
 }
 
 /// 成员缓存（`members.cache_path`）→ `user_id -> 展示名`（`card` 优先，回退 `nickname`）。
-/// 按路径与文件 mtime 缓存；文件消失时清空，避免跨来源复用。
+/// 按路径/群/内容缓存；相同mtime的替换和文件消失亦失效。
 struct CachedMemberNames {
     path: PathBuf,
     group_id: String,
-    modified: Option<SystemTime>,
+    content: Vec<u8>,
     names: HashMap<String, String>,
 }
 type MemberNameCache = Mutex<Option<CachedMemberNames>>;
@@ -470,12 +469,9 @@ fn member_name_map() -> &'static MemberNameCache {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
-fn load_member_name_map(path: &str, group_id: &str) -> HashMap<String, String> {
+fn load_member_name_map(raw: &[u8], group_id: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return map;
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(raw) else {
         return map;
     };
     if value
@@ -522,18 +518,18 @@ fn with_member_map<T>(cfg: &AppConfig, f: impl FnOnce(&HashMap<String, String>) 
     if path.is_empty() {
         return None;
     }
-    let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+    let content = std::fs::read(path).unwrap_or_default();
     let mut guard = member_name_map().lock().ok()?;
     let key = PathBuf::from(path);
     let stale = guard.as_ref().is_none_or(|cached| {
-        cached.path != key || cached.modified != mtime || cached.group_id != cfg.round.group_id
+        cached.path != key || cached.content != content || cached.group_id != cfg.round.group_id
     });
     if stale {
-        let map = load_member_name_map(path, &cfg.round.group_id);
+        let map = load_member_name_map(&content, &cfg.round.group_id);
         *guard = Some(CachedMemberNames {
             path: key,
             group_id: cfg.round.group_id.clone(),
-            modified: mtime,
+            content,
             names: map,
         });
     }

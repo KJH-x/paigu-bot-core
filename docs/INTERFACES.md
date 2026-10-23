@@ -559,3 +559,13 @@ IncomingEvent/MessageRecord新增可选`delegation`，日志缺省None、序列�
 资格按目标成员，实际actor白名单另验；阶段/手动锁及当前持久结算锁均不豁免，锁状态损坏为Error，不当未锁。权限前完整动作与当时manual_phase进入原自动产物；关执行开关不取消历史，锁期被拒绝者也不因后来解锁自动生效。保存后姓名/缓存不换目标、不问模型；人工作为完整override的改动和单步撤回继续沿用共同事务，不修改管理员原话。source窗口明确“管理员改单来源”，完整原话已展示时不重复同一段文字。
 
 `pipeline/names`统一提交后的姓名投影：新动作成功持久化后才更新公开名字，无动作但有效的拒绝/待核对消息若更新称呼，同步刷新看板姓名而不增加领域版本；Dropped/Duplicate不污染名称，写失败不发布新称呼/部分状态。重放也忽略原Dropped/重复来源，不能通过只比较数量掩盖姓名漂移。该小型投影刷新不是旧UP磁盘computed缓存/尾组增量已经实现。
+
+### 8.15 私有派生检查点（2026-10-23，基础恢复）
+
+`replay/computed`不是HTTP接口或快照交换格式。文件为`{format:1,build,context,integrity,payload:{result,eligibilities,display_names}}`，最后两项显式补齐ReplayResult的HTTP序列化跳过字段。默认私有消息根旁`computed/<round>.json`，PAIGU_COMPUTED_DIR可显式覆盖（使用私有非web目录）；轮次必须完整合法、不修剪后拼路径。加载最多64MiB、格式/构建/语义key/payload SHA256及轮次/版本/记录身份均检查，失败重算且原真源坏行仍硬失败。校验不是本机恶意篡改认证或加密。
+
+context覆盖完整原记录/理解/修订、完整审计、配置语义、成员文件内容及当前阶段；build为全部src Rust、Cargo.toml/Cargo.lock/build.rs与目标配置的构建指纹。cfg.revision/active_round_id不改变语义key，命中后使用当前revision；HTTP投影epoch/revision仍独立，不从文件恢复。配置密钥环境值不读取进key或payload，不额外复制整份配置；payload本身含成员/动作等隐私，不可公开分享。
+
+启动replacement恢复/严格源核验→缓存或全算→独立恢复持久结算锁→启动接收。continue已有parked状态优先，冷轮先准备缓存/完整重放再提交配置；fresh清空当前投影并移除该轮缓存，显式replay强制全算。人工事务/业务配置/导入在原持久提交后检查原记录与当前称呼，再写可丢弃检查点；失败不把已提交操作变成失败。只读预览/diff不写派生文件，缓存不恢复原始入站队列。
+
+当前是工程计划§16 A批；普通实时追加/尾组修订持续检查点及实际增量仍属B批。没有新增公开API、静态目录、前端真源或删减复盘步骤，不部署/重启实例。

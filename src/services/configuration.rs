@@ -102,6 +102,7 @@ pub(crate) async fn apply_locked(
     }
     if let Some(computed) = computed {
         state.pipeline.apply_replay(&computed, &records).await;
+        crate::replay::computed::checkpoint(&state.messages, &next, &computed, &records).await;
         state
             .pipeline
             .restore_settlement_lock(persistent_lock)

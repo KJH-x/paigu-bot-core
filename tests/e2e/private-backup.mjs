@@ -104,6 +104,11 @@ export async function verifyPrivateBackup(page, ctx) {
     await page.waitForFunction(() => document.querySelector('#conn-badge').textContent === '已连接' && document.querySelector('#snap-apply').disabled);
     check((await api(ctx.base, 'GET', '/api/messages')).messages.length === 1, 'selected backup restores old message cut');
     check(fs.readFileSync(journal, 'utf8').includes('9007199254740993'), 'raw upload preserves exact integer in restored journal');
+    const derived = path.join(ctx.tmpDir, 'config', 'computed', round + '.json');
+    check(fs.existsSync(derived), 'protected import publishes a private derived checkpoint');
+    for (const route of [`/computed/${round}.json`, `/data/computed/${round}.json`]) {
+      const hidden = await fetch(ctx.base + route); check(hidden.status === 404, 'derived member data never enters static routes');
+    }
 
     await page.locator('#snap-file').setInputFiles(saved); await preflight();
     await page.locator('#snap-path').fill(saved);

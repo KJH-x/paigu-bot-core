@@ -263,6 +263,18 @@ pub struct MessageLog {
 }
 
 impl MessageLog {
+    pub(crate) fn computed_path(&self, round: &str) -> anyhow::Result<PathBuf> {
+        anyhow::ensure!(
+            crate::settings::rounds::is_valid_round_id(round) && round == round.trim(),
+            "非法派生缓存轮次"
+        );
+        let root = std::env::var_os("PAIGU_COMPUTED_DIR")
+            .filter(|value| !value.to_string_lossy().trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.dir.parent().unwrap_or(Path::new(".")).join("computed"));
+        Ok(root.join(format!("{round}.json")))
+    }
+
     pub(crate) fn snapshot_dir(&self) -> PathBuf {
         let configured = std::env::var("PAIGU_SNAPSHOT_DIR").ok();
         self.snapshot_dir_override(configured.as_deref())

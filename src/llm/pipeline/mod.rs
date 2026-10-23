@@ -12,7 +12,7 @@ use crate::engine::replay::rebuild_allocation_snapshot;
 use crate::messages::{MessageLog, MessageRecord as LogMessageRecord};
 use crate::parser::coalesce::Classification;
 use crate::parser::parsed_event::ParsedIntent;
-use crate::replay::session::{ReplayOverrides, ReplayResult};
+use crate::replay::session::ReplayResult;
 use crate::settings::{AppConfig, ConfigStore};
 
 use super::client::{LlmClient, OpenAiClient};
@@ -39,6 +39,8 @@ mod automatic_tests;
 mod boundary_tests;
 #[cfg(test)]
 mod closure_tests;
+#[cfg(test)]
+mod computed_tests;
 #[cfg(test)]
 mod export_command_tests;
 #[cfg(test)]
@@ -811,6 +813,7 @@ impl Pipeline {
     }
 
     /// 以消息日志为准的权威重算（实时/重放同源）；返回重放结果。
+    #[cfg(test)]
     pub async fn recompute(&self) -> anyhow::Result<ReplayResult> {
         let _serial = self.message_write_guard().await;
         let cfg = self.cfg.get().await;
@@ -820,14 +823,36 @@ impl Pipeline {
         self.recompute_locked(&cfg).await
     }
 
+    /// Startup recovery may reuse a verified derived result, never the pending input queue.
+    pub(crate) async fn restore(&self) -> anyhow::Result<ReplayResult> {
+        let _serial = self.message_write_guard().await;
+        let cfg = self.cfg.read().await;
+        self.messages
+            .recover_replacement(&cfg.round.round_id)
+            .await?;
+        let (result, _) = crate::replay::computed::replay(
+            &self.messages,
+            &cfg,
+            crate::replay::computed::ReadPolicy::Prefer,
+        )
+        .await?;
+        let records = self.messages.read_only(&cfg.round.round_id).await?;
+        self.apply_replay(&result, &records).await;
+        Ok(result)
+    }
+
     pub(crate) async fn message_write_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.messages.write_guard().await
     }
 
     /// Caller holds message_write_guard; manual writers also hold the config read guard.
     pub(crate) async fn recompute_locked(&self, cfg: &AppConfig) -> anyhow::Result<ReplayResult> {
-        let result =
-            crate::replay::session::replay(&self.messages, cfg, ReplayOverrides::default()).await?;
+        let (result, _) = crate::replay::computed::replay(
+            &self.messages,
+            cfg,
+            crate::replay::computed::ReadPolicy::Force,
+        )
+        .await?;
         // Inputs and original automatic outcomes are immutable. Current revisions
         // and status belong to the rebuildable projection, not a second file commit.
         let records = self.messages.read_only(&cfg.round.round_id).await?;
