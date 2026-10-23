@@ -739,6 +739,7 @@ impl ConfigStore {
             .path
             .canonicalize()
             .unwrap_or_else(|_| self.path.clone());
+        let source = Arc::downgrade(self);
         std::thread::spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel();
             let Ok(mut watcher) = notify::RecommendedWatcher::new(tx, NConfig::default()) else {
@@ -756,19 +757,33 @@ impl ConfigStore {
                 .unwrap_or_else(|_| rounds::rounds_dir());
             let _ = watcher.watch(&rounds, RecursiveMode::NonRecursive);
             while let Ok(event) = rx.recv() {
+                let Some(store) = source.upgrade() else {
+                    break;
+                };
+                let active = store.inner.blocking_read().round.round_id.clone();
                 let relevant = |event: &Result<notify::Event, notify::Error>| {
                     event.as_ref().is_ok_and(|event| {
                         event.paths.iter().any(|p| {
                             p == &path
                                 || (p.parent() == Some(rounds.as_path())
-                                    && p.extension().is_some_and(|e| e == "json"))
+                                    && p.extension().is_some_and(|e| e == "json")
+                                    && p.file_stem().is_some_and(|id| id == active.as_str()))
                         })
                     })
                 };
                 let mut changed = relevant(&event);
-                // Trailing-edge debounce runs only in this dedicated OS thread.
-                while let Ok(event) = rx.recv_timeout(std::time::Duration::from_millis(300)) {
-                    changed |= relevant(&event);
+                if !changed {
+                    continue;
+                }
+                // A fixed coalescing window cannot be extended indefinitely by unrelated IO.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+                while let Some(remaining) =
+                    deadline.checked_duration_since(std::time::Instant::now())
+                {
+                    match rx.recv_timeout(remaining) {
+                        Ok(event) => changed |= relevant(&event),
+                        Err(_) => break,
+                    }
                 }
                 if changed {
                     runtime.spawn(on_change());

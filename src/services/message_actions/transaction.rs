@@ -196,7 +196,7 @@ async fn publish(
         )
         .await?;
     // Everything after the durable record is a rebuildable projection, not another filesystem commit.
-    state.pipeline.apply_replay(&computed, records).await;
+    state.pipeline.apply_replay(cfg, &computed, records).await;
     crate::replay::computed::checkpoint(&state.messages, cfg, &computed, records).await;
     let mut next = events.to_vec();
     next.push(event);
@@ -225,7 +225,7 @@ pub(super) async fn save(
     let overrides = crate::parser::parsed_event::collect_parse_overrides(&events);
     if duplicate(&events, &body.transaction_id, &hash)? {
         let computed = compute(&state.messages, &cfg, &records, &overrides).await?;
-        state.pipeline.apply_replay(&computed, &records).await;
+        state.pipeline.apply_replay(&cfg, &computed, &records).await;
         crate::replay::computed::checkpoint(&state.messages, &cfg, &computed, &records).await;
         return Ok(
             json!({"ok":true,"deduplicated":true,"transaction_id":body.transaction_id,"message":projected(main,&computed),"result":replay::replay_result_json(&computed),"undo":undo_view(&events)}),
@@ -467,7 +467,7 @@ pub async fn undo(state: &ApiState, body: UndoInput) -> Result<Value, ServiceErr
     let overrides = crate::parser::parsed_event::collect_parse_overrides(&events);
     if duplicate(&events, &body.transaction_id, &hash)? {
         let computed = compute(&state.messages, &cfg, &records, &overrides).await?;
-        state.pipeline.apply_replay(&computed, &records).await;
+        state.pipeline.apply_replay(&cfg, &computed, &records).await;
         crate::replay::computed::checkpoint(&state.messages, &cfg, &computed, &records).await;
         return Ok(
             json!({"ok":true,"deduplicated":true,"result":replay::replay_result_json(&computed),"undo":undo_view(&events)}),

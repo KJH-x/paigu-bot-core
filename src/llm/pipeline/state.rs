@@ -25,7 +25,6 @@ pub(super) struct State {
     pub(super) eligibilities: Vec<Eligibility>,
     pub(super) display: std::collections::HashMap<String, String>,
     pub(super) identity: std::collections::HashMap<String, String>,
-    pub(super) seq: i64,
     pub(super) version: i64,
     pub(super) snapshot: Option<AllocationSnapshot>,
     /// 管理员 `/锁位` `/结团` 后为 true，不再接受排/撤/改（`/开团` 解锁）。
@@ -46,25 +45,6 @@ pub(super) struct MessageRecord {
     pub(super) text: String,
     pub(super) status: String,
     pub(super) detail: String,
-}
-
-impl MessageRecord {
-    pub(super) fn from_log(record: &LogMessageRecord, round_id: &str, display: &str) -> Self {
-        Self {
-            delegation: record.delegation.clone(),
-            original_automatic: crate::messages::processing::original_summary(record),
-            manual_note: None,
-            record_id: record.record_id.clone(),
-            record_revision: record.record_revision,
-            round_id: round_id.to_string(),
-            seq: record.seq,
-            user_id: record.user_id.clone(),
-            display: display.to_string(),
-            text: record.text.clone(),
-            status: record.status.clone(),
-            detail: record.detail.clone(),
-        }
-    }
 }
 
 impl Pipeline {
@@ -172,17 +152,26 @@ impl Pipeline {
     }
 
     /// 将持久化日志的权威重放结果一次性应用到实时管线。
-    pub async fn apply_replay(&self, result: &ReplayResult, records: &[LogMessageRecord]) {
+    pub(crate) async fn apply_replay(
+        &self,
+        cfg: &crate::settings::AppConfig,
+        result: &ReplayResult,
+        records: &[LogMessageRecord],
+    ) {
         let mut state = self.state.lock().await;
         let locked = result.locked;
         let mut seen = HashSet::new();
         let mut identity = std::collections::HashMap::new();
-        for record in records {
+        let mut ordered: Vec<_> = records.iter().collect();
+        ordered.sort_by_key(|r| (r.timestamp_ms, r.seq));
+        for record in ordered {
             if record.status != "Pending" {
                 seen.insert(format!("{}::{}", record.group_id, record.message_id));
             }
-            let (clean, _) = crate::parser::normalize::clean_nickname(&record.nickname);
-            identity.insert(record.user_id.clone(), clean);
+            if crate::replay::session::is_name_source(cfg, record) {
+                let (clean, _) = crate::parser::normalize::clean_nickname(&record.nickname);
+                identity.insert(record.user_id.clone(), clean);
+            }
         }
         let display = result
             .display_names
@@ -228,7 +217,6 @@ impl Pipeline {
             eligibilities: result.eligibilities.clone(),
             display,
             identity,
-            seq: records.iter().map(|record| record.seq).max().unwrap_or(0),
             version: result.version,
             snapshot: Some(result.board.clone()),
             locked,

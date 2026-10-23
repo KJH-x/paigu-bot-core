@@ -225,7 +225,7 @@ pub async fn activate_round(
     } else {
         None
     };
-    match state.cfg.put(cfg, revision).await {
+    match state.cfg.put(cfg.clone(), revision).await {
         Ok(_) => {}
         Err(crate::settings::ConfigError::StaleRevision { actual, .. }) => {
             return Err(ServiceError::StaleRevision(actual));
@@ -255,12 +255,12 @@ pub async fn activate_round(
         "replay" => {
             reset = true;
             let (records, result) = prepared.expect("replay prepared before config commit");
-            state.pipeline.apply_replay(&result, &records).await;
+            state.pipeline.apply_replay(&cfg, &result, &records).await;
             replayed = Some(replay::replay_result_json(&result));
         }
         _ => {
             if let Some((records, result)) = prepared {
-                state.pipeline.apply_replay(&result, &records).await;
+                state.pipeline.apply_replay(&cfg, &result, &records).await;
             }
         }
     }

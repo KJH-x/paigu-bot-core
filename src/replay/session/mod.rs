@@ -436,6 +436,7 @@ async fn compute_with_memo(
         latest_ts = latest_ts.max(
             group
                 .iter()
+                .filter(|&&i| is_name_source(cfg, ordered[i]))
                 .map(|&i| ordered[i].timestamp_ms)
                 .max()
                 .unwrap_or(0),
@@ -616,26 +617,7 @@ pub(crate) fn resolve_display_names(
     ordered.sort_by_key(|record| (record.timestamp_ms, record.seq));
     let mut names = HashMap::new();
     for record in ordered {
-        let duplicate = record
-            .processing
-            .as_ref()
-            .and_then(|h| h.results.first())
-            .is_some_and(|r| {
-                matches!(
-                    r.understanding.source,
-                    crate::messages::processing::UnderstandingSource::Duplicate
-                )
-            });
-        if duplicate
-            || record.status == "Dropped"
-            || record
-                .processing
-                .as_ref()
-                .and_then(|history| history.results.first())
-                .is_some_and(|result| result.original_outcome.status == "Dropped")
-            || record.routed.to_ascii_lowercase().starts_with("drop")
-            || !policy::group_allowed(&cfg.gateway.whitelist_groups, &record.group_id)
-        {
+        if !is_name_source(cfg, record) {
             continue;
         }
         if let Some(name) = record
@@ -648,6 +630,47 @@ pub(crate) fn resolve_display_names(
         }
     }
     names
+}
+
+pub(crate) fn is_name_source(cfg: &AppConfig, record: &MessageRecord) -> bool {
+    let duplicate = record
+        .processing
+        .as_ref()
+        .and_then(|h| h.results.first())
+        .is_some_and(|r| {
+            matches!(
+                r.understanding.source,
+                crate::messages::processing::UnderstandingSource::Duplicate
+            )
+        });
+    if duplicate
+        || matches!(record.status.as_str(), "Dropped" | "Duplicate")
+        || record
+            .processing
+            .as_ref()
+            .and_then(|history| history.results.first())
+            .is_some_and(|result| result.original_outcome.status == "Dropped")
+        || record.routed.to_ascii_lowercase().starts_with("drop")
+        || !policy::group_allowed(&cfg.gateway.whitelist_groups, &record.group_id)
+    {
+        return false;
+    }
+    let (actor, nick) = record
+        .delegation
+        .as_ref()
+        .map(|d| (d.actor_user_id.as_str(), d.actor_nickname.as_str()))
+        .unwrap_or((
+            record.sender_user_id.as_deref().unwrap_or(&record.user_id),
+            record
+                .sender_nickname
+                .as_deref()
+                .unwrap_or(&record.nickname),
+        ));
+    let candidates = crate::settings::priority_candidates(cfg, actor, nick);
+    policy::member_allowed(
+        &cfg.gateway.whitelist_members,
+        &candidates.iter().map(String::as_str).collect::<Vec<_>>(),
+    )
 }
 
 async fn process_one(
@@ -742,6 +765,9 @@ async fn process_one(
         );
     }
     // Historical logs without an automatic artifact remain a visibly separate compatibility path.
+    if rec.status == "Duplicate" {
+        return Evaluation::skipped("Duplicate", rec.detail.clone());
+    }
     let text = rec.text.trim();
     let understood = if text.is_empty() || text.starts_with(['/', '／']) {
         Understanding::terminal(

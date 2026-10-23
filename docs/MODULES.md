@@ -1,5 +1,7 @@
 # 模块契约与文件所有权（MODULES）
 
+B2（2026-10-23，主代理统一接线）：普通/合并/代理/控制/terminal成功保存后均交`pipeline/live`推进和检查点；`admin`只负责副作用前共同授权/严格源及持久锁校验，保存原terminal产物，不另拼State。删除确认无调用方的`pipeline/names.rs`、admin重复资格构造、from_log与死seq缓存；姓名/identity改用session同一来源过滤。apply_replay显式接受调用方cfg，避免持有cfg读锁时再入读锁；接口无HTTP变化。`settings::spawn_watch`按当前激活轮过滤、固定窗口合并，相关修改/测试由主代理统一完成。最终有限T-26仍未收口。
+
 B1（2026-10-23，主代理统一接线）：`session/incremental.rs`只持有逐组输出备忘/签名与入口，`session/mod.rs`的同一compute/evaluate承担全量与后缀执行，不复制分配器；`ParseOverrides::input_for`封装完整有效覆盖键。`pipeline/live.rs`持有受共同writer保护的实时推进/完整收据/部分投影不落盘边界，`State`持有随轮parked的memo/cut；轮次fresh和测试reset在提交前准备记录身份，不删源。原`MessageLog::read_all`迁移式包装现仅测试使用，生产合并路径改严格只读源；内部query的既有迁移合同不变。普通非合并持续发布仍待B2，不把本批称全部完成。
 
 UP-02基础（2026-10-23，主代理统一接线）：`replay/computed`只管私有完整上下文、内部字段封包、校验/有界加载/可丢弃原子写；仍调用`session::replay_from_journal`，不另造解析/分配器。`MessageLog::computed_path`校验轮次及私有根；`build.rs`以全部Rust源/Cargo文件计算源码依赖指纹，复用既有sha2作构建依赖，无新下载包。启动/冷轮恢复、事务/配置/导入提交检查点与显式replay边界由主代理统一装配；普通入站及尾组增量仍见工程计划§16的B批，不能把基础缓存当完整统一栈完成。
@@ -17,7 +19,7 @@ W-G2-07 / T-25（2026-10-23，主代理统一审计）：`services/rounds/mod.rs
 
 2026-10-22代排：`settings/targets.rs`为源群受约束的一次性确定性成员索引；`pipeline/proxy.rs`负责分段与归属，独立真实actor/资格主体。bus与MessageRecord可选delegation不改旧None指纹；session共用权限/冻结动作。展示/复盘汇总携user_id作行身份，不再按显示名重猜CN。合同见INTERFACES §8.13；不授予管理/阶段豁免。
 
-同日T-14接线：`pipeline/target_modify.rs`只负责命令授权/唯一目标和规范化视图，不另造分配器；body/actor/source保存在admin_modify来源，原text不改，共用understanding及session权限。`pipeline/names.rs`统一提交后的称呼更新、无动作时同代快照同步，失败/Drop/重复不提升姓名真源；不是持久computed缓存。主代理统一修改common coalesce的全角斜杠控制边界，防止命令混进同语义组，详见INTERFACES §8.14。
+同日T-14接线：`pipeline/target_modify.rs`只负责命令授权/唯一目标和规范化视图，不另造分配器；body/actor/source保存在admin_modify来源，原text不改，共用understanding及session权限。当时`pipeline/names.rs`的小型提交后姓名刷新现已由B2共享会话取代、文件删除，保留失败/Drop/重复不提升姓名真源边界。主代理统一修改common coalesce的全角斜杠控制边界，防止命令混进同语义组，详见INTERFACES §8.14。
 
 ## 0. 冻结接口（跨模块契约，改动需 A0 同意）
 

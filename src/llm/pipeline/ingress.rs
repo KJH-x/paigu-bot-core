@@ -19,6 +19,12 @@ impl Pipeline {
         cfg: &AppConfig,
         ev: &IncomingEvent,
     ) -> Option<PipelineOutcome> {
+        let dirty = self.state.lock().await.ingress_dirty;
+        if ev.ingress.is_none() && dirty {
+            if let Err(error) = self.advance_locked(cfg).await {
+                return Some(self.publication_failure(error).await);
+            }
+        }
         let source = ev.ingress.as_ref()?;
         let (loaded, pending, dirty) = {
             let state = self.state.lock().await;
@@ -42,7 +48,7 @@ impl Pipeline {
             }
             if dirty || records.iter().any(|r| r.ingress.as_ref() == Some(source)) {
                 if let Err(error) = self.advance_locked(cfg).await {
-                    return Some(self.persistence_failure(ev, false, error).await);
+                    return Some(self.publication_failure(error).await);
                 }
             } else {
                 // Loading receipt metadata for a genuinely new frame must not
@@ -70,10 +76,10 @@ impl Pipeline {
             .read_ingress_records(&cfg.round.round_id)
             .await
         {
-            return Some(self.persistence_failure(ev, false, error).await);
+            return Some(self.publication_failure(error).await);
         }
         if let Err(error) = self.advance_locked(cfg).await {
-            return Some(self.persistence_failure(ev, false, error).await);
+            return Some(self.publication_failure(error).await);
         }
         let state = self.state.lock().await;
         Some(PipelineOutcome {

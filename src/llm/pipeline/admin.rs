@@ -1,36 +1,72 @@
-use chrono::{DateTime, Utc};
-use serde_json::Value;
-
-use crate::bus::{IncomingEvent, PipelineOutcome};
-use crate::domain::claim::{Eligibility, EligibilityScope};
-use crate::domain::ids::{EligibilityId, RoundId, UserId};
-
-use super::state::MessageRecord;
+use super::understanding::ProcessingContext;
 use super::Pipeline;
+use crate::bus::{IncomingEvent, PipelineOutcome};
+use crate::messages::processing::{ProcessingOutcome, Understanding, UnderstandingSource};
+use crate::settings::AppConfig;
 
 impl Pipeline {
     /// 管理员斜杠命令**落地执行**（D-1，仅在 `gateway.admin_commands_enabled` 开启时调用）。
     pub(super) async fn run_admin_command(
         &self,
-        round_id: &str,
+        cfg: &AppConfig,
         ev: &IncomingEvent,
-        display: &str,
-        seq: i64,
+        context: &mut ProcessingContext,
         cmd: &str,
     ) -> PipelineOutcome {
+        let authorization = Understanding::terminal(
+            UnderstandingSource::Control,
+            "Applied",
+            "控制命令身份检查",
+            None,
+        );
+        let evaluated = crate::replay::session::evaluate_understanding(
+            cfg,
+            &context.record,
+            &authorization,
+            context.manual_phase,
+        );
+        if evaluated.outcome.status != "Applied" {
+            context.understanding = Understanding::terminal(
+                UnderstandingSource::Control,
+                &evaluated.outcome.status,
+                evaluated.outcome.detail.clone(),
+                None,
+            );
+            return self.finish(cfg, context, ev, evaluated.outcome).await;
+        }
+        if let Err(error) = self
+            .messages
+            .read_ingress_records(&cfg.round.round_id)
+            .await
+        {
+            return self.persistence_failure(ev, false, error).await;
+        }
+        if let Err(error) = self.messages.domain_events(&cfg.round.round_id).await {
+            return self.persistence_failure(ev, false, error).await;
+        }
+        let persistent_lock = match crate::services::settlement::round_locked(&cfg.round.round_id) {
+            Ok(locked) => locked,
+            Err(_) => {
+                return self
+                    .persistence_failure(
+                        ev,
+                        false,
+                        anyhow::anyhow!("持久结算锁不可校验，未执行控制命令"),
+                    )
+                    .await
+            }
+        };
         let head = cmd.split_whitespace().next().unwrap_or("").to_string();
         let (status, detail, reply): (&str, String, String) = match head.as_str() {
             "开团" | "解锁" | "open" | "unlock" => {
-                let round_id = self.cfg.get().await.round.round_id;
-                if crate::services::settlement::round_locked(&round_id).unwrap_or(false) {
+                if persistent_lock {
                     (
                         "Rejected",
                         "订单已持久化锁定，请在结算页解锁".to_string(),
                         "订单已锁定；请在结算页确认并解锁。".to_string(),
                     )
                 } else {
-                    let cfg = self.cfg.get().await;
-                    if let Err(error) = self.set_locked_locked(&cfg, false).await {
+                    if let Err(error) = self.set_locked_locked(cfg, false).await {
                         return self.persistence_failure(ev, false, error).await;
                     }
                     let v = self.state.lock().await.version;
@@ -42,8 +78,7 @@ impl Pipeline {
                 }
             }
             "锁位" | "锁定" | "结团" | "结束" | "lock" | "close" => {
-                let cfg = self.cfg.get().await;
-                if let Err(error) = self.set_locked_locked(&cfg, true).await {
+                if let Err(error) = self.set_locked_locked(cfg, true).await {
                     return self.persistence_failure(ev, false, error).await;
                 }
                 let v = self.state.lock().await.version;
@@ -69,56 +104,19 @@ impl Pipeline {
             ),
         };
 
-        let record = match self
-            .persist(round_id, ev, seq, status, &detail, "admin")
-            .await
-        {
-            Ok(record) => record,
-            Err(error) => return self.persistence_failure(ev, false, error).await,
-        };
-        let cfg = self.cfg.get().await;
-        let (version, snapshot_value) = {
-            let mut st = self.state.lock().await;
-            if st.remember_name(&cfg, &record, display, status) {
-                st.refresh_snapshot_names(&cfg);
-            }
-            st.messages
-                .push(MessageRecord::from_log(&record, round_id, display));
-            (
-                st.version,
-                st.snapshot
-                    .as_ref()
-                    .and_then(|s| serde_json::to_value(s).ok())
-                    .unwrap_or(Value::Null),
-            )
-        };
-
-        PipelineOutcome {
-            status: status.to_string(),
-            detail,
-            reply: Some(reply),
-            version,
-            snapshot: Some(snapshot_value),
-        }
-    }
-}
-
-pub(super) fn priority_eligibility(round_id: &RoundId, user_id: &str) -> Eligibility {
-    Eligibility {
-        eligibility_id: EligibilityId(uuid::Uuid::new_v4().to_string()),
-        round_id: round_id.clone(),
-        user_id: UserId(user_id.to_string()),
-        priority_type: "shopping_fund".to_string(),
-        priority_level: 10,
-        scope: EligibilityScope {
-            item_ids: None,
-            item_kinds: None,
-            only_before_start_minutes: None,
-        },
-        max_uses: None,
-        used_count: 0,
-        valid_from: Some(DateTime::<Utc>::from_timestamp_millis(0).unwrap_or_else(Utc::now)),
-        valid_until: None,
-        note: Some("预存(购物金)用户".to_string()),
+        context.record.routed = "admin".into();
+        context.understanding = Understanding::terminal(
+            UnderstandingSource::Control,
+            status,
+            detail.clone(),
+            Some(reply.clone()),
+        );
+        self.finish(
+            cfg,
+            context,
+            ev,
+            ProcessingOutcome::new(status, detail, Some(reply)),
+        )
+        .await
     }
 }

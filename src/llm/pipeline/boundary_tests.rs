@@ -4,6 +4,55 @@ use crate::services::{configuration, message_actions, rounds};
 use std::sync::{atomic::Ordering, Arc};
 
 #[tokio::test]
+async fn inactive_round_traffic_cannot_postpone_the_active_round_reload_until_it_goes_quiet() {
+    let (state, _) = fixture(false, "").await;
+    let state = Arc::new(state);
+    state.pipeline.ingest(incoming("排 徽章 甲 1", 1000)).await;
+    let cfg = state.cfg.get().await;
+    let weak = Arc::downgrade(&state);
+    state.cfg.spawn_watch(move || {
+        let weak = weak.clone();
+        async move {
+            if let Some(state) = weak.upgrade() {
+                configuration::reload(&state, false).await.unwrap();
+            }
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let mut inactive = cfg.round.clone();
+    inactive.round_id = format!("inactive_{}", uuid::Uuid::new_v4().simple());
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let flag = running.clone();
+    let traffic = std::thread::spawn(move || {
+        for _ in 0..150 {
+            if !flag.load(Ordering::SeqCst) {
+                break;
+            }
+            crate::settings::rounds::write_round(&inactive).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    });
+    let mut active = cfg.round.clone();
+    active.priority_window = Some(crate::settings::PriorityWindow {
+        start_ms: 0,
+        end_ms: 10_000,
+    });
+    crate::settings::rounds::write_round(&active).unwrap();
+    let updated = tokio::time::timeout(std::time::Duration::from_millis(1500), async {
+        loop {
+            if state.pipeline.messages_since(0).await[0]["status"] == "Rejected" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await;
+    running.store(false, Ordering::SeqCst);
+    traffic.join().unwrap();
+    assert!(updated.is_ok(), "活跃轮变更不能等待无关轮次连续IO停止");
+}
+
+#[tokio::test]
 async fn configuration_prepares_before_commit_and_policy_reload_never_calls_model() {
     let (state, llm) = fixture(false, "{}").await;
     state.pipeline.process(incoming("排 徽章 甲 1", 1000)).await;

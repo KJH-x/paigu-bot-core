@@ -7,9 +7,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::bus::{EventSink, IncomingEvent, PipelineOutcome};
-use crate::domain::ids::{RoundId, UserId};
-use crate::engine::replay::rebuild_allocation_snapshot;
-use crate::messages::{MessageLog, MessageRecord as LogMessageRecord};
+use crate::messages::MessageLog;
 use crate::parser::coalesce::Classification;
 use crate::parser::parsed_event::ParsedIntent;
 use crate::replay::session::ReplayResult;
@@ -22,7 +20,6 @@ mod export;
 mod ingress;
 mod live;
 mod llm_parse;
-mod names;
 mod proxy;
 mod replay_view;
 mod state;
@@ -53,6 +50,8 @@ mod member_tests;
 #[cfg(test)]
 mod proxy_tests;
 #[cfg(test)]
+mod publication_tests;
+#[cfg(test)]
 mod replay_diff_tests;
 #[cfg(test)]
 mod settlement_tests;
@@ -69,8 +68,7 @@ mod tests;
 #[cfg(test)]
 mod transaction_tests;
 
-use admin::priority_eligibility;
-use state::{MessageRecord, State};
+use state::State;
 
 const RULE_CONFIDENCE: f32 = 0.9;
 
@@ -380,12 +378,6 @@ impl Pipeline {
                 return self.process_proxy_segments(&ev, segments).await;
             }
         }
-        let display = ev
-            .delegation
-            .as_ref()
-            .and_then(|d| crate::settings::delegation_display(&cfg, d))
-            .or_else(|| crate::settings::resolve_cn(&cfg, &ev.user_id, &ev.nickname))
-            .unwrap_or_else(|| ev.user_id.clone());
         let mut context = self.processing_context(&cfg, &ev).await;
         let modify_body = ev
             .delegation
@@ -405,10 +397,8 @@ impl Pipeline {
                 }
             }
         }
-        let seq = context.record.seq;
         {
             let mut state = self.state.lock().await;
-            state.seq = seq;
             if !state
                 .seen
                 .insert(format!("{}::{}", ev.group_id, ev.message_id))
@@ -422,10 +412,9 @@ impl Pipeline {
                 );
                 return self
                     .finish(
-                        &cfg.round.round_id,
+                        &cfg,
                         &context,
                         &ev,
-                        &display,
                         context.understanding.validation.clone(),
                     )
                     .await;
@@ -444,25 +433,16 @@ impl Pipeline {
                 &context.understanding,
                 context.manual_phase,
             );
-            return self
-                .finish(
-                    &cfg.round.round_id,
-                    &context,
-                    &ev,
-                    &display,
-                    evaluated.outcome,
-                )
-                .await;
+            return self.finish(&cfg, &context, &ev, evaluated.outcome).await;
         }
         let text = ev.text.trim();
         if text.is_empty() || (text.starts_with(['/', '／']) && modify_body.is_none()) {
             if text.starts_with(['/', '／']) && ev.is_admin && cfg.gateway.admin_commands_enabled {
                 return self
                     .run_admin_command(
-                        &cfg.round.round_id,
+                        &cfg,
                         &ev,
-                        &display,
-                        seq,
+                        &mut context,
                         text.trim_start_matches(['/', '／']).trim(),
                     )
                     .await;
@@ -482,10 +462,9 @@ impl Pipeline {
             );
             return self
                 .finish(
-                    &cfg.round.round_id,
+                    &cfg,
                     &context,
                     &ev,
-                    &display,
                     context.understanding.validation.clone(),
                 )
                 .await;
@@ -504,71 +483,16 @@ impl Pipeline {
             context.manual_phase,
         );
         if evaluated.events.is_empty() {
-            return self
-                .finish(
-                    &cfg.round.round_id,
-                    &context,
-                    &ev,
-                    &display,
-                    evaluated.outcome,
-                )
-                .await;
+            return self.finish(&cfg, &context, &ev, evaluated.outcome).await;
         }
-        let (events, eligibilities, snapshot) = {
+        let version = {
             let state = self.state.lock().await;
             evaluated.explain_cancellations(&state.events, &cfg);
-            let mut events = state.events.clone();
-            events.extend(evaluated.events);
-            let mut eligibilities = state.eligibilities.clone();
-            if evaluated.priority_claim && !eligibilities.iter().any(|e| e.user_id.0 == ev.user_id)
-            {
-                eligibilities.push(priority_eligibility(
-                    &RoundId(cfg.round.round_id.clone()),
-                    &ev.user_id,
-                ));
-            }
-            let mut names: std::collections::HashMap<UserId, String> = state
-                .display
-                .iter()
-                .filter_map(|(uid, raw)| {
-                    crate::settings::resolve_cn(&cfg, uid, raw)
-                        .map(|name| (UserId(uid.clone()), name))
-                })
-                .collect();
-            names.insert(UserId(ev.user_id.clone()), display.clone());
-            let snapshot =
-                rebuild_allocation_snapshot(&cfg.round.to_items(), &events, &eligibilities, &names);
-            (events, eligibilities, snapshot)
+            state.events.len().saturating_add(evaluated.events.len()) as i64
         };
-        let version = snapshot.version;
         let mut outcome = evaluated.outcome;
         outcome.reply = Some(format!("已记录，当前版本 #{version}"));
-        let record = match self
-            .persist_understanding(&cfg.round.round_id, &context, outcome.clone())
-            .await
-        {
-            Ok(record) => record,
-            Err(error) => return self.persistence_failure(&ev, false, error).await,
-        };
-        let value = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
-        let mut state = self.state.lock().await;
-        state.events = events;
-        state.eligibilities = eligibilities;
-        state.version = version;
-        state.snapshot = Some(snapshot);
-        state.remember_name(&cfg, &record, &display, &outcome.status);
-        state.messages.push(MessageRecord::from_log(
-            &record,
-            &cfg.round.round_id,
-            &display,
-        ));
-        PipelineOutcome {
-            status: outcome.status,
-            detail: outcome.detail,
-            reply: outcome.reply,
-            version,
-            snapshot: Some(value),
-        }
+        self.finish(&cfg, &context, &ev, outcome).await
     }
 
     /// 统一接收入口（NC / 测试注入共用，R6）。
@@ -603,27 +527,26 @@ impl Pipeline {
         }
         // 非群消息（私聊/临时会话无群号）一律 Dropped，不进入处理（防御性；网关已先拦）。
         if ev.group_id.trim().is_empty() {
-            if let Err(error) = self
-                .persist(
-                    &cfg.round.round_id,
-                    &ev,
-                    crate::messages::next_seq(),
-                    "Dropped",
-                    "非群消息",
-                    "drop:not_group_message",
-                )
-                .await
-            {
-                return self.persistence_failure(&ev, true, error).await;
+            if let Some(raw) = &ev.raw {
+                if let Err(error) = self
+                    .messages
+                    .append_raw_event(&cfg.round.round_id, raw)
+                    .await
+                {
+                    return self.persistence_failure(&ev, false, error).await;
+                }
             }
-            let (version, snapshot) = self.board().await;
-            return PipelineOutcome {
-                status: "Dropped".to_string(),
-                detail: "非群消息".to_string(),
-                reply: None,
-                version,
-                snapshot: Some(snapshot),
-            };
+            let mut context = self.processing_context(cfg, &ev).await;
+            context.record.routed = "drop:not_group_message".into();
+            context.understanding = crate::messages::processing::Understanding::terminal(
+                crate::messages::processing::UnderstandingSource::Control,
+                "Dropped",
+                "非群消息",
+                None,
+            );
+            return self
+                .finish(cfg, &context, &ev, context.understanding.validation.clone())
+                .await;
         }
         // 匿名代排 `X(代)`：席位填 `发送者(代)`，权限按发送者（`proxy_base`）。
         if crate::parser::coalesce::is_anonymous_proxy(&ev.text)
@@ -844,7 +767,7 @@ impl Pipeline {
         )
         .await?;
         let records = self.messages.read_only(&cfg.round.round_id).await?;
-        self.apply_replay(&result, &records).await;
+        self.apply_replay(&cfg, &result, &records).await;
         Ok(result)
     }
 
@@ -863,43 +786,8 @@ impl Pipeline {
         // Inputs and original automatic outcomes are immutable. Current revisions
         // and status belong to the rebuildable projection, not a second file commit.
         let records = self.messages.read_only(&cfg.round.round_id).await?;
-        self.apply_replay(&result, &records).await;
+        self.apply_replay(cfg, &result, &records).await;
         Ok(result)
-    }
-
-    /// 持久化一条入站消息日志（`routed=message`，`status` 记处理结果）。
-    async fn persist(
-        &self,
-        round_id: &str,
-        ev: &IncomingEvent,
-        seq: i64,
-        status: &str,
-        detail: &str,
-        routed: &str,
-    ) -> anyhow::Result<LogMessageRecord> {
-        let rec = LogMessageRecord {
-            record_id: crate::messages::new_record_id(),
-            record_revision: 1,
-            processing: None,
-            seq,
-            group_id: ev.group_id.clone(),
-            user_id: ev.user_id.clone(),
-            nickname: ev.nickname.clone(),
-            message_id: ev.message_id.clone(),
-            text: ev.text.clone(),
-            timestamp_ms: ev.timestamp_ms,
-            is_admin: ev.is_admin,
-            routed: routed.to_string(),
-            status: status.to_string(),
-            detail: detail.to_string(),
-            sender_user_id: ev.sender_user_id.clone(),
-            delegation: ev.delegation.clone(),
-            ingress: ev.ingress.clone(),
-            sender_nickname: ev.sender_nickname.clone(),
-        };
-        self.messages.append(round_id, &rec).await?;
-        self.mark_ingress(&rec).await;
-        Ok(rec)
     }
 
     async fn persistence_failure(
@@ -929,14 +817,13 @@ impl Pipeline {
 
     async fn finish(
         &self,
-        round_id: &str,
+        cfg: &AppConfig,
         context: &understanding::ProcessingContext,
         ev: &IncomingEvent,
-        display: &str,
         outcome: crate::messages::processing::ProcessingOutcome,
     ) -> PipelineOutcome {
         let record = match self
-            .persist_understanding(round_id, context, outcome.clone())
+            .persist_understanding(&cfg.round.round_id, context, outcome.clone())
             .await
         {
             Ok(record) => record,
@@ -946,24 +833,10 @@ impl Pipeline {
                     .await
             }
         };
-        let cfg = self.cfg.get().await;
-        let mut state = self.state.lock().await;
-        if state.remember_name(&cfg, &record, display, &outcome.status) {
-            state.refresh_snapshot_names(&cfg);
-        }
-        state
-            .messages
-            .push(MessageRecord::from_log(&record, round_id, display));
-        PipelineOutcome {
-            status: outcome.status,
-            detail: outcome.detail,
-            reply: outcome.reply,
-            version: state.version,
-            snapshot: state
-                .snapshot
-                .as_ref()
-                .and_then(|s| serde_json::to_value(s).ok()),
-        }
+        let acknowledge_action =
+            outcome.status == "Applied" && !context.understanding.events.is_empty();
+        self.publish_completed(cfg, &record, outcome.reply, acknowledge_action)
+            .await
     }
 }
 

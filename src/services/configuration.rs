@@ -101,7 +101,10 @@ pub(crate) async fn apply_locked(
             .await;
     }
     if let Some(computed) = computed {
-        state.pipeline.apply_replay(&computed, &records).await;
+        state
+            .pipeline
+            .apply_replay(&next, &computed, &records)
+            .await;
         crate::replay::computed::checkpoint(&state.messages, &next, &computed, &records).await;
         state
             .pipeline
