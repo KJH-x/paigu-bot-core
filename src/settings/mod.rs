@@ -649,8 +649,8 @@ impl ConfigStore {
             }
             cfg
         };
-        // U3：启动解析激活轮次（存在则覆盖 round；缺失则落盘当前 round）。
-        if rounds::resolve_active(&mut cfg) {
+        // An existing pointer is authoritative; bad source cannot select a fallback round.
+        if rounds::resolve_active(&mut cfg)? {
             if let Ok(raw) = serde_json::to_string_pretty(&cfg) {
                 if let Err(e) = std::fs::write(&path, raw) {
                     tracing::warn!("write config {} failed: {e}", path.display());
@@ -714,6 +714,7 @@ impl ConfigStore {
                 .ok_or_else(|| anyhow::anyhow!("激活轮次文件缺失或损坏，未切换为其他轮次"))?;
             anyhow::ensure!(cfg.round.round_id == id, "轮次文件标识与激活指针不一致");
         }
+        rounds::validate_round_id(&cfg.round.round_id)?;
         Ok(cfg)
     }
 

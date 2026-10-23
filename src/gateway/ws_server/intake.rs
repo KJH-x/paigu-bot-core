@@ -290,7 +290,7 @@ pub(super) async fn run(
                         .clone()
                         .unwrap_or(serde_json::to_value(&entry.event)?);
                     messages
-                        .append_raw_event(&entry.binding.round_id, &raw)
+                        .append_inbound_event(&entry.binding.round_id, &raw)
                         .await?;
                     messages.sync_ingress_commit(&entry.binding.round_id)?;
                     entry.raw_saved = true;

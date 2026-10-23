@@ -2,8 +2,8 @@
 //!
 //! - 每个轮次一个文件，内容 = `RoundSettings`；
 //! - `AppConfig.round` 仍是**运行时激活轮次**；
-//! - `AppConfig.active_round_id` 指向轮次文件；启动/热载据此覆盖 `round`，
-//!   缺失时把当前 `round` 落盘并把 `active_round_id` 设为它。
+//! - `AppConfig.active_round_id` 指向轮次文件；坏指针/文件拒绝启动或热载；
+//!   只有未设置指针时才以当前合法 `round` 初始化轮次库。
 
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -22,14 +22,25 @@ pub fn rounds_dir() -> PathBuf {
 }
 
 /// 轮次文件路径（`data/rounds/<round_id>.json`）。
-pub fn round_path(round_id: &str) -> PathBuf {
-    rounds_dir().join(format!("{}.json", round_id.trim()))
+pub fn round_path(round_id: &str) -> std::io::Result<PathBuf> {
+    validate_round_id(round_id)?;
+    Ok(rounds_dir().join(format!("{round_id}.json")))
 }
 
 /// 轮次 id 合法性：非空、≤64、无路径分隔符/点/冒号，仅字母/数字/中文/`_`/`-`。
 pub fn is_valid_round_id(id: &str) -> bool {
-    let id = id.trim();
+    let upper = id.to_ascii_uppercase();
+    let reserved = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            upper.strip_prefix(prefix).is_some_and(|suffix| {
+                matches!(
+                    suffix,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        });
     !id.is_empty()
+        && !reserved
         && id.chars().count() <= 64
         && !id.contains(['/', '\\', '.', ':'])
         && id
@@ -37,13 +48,25 @@ pub fn is_valid_round_id(id: &str) -> bool {
             .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
 }
 
+pub(crate) fn validate_round_id(id: &str) -> std::io::Result<()> {
+    if is_valid_round_id(id) {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "非法轮次标识，未访问轮次文件",
+        ))
+    }
+}
+
 /// 读取单个轮次文件；非法 id、缺失或解析失败均返回 `None`。
 pub fn read_round(round_id: &str) -> Option<RoundSettings> {
     if !is_valid_round_id(round_id) {
         return None;
     }
-    let raw = std::fs::read_to_string(round_path(round_id)).ok()?;
-    serde_json::from_str(&raw).ok()
+    let raw = std::fs::read_to_string(round_path(round_id).ok()?).ok()?;
+    let round: RoundSettings = serde_json::from_str(&raw).ok()?;
+    (round.round_id == round_id).then_some(round)
 }
 
 /// 落盘单个轮次（pretty JSON）；非法 id 拒绝。
@@ -54,7 +77,7 @@ pub fn write_round(round: &RoundSettings) -> std::io::Result<PathBuf> {
             format!("invalid round_id: {}", round.round_id),
         ));
     }
-    let path = round_path(&round.round_id);
+    let path = round_path(&round.round_id)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -103,51 +126,19 @@ pub fn list_round_files() -> Vec<RoundFileInfo> {
 
 /// 启动/热载解析（U3）：
 /// - `active_round_id` 指向的文件存在 → 用它覆盖 `round`；
-/// - 否则把当前 `round` 落盘为 `data/rounds/<round.round_id>.json` 并把 `active_round_id` 设为它。
+/// - 尚未设置指针时初始化当前合法轮次；已有指针无效/文件缺失损坏则失败。
 ///
 /// 返回 `true` 表示 `AppConfig` 被修改（调用方应回写 config）。
-pub fn resolve_active(cfg: &mut AppConfig) -> bool {
-    let current_id = cfg.round.round_id.trim().to_string();
-
-    if let Some(active) = cfg.active_round_id.clone().filter(|s| !s.trim().is_empty()) {
-        if let Some(mut loaded) = read_round(active.trim()) {
-            if loaded.round_id.trim().is_empty() {
-                loaded.round_id = active.trim().to_string();
-            }
-            cfg.round = loaded;
-            return false;
-        }
-        // active 指向缺失文件：回退为「以当前 round 为准」。
+pub fn resolve_active(cfg: &mut AppConfig) -> anyhow::Result<bool> {
+    if let Some(active) = cfg.active_round_id.as_deref() {
+        validate_round_id(active)?;
+        cfg.round = read_round(active).ok_or_else(|| {
+            anyhow::anyhow!("激活轮次文件缺失、损坏或标识不匹配，未回退为其他轮次")
+        })?;
+        return Ok(false);
     }
-
-    if current_id.is_empty() {
-        return false;
-    }
-    let newly_set = cfg.active_round_id.as_deref() != Some(current_id.as_str());
-    cfg.active_round_id = Some(current_id);
-    dump_current(cfg);
-    newly_set
-}
-
-/// 把当前 `round` 落盘（内容一致时跳过，避免无谓写盘）。
-pub fn dump_current(cfg: &AppConfig) {
-    if !is_valid_round_id(&cfg.round.round_id) {
-        return;
-    }
-    let path = round_path(&cfg.round.round_id);
-    let Ok(raw) = serde_json::to_string_pretty(&cfg.round) else {
-        return;
-    };
-    if std::fs::read_to_string(&path).ok().as_deref() == Some(raw.as_str()) {
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!("轮次目录创建失败 {}: {e}", parent.display());
-            return;
-        }
-    }
-    if let Err(e) = std::fs::write(&path, raw) {
-        tracing::warn!("轮次落盘失败 {}: {e}", path.display());
-    }
+    validate_round_id(&cfg.round.round_id)?;
+    write_round(&cfg.round)?;
+    cfg.active_round_id = Some(cfg.round.round_id.clone());
+    Ok(true)
 }

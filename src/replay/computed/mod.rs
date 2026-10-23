@@ -225,9 +225,7 @@ pub(crate) async fn replay(
     let records = store.read_ingress_records(&cfg.round.round_id).await?;
     let journal = store.read_events_strict(&cfg.round.round_id).await?;
     // Do this before load too: valid JSON with a damaged domain row is not a cache miss.
-    for value in journal.iter().filter(|v| v.get("event_type").is_some()) {
-        serde_json::from_value::<crate::domain::event::EventEnvelope>(value.clone())?;
-    }
+    crate::messages::domain_journal_events(&journal, &cfg.round.round_id)?;
     let complete = records.iter().all(|r| r.status != "Pending");
     let key = context(cfg, &records, &journal).ok();
     if policy == ReadPolicy::Prefer && complete {

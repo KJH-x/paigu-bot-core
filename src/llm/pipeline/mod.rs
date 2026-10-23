@@ -54,6 +54,8 @@ mod publication_tests;
 #[cfg(test)]
 mod replay_diff_tests;
 #[cfg(test)]
+mod safety_tests;
+#[cfg(test)]
 mod settlement_tests;
 #[cfg(test)]
 mod snapshot_download_tests;
@@ -364,7 +366,7 @@ impl Pipeline {
         if let Some(raw) = &ev.raw {
             if let Err(error) = self
                 .messages
-                .append_raw_event(&cfg.round.round_id, raw)
+                .append_inbound_event(&cfg.round.round_id, raw)
                 .await
             {
                 return self.persistence_failure(&ev, false, error).await;
@@ -530,7 +532,7 @@ impl Pipeline {
             if let Some(raw) = &ev.raw {
                 if let Err(error) = self
                     .messages
-                    .append_raw_event(&cfg.round.round_id, raw)
+                    .append_inbound_event(&cfg.round.round_id, raw)
                     .await
                 {
                     return self.persistence_failure(&ev, false, error).await;
@@ -599,7 +601,7 @@ impl Pipeline {
         if let Some(raw) = &ev.raw {
             if let Err(error) = self
                 .messages
-                .append_raw_event(&cfg.round.round_id, raw)
+                .append_inbound_event(&cfg.round.round_id, raw)
                 .await
             {
                 return self.persistence_failure(&ev, false, error).await;

@@ -186,3 +186,41 @@ fn to_incoming_event_maps_fields() {
     assert_eq!(incoming.text, "结城理 通行证");
     assert_eq!(incoming.timestamp_ms, 1_788_782_400_000);
 }
+
+#[test]
+fn safety_normalization_caps_unicode_plain_text_but_preserves_forged_json_as_a_whole() {
+    for source in [
+        "甲".repeat(MAX_INBOUND_TEXT_CHARS + 1),
+        "a🙂".repeat(MAX_INBOUND_TEXT_CHARS),
+    ] {
+        let mut event = group_event("123456789", &source);
+        assert_eq!(
+            normalize_message(&event),
+            source
+                .chars()
+                .take(MAX_INBOUND_TEXT_CHARS)
+                .collect::<String>()
+        );
+        event.message = Some(
+            serde_json::json!([{"type":"image","data":{}},{"type":"text","data":{"text":source}}]),
+        );
+        assert_eq!(
+            normalize_message(&event).chars().count(),
+            MAX_INBOUND_TEXT_CHARS
+        );
+        event.message = None;
+        assert_eq!(
+            normalize_message(&event).chars().count(),
+            MAX_INBOUND_TEXT_CHARS
+        );
+    }
+    let batch =
+        serde_json::json!([{"id":"member-01","text":"甲".repeat(MAX_INBOUND_TEXT_CHARS + 1)}])
+            .to_string();
+    let event = group_event("123456789", &batch);
+    assert_eq!(normalize_message(&event), batch);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&normalize_message(&event)).unwrap()[0]["id"],
+        "member-01"
+    );
+}

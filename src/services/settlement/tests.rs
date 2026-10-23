@@ -2,6 +2,17 @@ use super::*;
 use crate::settlement::{GiftTier, Line, Package};
 
 #[test]
+fn safety_settlement_rejects_invalid_round_before_reading_or_writing() {
+    for invalid in ["../escape", "round ", "CON"] {
+        assert!(round_locked(invalid).is_err(), "read {invalid:?}");
+        assert!(
+            write_draft_unlocked(&SettlementDraft::empty(invalid)).is_err(),
+            "write {invalid:?}"
+        );
+    }
+}
+
+#[test]
 fn legacy_settlement_with_unknown_provenance_requires_review_and_bad_schema_fails_closed() {
     let mut cfg = crate::settings::default_config();
     cfg.round = round_with_adjust(0);

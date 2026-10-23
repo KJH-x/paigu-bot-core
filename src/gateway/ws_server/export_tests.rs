@@ -160,7 +160,7 @@ async fn actual_owned_ws_control_exports_completed_actions_before_its_receipt_an
         .as_array()
         .unwrap()
         .iter()
-        .any(|event| event["message_id"].as_u64() == Some(9007199254740993)));
+        .any(|event| event["paigu_inbound"]["message_id"].as_u64() == Some(9007199254740993)));
     assert_eq!(bundle.settlement["draft"]["round_id"], cfg.round.round_id);
     client.send(control).await.unwrap();
     settled(&gateway, &pipeline, 3).await;

@@ -22,6 +22,8 @@ NapCatQQ ──反向 WS──▶ gateway ──▶ llm::Pipeline ──▶ engi
 
 ## 2. 常用命令
 
+> 2026-10-23：优先用`npm run check`（完整桌面用`npm run check:full`）进行隔离验收；直接从仓库cwd跑测试可能读到真实相对配置/数据。下列旧测试计数为历史记录，当前有效范围/最新证据见[后继验收台账](./docs/VERIFICATION-engineering-2026-10-23.md)。入口不需要NapCat/真实模型，私有语料显式选择且只读；不因测试通过部署/重启常驻实例。
+
 ```bash
 cargo build                                  # 编译（无 error / 无新 warning）
 cargo test                                   # Rust 单测（当前 223 passed）

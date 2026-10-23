@@ -32,8 +32,10 @@ fn draft_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("data/settlement"))
 }
 
-fn draft_path(round_id: &str) -> PathBuf {
-    draft_dir().join(format!("{round_id}.json"))
+fn draft_path(round_id: &str) -> Result<PathBuf, ServiceError> {
+    crate::settings::rounds::validate_round_id(round_id)
+        .map_err(|_| ServiceError::BadRequest("轮次标识无效，未访问结算文件".into()))?;
+    Ok(draft_dir().join(format!("{round_id}.json")))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +89,7 @@ fn read_draft(round_id: &str) -> Result<SettlementDraft, ServiceError> {
 }
 
 fn read_draft_unlocked(round_id: &str) -> Result<SettlementDraft, ServiceError> {
-    let path = draft_path(round_id);
+    let path = draft_path(round_id)?;
     if !path.exists() {
         return Ok(SettlementDraft::empty(round_id));
     }
@@ -121,7 +123,7 @@ pub async fn is_locked(state: &ApiState) -> Result<bool, ServiceError> {
 }
 
 fn write_draft_unlocked(draft: &SettlementDraft) -> Result<(), ServiceError> {
-    let path = draft_path(&draft.round_id);
+    let path = draft_path(&draft.round_id)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| ServiceError::Internal(error.into()))?;
     }

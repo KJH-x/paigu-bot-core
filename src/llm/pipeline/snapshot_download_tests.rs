@@ -5,8 +5,8 @@ use crate::services::{message_actions, snapshot::transfer};
 use serde_json::{json, Value};
 use std::sync::{atomic::Ordering, Arc};
 
-struct Server {
-    base: String,
+pub(super) struct Server {
+    pub(super) base: String,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Server {
@@ -14,7 +14,7 @@ impl Drop for Server {
         self.task.abort();
     }
 }
-async fn server(state: crate::api::ApiState) -> (Arc<crate::api::ApiState>, Server) {
+pub(super) async fn server(state: crate::api::ApiState) -> (Arc<crate::api::ApiState>, Server) {
     let state = Arc::new(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());

@@ -260,18 +260,18 @@ fn round_store_activation_round_trips() {
     cfg.round.round_id = id.clone();
     cfg.round.title = "原始".to_string();
     cfg.active_round_id = None;
-    assert!(rounds::resolve_active(&mut cfg));
+    assert!(rounds::resolve_active(&mut cfg).unwrap());
     assert_eq!(cfg.active_round_id.as_deref(), Some(id.as_str()));
 
     let mut reloaded = default_config();
     reloaded.round.round_id = id.clone();
     reloaded.round.title = "应被覆盖".to_string();
     reloaded.active_round_id = Some(id.clone());
-    assert!(!rounds::resolve_active(&mut reloaded));
+    assert!(!rounds::resolve_active(&mut reloaded).unwrap());
     assert_eq!(reloaded.round.title, "原始");
 
     assert!(rounds::read_round(&id).is_some());
-    let _ = std::fs::remove_file(rounds::round_path(&id));
+    let _ = std::fs::remove_file(rounds::round_path(&id).unwrap());
 }
 
 #[test]
@@ -281,6 +281,89 @@ fn round_id_validation_rejects_paths() {
     assert!(!rounds::is_valid_round_id(""));
     assert!(!rounds::is_valid_round_id("../etc"));
     assert!(!rounds::is_valid_round_id("a/b"));
+}
+
+#[test]
+fn safety_round_id_has_no_whitespace_alias_or_windows_device_target() {
+    for valid in [
+        "轮次_01",
+        "round-1_a",
+        "CON-normal",
+        "COM10",
+        "a".repeat(64).as_str(),
+    ] {
+        assert!(rounds::is_valid_round_id(valid), "{valid:?}");
+    }
+    for invalid in [
+        " round",
+        "round ",
+        "round\t",
+        "CON",
+        "con",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM9",
+        "LPT1",
+        "LPT9",
+        "COM¹",
+        "LPT²",
+        "a".repeat(65).as_str(),
+    ] {
+        assert!(!rounds::is_valid_round_id(invalid), "{invalid:?}");
+    }
+}
+
+#[test]
+fn safety_startup_rejects_invalid_or_missing_active_source_without_fallback_writes() {
+    let root = std::env::temp_dir().join(format!("paigu-source-safety-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("config.json");
+    let mut cfg = default_config();
+    cfg.round.round_id = format!("safe_{}", uuid::Uuid::new_v4().simple());
+    let fallback_path = rounds::round_path(&cfg.round.round_id).unwrap();
+    for active in [
+        "../escape".to_string(),
+        "CON".to_string(),
+        format!("missing_{}", uuid::Uuid::new_v4().simple()),
+    ] {
+        cfg.active_round_id = Some(active);
+        let raw = serde_json::to_vec(&cfg).unwrap();
+        std::fs::write(&path, &raw).unwrap();
+        assert!(
+            ConfigStore::load(&path).is_err(),
+            "bad active pointer must not select inline fallback"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), raw);
+        assert!(!fallback_path.exists());
+    }
+    cfg.active_round_id = None;
+    let active = format!("bad_source_{}", uuid::Uuid::new_v4().simple());
+    let source = rounds::round_path(&active).unwrap();
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    cfg.active_round_id = Some(active.clone());
+    for bad in [
+        b"broken source".to_vec(),
+        serde_json::to_vec(&cfg.round).unwrap(),
+    ] {
+        std::fs::write(&source, &bad).unwrap();
+        let raw = serde_json::to_vec(&cfg).unwrap();
+        std::fs::write(&path, &raw).unwrap();
+        assert!(ConfigStore::load(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), raw);
+        assert_eq!(std::fs::read(&source).unwrap(), bad);
+        assert!(!fallback_path.exists());
+    }
+    std::fs::remove_file(source).unwrap();
+    cfg.active_round_id = None;
+    cfg.round.round_id = "CON".into();
+    let raw = serde_json::to_vec(&cfg).unwrap();
+    std::fs::write(&path, &raw).unwrap();
+    assert!(ConfigStore::load(&path).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), raw);
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir(root).unwrap();
 }
 
 #[test]

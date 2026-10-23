@@ -27,12 +27,13 @@ fn lines<T: Serialize>(values: &[T]) -> anyhow::Result<Vec<u8>> {
 }
 
 impl MessageLog {
-    fn replacement_path(&self, round: &str) -> PathBuf {
-        self.dir.join(format!("{round}.replacement.json"))
+    fn replacement_path(&self, round: &str) -> anyhow::Result<PathBuf> {
+        crate::settings::rounds::validate_round_id(round)?;
+        Ok(self.dir.join(format!("{round}.replacement.json")))
     }
     pub(super) fn ensure_no_replacement(&self, round: &str) -> anyhow::Result<()> {
         anyhow::ensure!(
-            !self.replacement_path(round).exists(),
+            !self.replacement_path(round)?.exists(),
             "快照事务待恢复，暂不读写该轮消息；请重启隔离服务或重试导入"
         );
         Ok(())
@@ -59,12 +60,12 @@ impl MessageLog {
         if fault == 4 {
             anyhow::bail!("injected import crash after prepare");
         }
-        crate::persistence::atomic_write(&self.store_for(&r.round_id).path, &lines(&r.records)?)?;
+        crate::persistence::atomic_write(&self.store_for(&r.round_id)?.path, &lines(&r.records)?)?;
         #[cfg(test)]
         if fault == 5 {
             anyhow::bail!("injected import crash after message install");
         }
-        crate::persistence::atomic_write(&self.event_path_for(&r.round_id), &lines(&r.events)?)?;
+        crate::persistence::atomic_write(&self.event_path_for(&r.round_id)?, &lines(&r.events)?)?;
         #[cfg(test)]
         if fault == 6 {
             anyhow::bail!("injected import crash after event install");
@@ -81,12 +82,12 @@ impl MessageLog {
             .dir
             .join(format!("{}.applied-{}.json", r.round_id, r.transaction_id));
         // Retain both the exact old private logs and imported logs for recovery.
-        std::fs::rename(self.replacement_path(&r.round_id), &backup)?;
+        std::fs::rename(self.replacement_path(&r.round_id)?, &backup)?;
         Ok(backup)
     }
     pub(crate) async fn recover_replacement(&self, round: &str) -> anyhow::Result<Option<PathBuf>> {
         let _serial = JsonlMessageStore::lock();
-        let path = self.replacement_path(round);
+        let path = self.replacement_path(round)?;
         if !path.exists() {
             return Ok(None);
         }
@@ -123,7 +124,7 @@ impl MessageLog {
             events: events.to_vec(),
         };
         let _serial = JsonlMessageStore::lock();
-        crate::persistence::atomic_write(&self.replacement_path(round), &serde_json::to_vec(&r)?)?;
+        crate::persistence::atomic_write(&self.replacement_path(round)?, &serde_json::to_vec(&r)?)?;
         self.install_replacement(&r)
     }
 }

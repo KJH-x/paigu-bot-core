@@ -40,7 +40,7 @@ pub(crate) async fn replay_incremental(
     journal: &[serde_json::Value],
     previous: &Memo,
 ) -> anyhow::Result<(ReplayResult, Memo)> {
-    let (overrides, phase) = journal_context(journal)?;
+    let (overrides, phase) = journal_context(journal, &cfg.round.round_id)?;
     let context = crate::replay::computed::incremental_context(cfg, phase).ok();
     let (computed, memo) = compute_with_memo(
         cfg,

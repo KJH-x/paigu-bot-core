@@ -1,5 +1,7 @@
 # 模块契约与文件所有权（MODULES）
 
+T-26（2026-10-23验收完成，主代理统一接线）：轮次标识在settings、MessageLog/replacement、结算及computed文件边界拒绝非法路径/设备名；启动指针严格解析。`messages::domain_journal_events`统一内部事件来源/轮次/类型，入站原JSON另封装、查看时还原，session/缓存/导入复用；创建/删除补共同writer及同名源保留。13安全用例与最终473 Rust/35桌面/完整只读语料已通过，逐项范围见工程台账。下面各批“仍待”是当时记录，不重新打开已完成项。
+
 B2（2026-10-23，主代理统一接线）：普通/合并/代理/控制/terminal成功保存后均交`pipeline/live`推进和检查点；`admin`只负责副作用前共同授权/严格源及持久锁校验，保存原terminal产物，不另拼State。删除确认无调用方的`pipeline/names.rs`、admin重复资格构造、from_log与死seq缓存；姓名/identity改用session同一来源过滤。apply_replay显式接受调用方cfg，避免持有cfg读锁时再入读锁；接口无HTTP变化。`settings::spawn_watch`按当前激活轮过滤、固定窗口合并，相关修改/测试由主代理统一完成。最终有限T-26仍未收口。
 
 B1（2026-10-23，主代理统一接线）：`session/incremental.rs`只持有逐组输出备忘/签名与入口，`session/mod.rs`的同一compute/evaluate承担全量与后缀执行，不复制分配器；`ParseOverrides::input_for`封装完整有效覆盖键。`pipeline/live.rs`持有受共同writer保护的实时推进/完整收据/部分投影不落盘边界，`State`持有随轮parked的memo/cut；轮次fresh和测试reset在提交前准备记录身份，不删源。原`MessageLog::read_all`迁移式包装现仅测试使用，生产合并路径改严格只读源；内部query的既有迁移合同不变。普通非合并持续发布仍待B2，不把本批称全部完成。

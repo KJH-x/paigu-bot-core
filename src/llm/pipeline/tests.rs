@@ -954,7 +954,7 @@ async fn message_log_records_every_inbound() {
         .process(event("u2", "成员02", "今天天气不错", 2_000))
         .await;
 
-    let store = JsonlMessageStore::new(&dir, &cfg.round.round_id);
+    let store = JsonlMessageStore::new(&dir, &cfg.round.round_id).unwrap();
     let recs = store.read_all().await.unwrap();
     assert_eq!(recs.len(), 3);
     assert_eq!(recs[0].status, "Applied");

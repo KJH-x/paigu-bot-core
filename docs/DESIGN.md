@@ -90,7 +90,7 @@
 }
 ```
 
-- **轮次库（U3，2026-09-24）**：`round`（运行时激活轮次）由 **`active_round_id` → `data/rounds/<round_id>.json`** 驱动；启动/热载解析见 `src/settings/rounds.rs::resolve_active`（文件存在则覆盖 `round`；否则把当前 `round` 落盘并回填 `active_round_id`）。目录可由 `PAIGU_ROUNDS_DIR` 覆盖（默认 `data/rounds`）。`config/app.json` 不再内联完整商品目录，仅保留 `active_round_id`。
+- **轮次库（U3；2026-10-23严格真源）**：`round`由 **`active_round_id` → `data/rounds/<round_id>.json`** 驱动；`settings::rounds::resolve_active`只在未设指针时初始化，已有指针非法/缺失/损坏/ID不匹配直接失败、不回填另一轮。路径构造同一完整标识校验并拒绝Windows设备名；目录可由`PAIGU_ROUNDS_DIR`覆盖（默认`data/rounds`）。持久app不再内联完整商品目录。
 
 - 存储：`ConfigStore`（`tokio::sync::RwLock<AppConfig>` + `revision`）；`PUT` 时校验 `revision`，成功 `revision+1`；`notify` 监听文件变更自动热载。
 - 环境变量覆盖：`PAIGU_CONFIG_PATH`（默认 `config/app.json`）、`PAIGU_HTTP_PORT`（默认 `21081`）。

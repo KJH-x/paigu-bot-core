@@ -387,7 +387,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `GatewayConfig.accept_forged_messages` + `GatewayConfig.test_group_id` + `RoundSettings.category` | **伪造来源消息**（测试用，默认 false）：仅当 `accept_forged_messages=true` **且** 当前轮为**测试轮**（`category:"test"`）**且** 消息来自**测试群**（`gateway.test_group_id`）时，`Pipeline::handle`（**NC 入口**）才解包 `{"id":"<qq>","text":"<内容>","timestamp":<时间>}` 双层 JSON（`unwrap_forged_envelope`）；`process` 核心不再感知伪造（隔离只作用于来自 NC 的消息）。`timestamp` 支持整数毫秒 / 纯数字串 / RFC3339 / 本地 `YYYY-MM-DD HH:MM[:SS]`，缺省用外层时间；群/消息 id 沿用外层 |
 | `RoundSettings.category` | 轮次类别 `"test" \| "normal"`（默认 `normal`）：**测试轮只绑定测试群、正常轮只绑定正常群**（`test_round_group_mismatch` / `normal_round_uses_test_group`） |
 | `MergeSettings`（`AppConfig.merge`） | **临近同发送者消息合并**（实验，默认关）：`enabled` + `same_sender`；实时/重放共用 `parser::coalesce` 分组（相邻、同人、同意图合并；代表=组内 `(ts,seq)` 最大者）；成员状态 `Merged`。 |
-| `Pipeline::ingest` | **统一接收入口**（NC `handle` 与 sim 注入共用）：`gate_nc` → 匿名代排改写 → 启用合并时 `recompute`（以日志为准），否则旧逐条 `process`。 |
+| `Pipeline::ingest` | **统一接收入口**（NC `handle` 与 sim 注入共用）：NC门禁/代排预处理、保存理解后统一推进共享组后缀与检查点（§8.17）；不再保留普通/合并各自拼State的执行器。 |
 | 匿名代排 `X(代)` | 席位填 `发送者(代)`；新合成身份由群＋真实发送者＋代号生成，非显示名；sender字段保留资格主体，delegation保留真实发言来源，锁定仍生效。旧明确sender的匿名记录可沿用原身份，不改旧指纹。 |
 | 状态 `Merged` | 合并组成员行（`MessageRecord.status`）；消息流**逐条展示、不过滤**。 |
 | `GatewayConfig.react_emoji_id` | 收到**已路由**消息后以 `set_msg_emoji_like` 回应（如 `76`=👍），**不发文本**（默认 None 关闭）；经 `Gateway::dispatch` 下发（该内部路径不受 `allowed_actions` 限制，由本配置显式授权） |
@@ -415,7 +415,7 @@ gateway ──EventSink(trait)──▶ pipeline          # 反向依赖：Gatew
 | `GET /api/rounds` | `{rounds:[{round_id,title,group_id,items,subitems,active,updated_at}], active_round_id}`；按 mtime 降序 |
 | `POST /api/rounds` | body `{round_id, title?, copy_from?}`；`round_id` 非空、≤64、仅字母/数字/中文/`_`/`-`；`copy_from` 存在则复制其商品/阶段 |
 | `POST /api/rounds/:id/setup` | **开团前填写**（Phase 0 档案）：body = `RoundSettings` 形态（`title`/`group_id`/`priority_users`/`priority_window`/`phases`/`items`）**+ `dry_run?`**（默认 false，仅校验不落盘）。缺省字段保留既有值，列表字段提供即整体替换；body `round_id`（若提供）须与路径一致。写入 `data/rounds/<id>.json`；**若为激活轮次则同步热载运行配置**（锁定中拒绝，423）。返回 `{ok,dry_run,written,applied_to_active,revision?,issues,round?}`（`ok` = 无 error 级 issue）。模板见 [round-setup.template.json](./round-setup.template.json) |
-| `POST /api/rounds/:id/activate` | body `{mode?:"continue"\|"fresh"\|"replay"}`（**默认 continue**）；`continue` 仅切换激活（无既有状态时等价 `fresh`），`fresh` 重置流水线，`replay` 重置并用该轮消息重放；**切换与重放解耦**。返回 `{ok,active_round_id,mode,reset,replayed,version}` |
+| `POST /api/rounds/:id/activate` | body `{mode?:"continue"\|"fresh"\|"replay"}`（**默认 continue**）；`continue`保留本轮已parked状态，冷轮先准备真源/有效缓存恢复；`fresh`清空瞬态投影，`replay`强制完整真源重算。**切换与重放解耦**，详见§8.15–16。返回 `{ok,active_round_id,mode,reset,replayed,version}` |
 | `POST /api/rounds/:id/check` | `{ok,issues:[{level,code,message,where}]}`；含 `duplicate_item_id`/`alias_conflict`/`name_conflict`/`category_subitem_mismatch`/`class_derived_mismatch`（warn）等 |
 | `DELETE /api/rounds/:id` | `{ok,removed}`；激活中的轮次拒绝 |
 | `data/rounds/<round_id>.json` | 轮次文件（内容 = `RoundSettings`）；`PAIGU_ROUNDS_DIR` 可覆盖目录 |
@@ -568,7 +568,7 @@ context覆盖完整原记录/理解/修订、完整审计、配置语义、成�
 
 启动replacement恢复/严格源核验→缓存或全算→独立恢复持久结算锁→启动接收。continue已有parked状态优先，冷轮先准备缓存/完整重放再提交配置；fresh清空当前投影并移除该轮缓存，显式replay强制全算。人工事务/业务配置/导入在原持久提交后检查原记录与当前称呼，再写可丢弃检查点；失败不把已提交操作变成失败。只读预览/diff不写派生文件，缓存不恢复原始入站队列。
 
-当前基础恢复为工程计划§16 A批；§17 B1已将真实合并追加/收据恢复接到共享组后缀，普通实时完整迁移仍待B2。没有新增公开API、静态目录、前端真源或删减复盘步骤，不部署/重启实例。
+基础恢复为工程计划§16 A批；后续§17–18已完成普通/合并持续共享推进，§19有限审计另有逐项证据。没有新增公开API、静态目录、前端真源或删减复盘步骤，不部署/重启实例。
 
 ### 8.16 组后缀备忘与瞬态fresh（2026-10-23，B1）
 
@@ -587,3 +587,17 @@ fresh在配置提交前严格准备源记录身份，提交后清空投影/该�
 姓名/identity统一同一来源与时间序；旧无产物Duplicate显式终止，不因规则兼容变新认购。已初始化板的generated_at取有效非Drop/重复输入的最新时刻，避免无效信息改变业务板；无操作的已保存消息可形成明确空投影，fresh与未初始化只读诊断仍不隐式恢复。完整原消息/自动结果/人工override和后续撤改保留，分配仍唯一引擎。
 
 文件监听只对当前激活轮次文件和app配置触发，以固定300ms窗口合并，不被其它轮次持续IO无限延后；不放宽原5秒监听回归，不轮询真实配置/接收器或新增UI控制。
+
+### 8.18 路径、启动真源与原帧审计边界（2026-10-23）
+
+轮次标识由`settings::rounds::is_valid_round_id/validate_round_id`统一校验：完整非空、≤64字符、只允许既有字母数字/中文/下划线/连字符，不在底层偷偷trim；拒绝Windows设备名（不区分大小写的CON/PRN/AUX/NUL、COM1–9/LPT1–9及Windows识别的上标数字）。消息/事件/replacement、结算及computed路径构造遇非法输入返回错误，不能当成无记录或创建其它路径；新建表单显式trim仍是原入口行为。
+
+启动仅在没有`active_round_id`时初始化合法当前轮次；指针已存在时，非法/缺失/损坏/内容标识不匹配均失败，不回写配置或静默选择inline旧轮次。热载亦保持严格来源。文件缺失需要管理者核对真实来源，而不是自动造一个空轮来掩盖。该工程修正不自动迁移/删除真实文件或更新常驻实例。
+
+`setup`无论当前轮或未激活轮，类别与测试群绑定错误在写前返回422 `{error:"category_binding_invalid",ok:false,written:false,issues}`；`dry_run:true`只诊断，仍返回200且不写。其他目录诊断级别/保存合同不因此扩大为新业务拒绝规则。激活三模式和配置共同提交仍重验绑定；不把它宣称为检查并自动修正整库不活跃轮次的测试群号。
+
+轮次创建/删除亦在共同writer内复核；已有文件即拒绝新建，即使内容损坏或Windows大小写别名读取不匹配，也不能将其当作不存在覆盖。等候writer后目标已成激活轮则不能删除；不是对不合作外部进程写文件的跨进程事务承诺。
+
+新原始入站审计行封装为`{paigu_inbound:<完整原始JSON>}`，服务端主动封装而非信任原帧自称的来源。原文、额外字段和大整数不修改；`GET /api/events`的查看投影仍返回原始JSON，完整私有备份保留封装。历史带`post_type`的OneBot原帧也不得解释为内部控制，即使另带`event_type/payload`。只有未封装的内部领域行按严格EventEnvelope解码并核对同轮/类型；损坏内部行不能伪装成无动作。全量/增量、加载阶段/ParseOverride、缓存真源预检及私有导入共用`messages::domain_journal_events`，不再以“JSON里有event_type”直接给控制权。
+
+这是本机服务写入路径的来源区分，不是对任意旧私有文件的密码学认证；历史缺少来源的完整领域行不能仅凭格式证明由谁生成。本地可信管理员显式导入仍属特权操作，不能据此公开管理API。普通OneBot非JSON文本现有4096字符归一化保留，JSON批次不截断；WS帧/消息上限1MiB、普通Json请求2MiB、私有备份64MiB，超限整请求拒绝。HTTP本地测试注入不伪称具有相同4096字符截断。

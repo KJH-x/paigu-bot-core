@@ -166,6 +166,8 @@ pub test_group_id: Option<String>,
 - `AGENTS.md` §4 红线：伪造解包仅测试群生效；模拟器页已移除。
 
 ## 8. 落地与验收
+
+> 以下是2026-10-13当时的操作记录/方案，不是当前部署授权；后继工程仅隔离开发，未更新/重启常驻实例，不能照此对真实配置/群补做。当前绑定硬守卫与实际验收以INTERFACES §8.18及后继工程台账为准。
 1. `.\deploy\stop.ps1` → `.\deploy\build.ps1` → `Start-ScheduledTask -TaskName paigu-bot-core-run`。
 2. 经 `/api/rounds/:id/setup` 给 `余音向海-恒远津梁-20261012` 置 `category:"test"`；`config/app.json` 配 `test_group_id`。
 3. 验收：批量灌 3 条（1 合法、1 缺 timestamp、1 非测试群）核对 `summary`/看板；普通群 NC 消息不解包；非测试轮调用返回 400；e2e（含 1920×1080/100% 排版）全 PASS。

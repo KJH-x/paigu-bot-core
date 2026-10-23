@@ -118,5 +118,5 @@ LLM 输出契约（严格 JSON）：
 - 配置文件：`config/app.json`（gitignored），带 `revision`。
 - 改动后**热载**（`notify` 文件监听；无依赖时退化为 mtime 轮询）。
 - **prompt 即配置**：LLM 提示词、预存用户、时段、白名单、展示参数都在配置里，可编辑并保存（乐观并发：`revision` 不匹配 → 409 + 冲突提示）。
-- **轮次库（U3，2026-09-24）**：`config/app.json` 仅保留 **`active_round_id`** 指向当前轮次；每个轮次一个文件 **`data/rounds/<round_id>.json`**（内容 = `RoundSettings`：round_id/title/group_id/priority_users/priority_window/phases/items）。`config/app.json` 的 `round` 仍是**运行时激活轮次**：启动/热载时若 `active_round_id` 指向的文件存在则据其覆盖 `round`，否则把当前 `round` 落盘并把 `active_round_id` 设为它（`PAIGU_ROUNDS_DIR` 可覆盖目录）。
-- **切换与重放解耦**：`activate` 模式 `continue`（默认；无既有状态时等价 `fresh`）/ `fresh` / `replay`；重放是独立自动计算功能，不与切换绑定。轮次/商品等流程内配置在 `/round` 页编辑；其余不常改配置在 `/settings` 页（不进 Stepper）。
+- **轮次库（U3，2026-09-24；2026-10-23严格真源）**：`config/app.json` 仅保留 **`active_round_id`** 指向当前轮次；每个轮次一个文件 **`data/rounds/<round_id>.json`**（内容 = `RoundSettings`：round_id/title/group_id/priority_users/priority_window/phases/items）。`round`仍是运行时激活轮次：没有指针时才以合法当前轮初始化；已有指针则必须合法、文件完整且内容ID匹配，坏来源拒绝启动/热载，不回退后写另一轮。`PAIGU_ROUNDS_DIR`可覆盖私有目录，完整边界见INTERFACES §8.18。
+- **切换与重放解耦**：`continue`（默认）保留该轮已有内存状态，冷轮从严格真源及有效派生物恢复；`fresh`明确清空当前瞬态投影，`replay`强制完整重算。新无记录轮次仍为空，不将切换默认为清历史。轮次/商品等流程内配置在`/round`，其余配置在`/settings`；缓存/部分投影边界见INTERFACES §8.15–18。

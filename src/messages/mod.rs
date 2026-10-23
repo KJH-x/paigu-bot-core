@@ -54,6 +54,29 @@ pub struct MessageRecord {
 pub const DEFAULT_MESSAGES_DIR: &str = "data/messages";
 pub const DEFAULT_EVENTS_DIR: &str = "data/events";
 
+pub(crate) fn domain_journal_events(
+    journal: &[serde_json::Value],
+    round: &str,
+) -> anyhow::Result<Vec<crate::domain::event::EventEnvelope>> {
+    journal
+        .iter()
+        .filter(|value| {
+            value.get("event_type").is_some()
+                && value.get("post_type").is_none()
+                && value.get("paigu_inbound").is_none()
+        })
+        .map(|value| {
+            let event: crate::domain::event::EventEnvelope = serde_json::from_value(value.clone())?;
+            anyhow::ensure!(event.round_id.0 == round, "审计事件轮次不匹配");
+            anyhow::ensure!(
+                event.event_type == event.payload.event_type_str(),
+                "审计事件类型不匹配"
+            );
+            Ok(event)
+        })
+        .collect()
+}
+
 static NEXT_SEQ: AtomicI64 = AtomicI64::new(0);
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -85,10 +108,11 @@ pub(crate) struct JsonlMessageStore {
 }
 
 impl JsonlMessageStore {
-    pub(crate) fn new(dir: impl AsRef<Path>, round_id: &str) -> Self {
-        Self {
+    pub(crate) fn new(dir: impl AsRef<Path>, round_id: &str) -> anyhow::Result<Self> {
+        crate::settings::rounds::validate_round_id(round_id)?;
+        Ok(Self {
             path: dir.as_ref().join(format!("{round_id}.jsonl")),
-        }
+        })
     }
 
     #[cfg(test)]
@@ -305,7 +329,7 @@ impl MessageLog {
     /// Caller holds the common writer. Flush both durable destinations before
     /// removing the independent intake copy, including a previous partial commit.
     pub(crate) fn sync_ingress_commit(&self, round: &str) -> anyhow::Result<()> {
-        for path in [self.store_for(round).path, self.event_path_for(round)] {
+        for path in [self.store_for(round)?.path, self.event_path_for(round)?] {
             match std::fs::OpenOptions::new().write(true).open(path) {
                 Ok(file) => file.sync_all()?,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -318,7 +342,7 @@ impl MessageLog {
         &self,
         round: &str,
     ) -> anyhow::Result<Vec<MessageRecord>> {
-        let path = self.store_for(round).path;
+        let path = self.store_for(round)?.path;
         if path.exists() {
             for line in std::fs::read_to_string(path)?
                 .lines()
@@ -397,34 +421,35 @@ impl MessageLog {
         Self::new(dir, events_dir)
     }
 
-    fn store_for(&self, round_id: &str) -> JsonlMessageStore {
+    fn store_for(&self, round_id: &str) -> anyhow::Result<JsonlMessageStore> {
         JsonlMessageStore::new(&self.dir, round_id)
     }
 
-    fn event_path_for(&self, round_id: &str) -> PathBuf {
-        self.events_dir.join(format!("{round_id}.jsonl"))
+    fn event_path_for(&self, round_id: &str) -> anyhow::Result<PathBuf> {
+        crate::settings::rounds::validate_round_id(round_id)?;
+        Ok(self.events_dir.join(format!("{round_id}.jsonl")))
     }
 
     pub async fn append(&self, round_id: &str, rec: &MessageRecord) -> anyhow::Result<()> {
         self.ensure_no_replacement(round_id)?;
-        self.store_for(round_id).append(rec).await
+        self.store_for(round_id)?.append(rec).await
     }
 
     #[cfg(test)]
     pub async fn read_all(&self, round_id: &str) -> anyhow::Result<Vec<MessageRecord>> {
         self.ensure_no_replacement(round_id)?;
-        self.store_for(round_id).read_all().await
+        self.store_for(round_id)?.read_all().await
     }
 
     pub async fn read_only(&self, round_id: &str) -> anyhow::Result<Vec<MessageRecord>> {
         self.ensure_no_replacement(round_id)?;
-        self.store_for(round_id).read_only().await
+        self.store_for(round_id)?.read_only().await
     }
 
     #[cfg(test)]
     pub async fn replace_all(&self, round_id: &str, recs: &[MessageRecord]) -> anyhow::Result<()> {
         self.ensure_no_replacement(round_id)?;
-        self.store_for(round_id).replace_all(recs).await
+        self.store_for(round_id)?.replace_all(recs).await
     }
 
     #[allow(dead_code)] // C-5：供 API/运维按条件检索，当前无调用方
@@ -432,7 +457,8 @@ impl MessageLog {
     where
         F: Fn(&MessageRecord) -> bool + Send,
     {
-        self.store_for(round_id).query(pred).await
+        self.ensure_no_replacement(round_id)?;
+        self.store_for(round_id)?.query(pred).await
     }
 
     pub async fn update<F>(
@@ -445,12 +471,12 @@ impl MessageLog {
         F: FnMut(&mut MessageRecord) + Send,
     {
         self.ensure_no_replacement(round_id)?;
-        self.store_for(round_id).update(record_id, f).await
+        self.store_for(round_id)?.update(record_id, f).await
     }
 
     pub async fn delete(&self, round_id: &str, record_id: &str) -> anyhow::Result<bool> {
         self.ensure_no_replacement(round_id)?;
-        self.store_for(round_id).delete(record_id).await
+        self.store_for(round_id)?.delete(record_id).await
     }
 
     #[cfg(test)]
@@ -475,13 +501,23 @@ impl MessageLog {
     }
 
     /// 追加一条**原始事件**（C-3：保留所有成员原始事件，供事件溯源/重放）。
+    pub(crate) async fn append_inbound_event(
+        &self,
+        round_id: &str,
+        ev: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        self.append_raw_event(round_id, &serde_json::json!({"paigu_inbound":ev}))
+            .await
+    }
+
+    /// Append a trusted internal journal row; raw transport input uses append_inbound_event.
     pub async fn append_raw_event(
         &self,
         round_id: &str,
         ev: &serde_json::Value,
     ) -> anyhow::Result<()> {
         self.ensure_no_replacement(round_id)?;
-        let path = self.event_path_for(round_id);
+        let path = self.event_path_for(round_id)?;
         let line = serde_json::to_string(ev)?;
         let _guard = JsonlMessageStore::lock();
         JsonlMessageStore::ensure_parent(&path)?;
@@ -502,7 +538,7 @@ impl MessageLog {
     ) -> anyhow::Result<()> {
         self.ensure_no_replacement(round_id)?;
         use std::io::{Read, Seek, SeekFrom, Write};
-        let path = self.event_path_for(round_id);
+        let path = self.event_path_for(round_id)?;
         let _guard = JsonlMessageStore::lock();
         JsonlMessageStore::ensure_parent(&path)?;
         let mut file = std::fs::OpenOptions::new()
@@ -565,7 +601,7 @@ impl MessageLog {
         round_id: &str,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         self.ensure_no_replacement(round_id)?;
-        let path = self.event_path_for(round_id);
+        let path = self.event_path_for(round_id)?;
         let _guard = JsonlMessageStore::lock();
         if !path.exists() {
             return Ok(vec![]);
@@ -586,12 +622,7 @@ impl MessageLog {
         &self,
         round_id: &str,
     ) -> anyhow::Result<Vec<crate::domain::event::EventEnvelope>> {
-        self.read_events_strict(round_id)
-            .await?
-            .into_iter()
-            .filter(|value| value.get("event_type").is_some())
-            .map(|value| serde_json::from_value(value).map_err(Into::into))
-            .collect()
+        domain_journal_events(&self.read_events_strict(round_id).await?, round_id)
     }
 
     /// 读取原始事件（C-3）。
@@ -603,7 +634,7 @@ impl MessageLog {
         round_id: &str,
         limit: usize,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
-        let path = self.event_path_for(round_id);
+        let path = self.event_path_for(round_id)?;
         let _guard = JsonlMessageStore::lock();
         if !path.exists() {
             return Ok(Vec::new());
@@ -619,7 +650,10 @@ impl MessageLog {
         let mut skipped = 0usize;
         for line in &lines[start..] {
             match serde_json::from_str::<serde_json::Value>(line.trim()) {
-                Ok(v) => out.push(v),
+                Ok(v) => {
+                    let v: serde_json::Value = v;
+                    out.push(v.get("paigu_inbound").cloned().unwrap_or(v));
+                }
                 Err(_) => skipped += 1,
             }
         }
@@ -630,5 +664,7 @@ impl MessageLog {
     }
 }
 
+#[cfg(test)]
+mod safety_tests;
 #[cfg(test)]
 mod tests;

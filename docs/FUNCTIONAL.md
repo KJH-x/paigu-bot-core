@@ -1,11 +1,13 @@
 # 排谷机器人 · 当前功能（FUNCTIONAL）
 
-> 2026-10-21 源码复核。本文只列当前行为，引用模块/函数而非易失效行号；`npm run test:docs` 校验本地链接及本文显式源码符号是否存在。接口字段以 [INTERFACES](./INTERFACES.md) §8.9 为准，业务决策以 [POLICY](./POLICY.md) 与 [DECISIONS](./DECISIONS.md) §H 为准。
-> MP41＋IA18 已逐项验收，证据见 [台账](./VERIFICATION-msg-ia-2026-10-18.md)。后继 E2…E4 不因此算完成，见 [工程计划](./PLAN-engineering-followup-2026-10-19.md)。未部署，不操作真实群/配置。
+> 2026-10-23 源码复核。本文只列当前行为，引用模块/函数而非易失效行号；`npm run test:docs` 校验本地链接及本文显式源码符号是否存在。接口字段以 [INTERFACES](./INTERFACES.md) §8.9/§8.18 为准，业务决策以 [POLICY](./POLICY.md) 与 [DECISIONS](./DECISIONS.md) §H 为准。
+> MP41＋IA18 已逐项验收，证据见 [台账](./VERIFICATION-msg-ia-2026-10-18.md)。后继E0…E4已另行按有效范围完成，[工程计划](./PLAN-engineering-followup-2026-10-19.md)及有限台账不替未定业务/真实部署背书。未部署，不操作真实群/配置。
 
 ## 1. 运行与接收
 
 `run`（默认）与 `serve` 装配同一 Gateway、Pipeline 和本地 HTTP 服务，不连接 PostgreSQL。启动先严格核验持久消息/人工审计，再使用有效派生缓存或确定性重算，并恢复持久结算锁后才启动接收；坏日志或不能恢复的结算锁明确失败，不猜测恢复成功。入口：[`run_gateway_stack`](../src/main.rs)、[`Pipeline::restore`](../src/llm/pipeline/mod.rs)、[`restore_persistent_lock`](../src/services/settlement/mod.rs)。
+
+已有激活指针必须指向完整、同标识轮次文件；坏指针/缺文件不回退并写入另一轮。底层路径拒绝非法标识/空白别名/Windows设备名，不靠清洗ID换目标。新入站原帧独立封装，不能靠携带`event_type`冒充阶段或人工修订事件；完整原JSON仍可查看/备份，内部领域行严格核对同轮/类型。[`domain_journal_events`](../src/messages/mod.rs)。安全修正/验收范围见[工程台账](./VERIFICATION-engineering-2026-10-23.md)，不代表公开API安全认证。
 
 - Gateway 接收 OneBot 反向 WS，检查群消息、白名单、非空及成员限制，群名片优先。[`decide_route`](../src/gateway/onebot/mod.rs)、[`parse_identity`](../src/gateway/onebot/mod.rs)。
 - 昵称清洗统一调用 [`clean_nickname`](../src/parser/normalize.rs)：全角归一，首个括号或空白截断；代理语义另保留身份，不能靠改显示名取得管理员资格。
@@ -89,7 +91,7 @@
 
 管理员“导出”复用同一严格读取/完整审计与草稿/封包/文件写入，但保留本控制记录保存前的已完成动作切面，不等待或确认自身NC收据。原始审计可含未执行帧，不恢复待处理队列，不是接收器灾备；HTTP导出与破坏性应用仍保留idle守卫。损坏行或Pending消息拒绝导出/应用，不跳坏行写空备份。默认目录随私有消息存储根（或明确PAIGU_SNAPSHOT_DIR），每次唯一目录避免覆盖；显式路径合同保留。[`Pipeline::export_snapshot`](../src/llm/pipeline/export.rs)。
 
-## 8. 测试与仍未完成项
+## 8. 测试与实现边界
 
 可重复检查见 [DEVELOPMENT](./DEVELOPMENT.md) 与 [桌面套件](../tests/e2e/README.md)。桌面仅验收1920×1080、100%、DPR1；计数以实际输出/台账为准，不按总数推断业务全覆盖。私有样本与源表只读，输出在隔离目录；缺私有输入不声称语料通过。真实接收器/真实模型/公网发布不属于自动测试。
 
@@ -99,11 +101,13 @@
 
 管理员目标改单、具名代理、有界入站、调度可观测性及跨商品分级已分批验收，证据见 [TODOS](./TODOS.md)/工程计划。私有派生缓存基础与恢复已接线，完整来源/配置/成员内容/当前阶段/源码依赖指纹及payload哈希失效，坏缓存回退、坏真源失败。人工事务、配置业务重算和私有导入提交后更新检查点；只读预览/诊断不因此写缓存。[`checkpoint`](../src/replay/computed/mod.rs)。
 
-共享会话按完整冻结组/人工选择签名复用相同前缀，从首个变化组起求值全部后缀；仍全量分配并刷新完整输入的称呼，不拿旧名/资格或只看seq。普通与合并追加、控制/代理/terminal和已完成收据恢复均接相同提交后推进；备忘仅在本轮内存（随parked保留），重启首条可完整热身。旧无自动产物Duplicate仍是终止记录，不回退规则再认购；重复/Drop不更新已初始化的业务快照时间或当前称呼。最终有限覆盖审计仍待T-26，不按数量推断全覆盖。[`replay_incremental`](../src/replay/session/incremental.rs)。
+共享会话按完整冻结组/人工选择签名复用相同前缀，从首个变化组起求值全部后缀；仍全量分配并刷新完整输入的称呼，不拿旧名/资格或只看seq。普通与合并追加、控制/代理/terminal和已完成收据恢复均接相同提交后推进；备忘仅在本轮内存（随parked保留），重启首条可完整热身。旧无自动产物Duplicate仍是终止记录，不回退规则再认购；重复/Drop不更新已初始化的业务快照时间或当前称呼。T-26有限审计已登记台账，不按数量推断全覆盖。[`replay_incremental`](../src/replay/session/incremental.rs)。
 
 派生文件默认在私有消息根旁computed，最多读取64MiB，可删除重建，不是备份或待处理队列。continue保留本轮进程内状态；冷轮从有效缓存/完整真源恢复，fresh清空当前投影并移除该轮缓存。非空历史建立进程内原记录身份cut，合并/收据重试不跨cut恢复旧认购；新消息即使时间更早也纳入。测试HTTP reset同样处理，部分板不写成完整源检查点。cut不删源/不落盘，显式全量replay/人工事务仍按完整真源并结束cut，重启仍完整恢复。复盘逐原消息可达、步骤不折叠，模式/游标不落缓存。ColumnLocked与管理员阶段豁免仍需业务决策；远程发布暂停，未部署或重启常驻实例。
 
 ## 9. 已放弃／历史内容（不可据此重新执行）
+
+2026-10-23：坏激活指针自动回填另一轮、新建覆盖损坏同名文件、未激活轮错误绑定仍落盘、按原帧event_type授内部控制来源均停止沿用；现行严格边界见INTERFACES §8.18。旧源码Git可恢复，不据此改真实数据。
 
 2026-09-14调查与之后分批记录完整移至 [历史快照](./archive/FUNCTIONAL-2026-09-14.md)。其旧行号、52/8测试、已删除的pipeline.rs/ws_server.rs等路径，以及“复盘501”“结算未接线”“无持久化/需主动恢复”“serve走旧栈”“模拟器仍可达”等描述不再有效。
 

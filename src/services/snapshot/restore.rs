@@ -97,18 +97,8 @@ pub async fn snapshot_import(state: &ApiState, body: ImportBody) -> Result<Value
     ))?;
     let mut events: Vec<Value> = serde_json::from_value(bundle.events.clone())
         .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-    let mut domain = vec![];
-    for event in &events {
-        if event.get("event_type").is_some() {
-            let envelope: crate::domain::event::EventEnvelope =
-                serde_json::from_value(event.clone())
-                    .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-            if envelope.round_id.0 != cfg.round.round_id {
-                return Err(ServiceError::BadRequest("备份事件包含其他轮次".into()));
-            }
-            domain.push(envelope);
-        }
-    }
+    let domain = crate::messages::domain_journal_events(&events, &cfg.round.round_id)
+        .map_err(|e| ServiceError::BadRequest(e.to_string()))?;
     let overrides = crate::parser::parsed_event::collect_parse_overrides(&domain);
     let phase = domain
         .iter()

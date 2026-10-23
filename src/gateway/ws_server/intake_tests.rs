@@ -36,6 +36,81 @@ struct Connection {
     directory: std::path::PathBuf,
 }
 
+#[tokio::test]
+async fn safety_ws_oversize_message_is_rejected_before_durable_intake_or_delivery() {
+    let (cfg, sink, owned) = slow_fixture();
+    let gateway = Gateway::new(cfg.clone(), sink.clone());
+    let oversized = "x".repeat(1024 * 1024 + 1);
+    assert!(gateway.on_text(&oversized).await.is_err());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let gw = gateway.clone();
+    let connection = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        gw.handle_connection(socket, 1).await
+    });
+    let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+        .await
+        .unwrap();
+    // The transport may close while the client is still writing the oversized frame.
+    let _ = client.send(WsMessage::Text(oversized.into())).await;
+    tokio::time::timeout(Duration::from_secs(3), connection)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let round = cfg.get().await.round.round_id;
+    assert!(!sink.log.has_pending_ingress(&round).unwrap());
+    assert!(sink.log.read_only(&round).await.unwrap().is_empty());
+    assert!(sink
+        .log
+        .read_events_strict(&round)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(sink.received.lock().unwrap().is_empty());
+    assert_eq!(gateway.status().await["clients"], 0);
+    drop(owned);
+}
+
+#[tokio::test]
+async fn safety_dropped_gateway_frame_without_onebot_fields_cannot_become_a_domain_event() {
+    use crate::domain::event::{DomainEvent, EventEnvelope, EventStatus, RoundPhaseSet};
+    use crate::domain::ids::{EventId, RoundId, UserId};
+    let (cfg, sink, owned) = slow_fixture();
+    let gateway = Gateway::new(cfg.clone(), sink.clone());
+    let round = cfg.get().await.round.round_id;
+    let raw = serde_json::to_value(EventEnvelope {
+        event_id: EventId("untrusted-frame".into()),
+        round_id: RoundId(round.clone()),
+        group_id: "123456789".into(),
+        user_id: UserId("u1".into()),
+        raw_message_id: None,
+        event_type: "round_phase_set".into(),
+        effective_at: chrono::Utc::now(),
+        sequence: 1,
+        payload: DomainEvent::RoundPhaseSet(RoundPhaseSet {
+            phase: Some(crate::round::RoundPhase::Locked),
+            set_by: UserId("u1".into()),
+        }),
+        status: EventStatus::Active,
+    })
+    .unwrap();
+    gateway.on_text(&raw.to_string()).await.unwrap();
+    wait_pending(&gateway, 0).await;
+    assert!(sink.log.domain_events(&round).await.unwrap().is_empty());
+    assert_eq!(
+        sink.log.read_raw_events(&round, 0).await.unwrap(),
+        vec![raw]
+    );
+    assert_eq!(
+        sink.log.read_only(&round).await.unwrap()[0].status,
+        "Dropped"
+    );
+    assert!(sink.received.lock().unwrap().is_empty());
+    drop(owned);
+}
+
 impl Drop for Connection {
     fn drop(&mut self) {
         self.server.abort();

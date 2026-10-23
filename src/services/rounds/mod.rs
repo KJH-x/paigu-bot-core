@@ -65,13 +65,17 @@ pub struct CreateRoundBody {
 
 /// `POST /api/rounds`：新建轮次（`copy_from` 存在则复制其商品/阶段）。
 pub async fn create_round(state: &ApiState, body: CreateRoundBody) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     let round_id = body.round_id.trim().to_string();
     if !rounds::is_valid_round_id(&round_id) {
         return Err(ServiceError::BadRequest(
             "round_id 非法（非空、≤64 且仅允许字母/数字/中文/_-）".to_string(),
         ));
     }
-    if rounds::read_round(&round_id).is_some() {
+    if rounds::round_path(&round_id)
+        .map_err(|_| ServiceError::BadRequest("轮次标识无效".into()))?
+        .exists()
+    {
         return Err(ServiceError::BadRequest(format!(
             "round_id 已存在：{round_id}"
         )));
@@ -376,10 +380,9 @@ pub async fn setup_round(
             "round.group_id",
         ));
     }
-    issues.extend(category_issues(
-        &round,
-        cfg.gateway.test_group_id.as_deref(),
-    ));
+    let binding_issues = category_issues(&round, cfg.gateway.test_group_id.as_deref());
+    let binding_invalid = binding_issues.iter().any(|i| i["level"] == "error");
+    issues.extend(binding_issues);
     let ok = !issues.iter().any(|i| i["level"] == "error");
 
     if body.dry_run {
@@ -393,7 +396,13 @@ pub async fn setup_round(
         }));
     }
 
-    if is_active && crate::services::settlement::round_locked(&id).unwrap_or(false) {
+    if binding_invalid {
+        return Err(ServiceError::Validation(json!({
+            "error":"category_binding_invalid", "ok":false, "written":false, "issues":issues,
+        })));
+    }
+
+    if is_active && crate::services::settlement::round_locked(&id)? {
         return Err(ServiceError::Locked(
             "轮次已锁定，不能修改开团档案".to_string(),
         ));
@@ -481,6 +490,7 @@ pub async fn check_round(state: &ApiState, id: &str) -> Result<Value, ServiceErr
 
 /// `DELETE /api/rounds/:id`：删除轮次（激活中的轮次拒绝）。
 pub async fn delete_round(state: &ApiState, id: &str) -> Result<Value, ServiceError> {
+    let _serial = state.pipeline.message_write_guard().await;
     let id = id.trim().to_string();
     let cfg = state.cfg.get().await;
     let active = cfg
@@ -490,7 +500,8 @@ pub async fn delete_round(state: &ApiState, id: &str) -> Result<Value, ServiceEr
     if id == active || id == cfg.round.round_id {
         return Err(ServiceError::BadRequest("不能删除激活中的轮次".to_string()));
     }
-    let path = rounds::round_path(&id);
+    let path =
+        rounds::round_path(&id).map_err(|_| ServiceError::BadRequest("轮次标识无效".into()))?;
     if !path.exists() {
         return Err(ServiceError::NotFound(format!("轮次不存在：{id}")));
     }

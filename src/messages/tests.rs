@@ -67,7 +67,7 @@ fn messages_dir_from_defaults_and_overrides() {
 #[tokio::test]
 async fn read_only_context_does_not_migrate_or_rewrite_a_legacy_message_file() {
     let dir = temp_dir();
-    let store = JsonlMessageStore::new(&dir, "readonly");
+    let store = JsonlMessageStore::new(&dir, "readonly").unwrap();
     let mut old = record(7, "历史消息");
     old.record_id.clear();
     store.append(&old).await.unwrap();
@@ -85,7 +85,7 @@ async fn read_only_context_does_not_migrate_or_rewrite_a_legacy_message_file() {
 
 #[test]
 fn file_handle_uses_round_id_filename() {
-    let store = JsonlMessageStore::new("data/messages", "月行水上");
+    let store = JsonlMessageStore::new("data/messages", "月行水上").unwrap();
     assert_eq!(
         store.path(),
         Path::new("data/messages").join("月行水上.jsonl")

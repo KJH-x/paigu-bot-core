@@ -157,14 +157,10 @@ pub struct ReplayResult {
 
 /// 从事件日志折叠手动阶段覆盖（`RoundPhaseSet`，按 `(effective_at, sequence)` last-wins）。
 pub(crate) async fn load_manual_phase(store: &MessageLog, round_id: &str) -> Option<RoundPhase> {
-    let raw = match store.read_raw_events(round_id, 0).await {
-        Ok(raw) => raw,
+    let events = match store.domain_events(round_id).await {
+        Ok(events) => events,
         Err(_) => return None,
     };
-    let events: Vec<EventEnvelope> = raw
-        .into_iter()
-        .filter_map(|value| serde_json::from_value(value).ok())
-        .collect();
     events
         .into_iter()
         .filter(|e| matches!(e.payload, DomainEvent::RoundPhaseSet(_)))
@@ -192,19 +188,15 @@ pub(crate) async fn replay_from_journal(
     journal: &[serde_json::Value],
     overrides: ReplayOverrides,
 ) -> anyhow::Result<ReplayResult> {
-    let (parse_overrides, manual_phase) = journal_context(journal)?;
+    let (parse_overrides, manual_phase) = journal_context(journal, &base.round.round_id)?;
     replay_messages_with_parse(base, records, overrides, &parse_overrides, manual_phase).await
 }
 
 fn journal_context(
     journal: &[serde_json::Value],
+    round: &str,
 ) -> anyhow::Result<(ParseOverrides, Option<RoundPhase>)> {
-    let events: Vec<EventEnvelope> = journal
-        .iter()
-        .filter(|value| value.get("event_type").is_some())
-        .cloned()
-        .map(serde_json::from_value)
-        .collect::<Result<_, _>>()?;
+    let events = crate::messages::domain_journal_events(journal, round)?;
     let parse_overrides = collect_parse_overrides(&events);
     let manual_phase = events
         .iter()
@@ -229,14 +221,10 @@ pub async fn replay_messages(
 
 /// §U7：读取轮次事件日志中的 `ParseOverride`，建立 `message_id → 修正解析` 映射。
 pub(crate) async fn load_parse_overrides(store: &MessageLog, round_id: &str) -> ParseOverrides {
-    let raw = match store.read_raw_events(round_id, 0).await {
-        Ok(raw) => raw,
+    let events = match store.domain_events(round_id).await {
+        Ok(events) => events,
         Err(_) => return ParseOverrides::default(),
     };
-    let events: Vec<EventEnvelope> = raw
-        .into_iter()
-        .filter_map(|value| serde_json::from_value(value).ok())
-        .collect();
     collect_parse_overrides(&events)
 }
 
